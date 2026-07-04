@@ -5,10 +5,12 @@ reimplements ChunkSearchRepository behind the same method signatures.
 """
 
 import uuid
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.sql.elements import ColumnElement
 
 from models import Chunk, Document
 
@@ -61,11 +63,12 @@ class ChunkSearchRepository:
 
     async def dense_search(
         self,
-        kb_id: uuid.UUID,
+        kb_id: uuid.UUID | Sequence[uuid.UUID],
         query_embedding: list[float],
         limit: int,
         collection_id: uuid.UUID | None = None,
     ) -> list[SearchHit]:
+        kb_filter = _knowledge_base_filter(kb_id)
         distance = Chunk.embedding.cosine_distance(query_embedding)
         stmt = (
             select(
@@ -78,7 +81,7 @@ class ChunkSearchRepository:
             )
             .join(Document, Document.id == Chunk.document_id)
             .where(
-                Chunk.knowledge_base_id == kb_id,
+                kb_filter,
                 Chunk.is_active.is_(True),
                 Chunk.embedding.is_not(None),
                 Document.is_deleted.is_(False),
@@ -96,11 +99,12 @@ class ChunkSearchRepository:
 
     async def sparse_search(
         self,
-        kb_id: uuid.UUID,
+        kb_id: uuid.UUID | Sequence[uuid.UUID],
         query: str,
         limit: int,
         collection_id: uuid.UUID | None = None,
     ) -> list[SearchHit]:
+        kb_filter = _knowledge_base_filter(kb_id)
         tsquery = func.websearch_to_tsquery("english", query)
         rank = func.ts_rank_cd(Chunk.tsv, tsquery)
         stmt = (
@@ -114,7 +118,7 @@ class ChunkSearchRepository:
             )
             .join(Document, Document.id == Chunk.document_id)
             .where(
-                Chunk.knowledge_base_id == kb_id,
+                kb_filter,
                 Chunk.is_active.is_(True),
                 Chunk.tsv.op("@@")(tsquery),
                 Document.is_deleted.is_(False),
@@ -129,3 +133,9 @@ class ChunkSearchRepository:
             SearchHit(r.id, r.document_id, r.title, r.content, r.chunk_metadata, float(r.score))
             for r in rows
         ]
+
+
+def _knowledge_base_filter(kb_id: uuid.UUID | Sequence[uuid.UUID]) -> ColumnElement[bool]:
+    if isinstance(kb_id, uuid.UUID):
+        return Chunk.knowledge_base_id == kb_id
+    return Chunk.knowledge_base_id.in_(list(kb_id))

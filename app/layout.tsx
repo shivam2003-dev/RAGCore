@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Inter } from "next/font/google";
 import "./globals.css";
+import { AppPreferences } from "@/components/app-preferences";
 import { Sidebar } from "@/components/sidebar";
 import { TopBar } from "@/components/topbar";
 
@@ -22,8 +23,9 @@ export default function RootLayout({
   return (
     <html lang="en" className={`${inter.variable} h-full`}>
       <body className="min-h-full font-sans">
+        <AppPreferences />
         <Sidebar />
-        <div className="pl-[248px]">
+        <div className="kimbal-shell pl-[248px]">
           <TopBar />
           <main className="mx-auto max-w-[1440px] px-8 py-7">{children}</main>
         </div>

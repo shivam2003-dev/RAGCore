@@ -84,3 +84,63 @@ async def test_pipeline_end_to_end(db, seeded_kb):
     assert ctx.confidence is not None and ctx.confidence > 0
     assert ctx.attempts[0].result_count == len(ctx.chunks)
     assert "retrieval" in ctx.timings_ms and "embedding" in ctx.timings_ms
+
+
+async def test_pipeline_can_search_across_multiple_knowledge_bases(db, seeded_kb):
+    kb, embedder = seeded_kb
+    jira_kb = KnowledgeBase(
+        organization_id=kb.organization_id,
+        name="Jira DEVO",
+        embedding_model="fake",
+        embedding_dimensions=embedder.dimensions,
+    )
+    db.add(jira_kb)
+    await db.flush()
+    doc = Document(
+        knowledge_base_id=jira_kb.id,
+        title="DEVO-10555: Broker installation",
+        source_type="md",
+        status=DocumentStatus.READY,
+    )
+    db.add(doc)
+    await db.flush()
+    version = DocumentVersion(
+        document_id=doc.id,
+        version=1,
+        file_path="/dev/null",
+        file_sha256="1" * 64,
+        file_size_bytes=1,
+        created_at=utcnow(),
+    )
+    db.add(version)
+    await db.flush()
+    content = "Issue key: DEVO-10555\nStatus: To Do\nAssignee email: s.kumar@kimbal.io"
+    vector = (await embedder.embed([content]))[0]
+    db.add(
+        Chunk(
+            knowledge_base_id=jira_kb.id,
+            document_id=doc.id,
+            document_version_id=version.id,
+            ordinal=0,
+            content=content,
+            token_count=20,
+            embedding=vector,
+            created_at=utcnow(),
+        )
+    )
+    await db.commit()
+
+    pipeline = RetrievalPipeline(
+        search_repo=ChunkSearchRepository(db), embedder=embedder, settings=get_settings()
+    )
+    ctx = await pipeline.run(
+        RetrievalContext(
+            kb_id=kb.id,
+            kb_ids=[kb.id, jira_kb.id],
+            query="open issue assigned to s.kumar@kimbal.io from DEVO board",
+            top_k=3,
+        )
+    )
+
+    assert ctx.chunks
+    assert any("DEVO-10555" in chunk.content for chunk in ctx.chunks)

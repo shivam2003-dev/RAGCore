@@ -95,6 +95,52 @@ async def test_full_rag_flow(client, auth_headers):
     assert fb.status_code == 201
 
 
+async def test_web_only_ask_streams_and_persists_citations(client, auth_headers):
+    kb_id = await _create_kb(client, auth_headers)
+    conv = await client.post(
+        "/api/v1/conversations",
+        json={"knowledge_base_id": kb_id, "title": "web search"},
+        headers=auth_headers,
+    )
+    assert conv.status_code == 201, conv.text
+    conv_id = conv.json()["id"]
+
+    async with client.stream(
+        "POST",
+        f"/api/v1/conversations/{conv_id}/ask",
+        json={"question": "What is current web context?", "source_mode": "web"},
+        headers=auth_headers,
+    ) as resp:
+        assert resp.status_code == 200
+        events: list[tuple[str, str]] = []
+        current_event = ""
+        async for line in resp.aiter_lines():
+            if line.startswith("event: "):
+                current_event = line[7:]
+            elif line.startswith("data: "):
+                events.append((current_event, line[6:]))
+
+    event_types = [event_type for event_type, _payload in events]
+    assert event_types[0] == "sources"
+    assert "delta" in event_types
+    assert event_types[-1] == "done"
+
+    sources_payload = json.loads(events[0][1])
+    assert sources_payload["source_mode"] == "web"
+    assert sources_payload["sources"][0]["source_type"] == "web"
+    assert sources_payload["sources"][0]["url"] == "https://example.com/kimbal-web-search"
+
+    done = json.loads(events[-1][1])
+    assert done["source_mode"] == "web"
+    assert done["message_id"]
+
+    messages = (
+        await client.get(f"/api/v1/conversations/{conv_id}/messages", headers=auth_headers)
+    ).json()
+    assert [message["role"] for message in messages] == ["user", "assistant"]
+    assert messages[1]["citations"], "web chunks are persisted and citable"
+
+
 async def test_upload_rejects_wrong_magic_bytes(client, auth_headers):
     kb_id = await _create_kb(client, auth_headers)
     resp = await client.post(

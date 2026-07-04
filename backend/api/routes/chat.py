@@ -1,11 +1,19 @@
 import json
 import uuid
+from collections.abc import AsyncIterator
 
 from fastapi import APIRouter
 from sse_starlette.sse import EventSourceResponse
 
-from api.deps import ChatServiceDep, CurrentUser, DbDep
-from api.schemas import AskRequest, ConversationCreate, ConversationOut, FeedbackCreate, MessageOut
+from api.deps import ChatServiceDep, CurrentUser, DbDep, SettingsDep
+from api.schemas import (
+    AskRequest,
+    ChatCapabilitiesOut,
+    ConversationCreate,
+    ConversationOut,
+    FeedbackCreate,
+    MessageOut,
+)
 from core.exceptions import AppError, NotFoundError
 from database.base import utcnow
 from models import Feedback
@@ -14,6 +22,7 @@ from repositories.conversations import (
     FeedbackRepository,
     MessageRepository,
 )
+from services.chat_service import llm_council_status
 
 router = APIRouter(tags=["chat"])
 
@@ -30,6 +39,18 @@ async def create_conversation(
 async def list_conversations(user: CurrentUser, db: DbDep, limit: int = 50, offset: int = 0) -> list[ConversationOut]:
     convs = await ConversationRepository(db).list_for_user(user.id, limit=min(limit, 200), offset=offset)
     return [ConversationOut.model_validate(c) for c in convs]
+
+
+@router.get("/chat/capabilities", response_model=ChatCapabilitiesOut)
+async def chat_capabilities(_user: CurrentUser, settings: SettingsDep) -> ChatCapabilitiesOut:
+    status = llm_council_status(settings)
+    return ChatCapabilitiesOut(
+        answer_modes=["fast", "council"],
+        council_configured=status.configured,
+        council_models=status.models,
+        council_chair_model=status.chair_model,
+        council_reason=status.reason,
+    )
 
 
 @router.get("/conversations/{conversation_id}/messages", response_model=list[MessageOut])
@@ -59,13 +80,15 @@ async def ask(
 ) -> EventSourceResponse:
     """Streamed RAG answer. SSE events: sources → delta* → done."""
 
-    async def event_stream():  # type: ignore[no-untyped-def]
+    async def event_stream() -> AsyncIterator[dict[str, str]]:
         try:
             async for event in chat.ask(
                 user=user,
                 conversation_id=conversation_id,
                 question=body.question,
                 regenerate=body.regenerate,
+                source_mode=body.source_mode,
+                answer_mode=body.answer_mode,
             ):
                 yield {"event": event.type, "data": json.dumps(event.data)}
         except AppError as exc:

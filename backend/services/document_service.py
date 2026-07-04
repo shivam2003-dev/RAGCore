@@ -44,15 +44,39 @@ class DocumentService:
         collection_id: uuid.UUID | None = None,
         existing_document_id: uuid.UUID | None = None,
     ) -> Document:
+        filename = file.filename or "untitled"
+        content = await file.read()
+        return await self.create_from_bytes(
+            user=user,
+            kb_id=kb_id,
+            filename=filename,
+            content=content,
+            collection_id=collection_id,
+            existing_document_id=existing_document_id,
+            audit_action="document.upload",
+        )
+
+    async def create_from_bytes(
+        self,
+        *,
+        user: User,
+        kb_id: uuid.UUID,
+        filename: str,
+        content: bytes,
+        collection_id: uuid.UUID | None = None,
+        existing_document_id: uuid.UUID | None = None,
+        title: str | None = None,
+        metadata: dict[str, object] | None = None,
+        audit_action: str = "document.upload",
+    ) -> Document:
         kb = await self._kbs.get(kb_id, user.organization_id)
         if kb is None:
             raise NotFoundError("Knowledge base not found")
 
-        suffix = Path(file.filename or "").suffix.lower()
+        suffix = Path(filename).suffix.lower()
         if suffix not in SUPPORTED_SUFFIXES:
             raise ValidationError(f"Unsupported file type: {suffix or 'unknown'}")
 
-        content = await file.read()
         if len(content) > self._settings.upload_max_bytes:
             raise ValidationError("File exceeds size limit")
         if not content:
@@ -66,15 +90,19 @@ class DocumentService:
             doc.current_version += 1
             doc.status = DocumentStatus.UPLOADED
             doc.error = None
+            doc.title = title or doc.title
+            if metadata is not None:
+                doc.doc_metadata = metadata
             version_number = doc.current_version
         else:
             doc = Document(
                 knowledge_base_id=kb_id,
                 collection_id=collection_id,
                 uploaded_by=user.id,
-                title=Path(file.filename or "untitled").name,
+                title=title or Path(filename or "untitled").name,
                 source_type=suffix.lstrip("."),
                 status=DocumentStatus.UPLOADED,
+                doc_metadata=metadata or {},
             )
             self._docs.add(doc)
             version_number = 1
@@ -91,7 +119,7 @@ class DocumentService:
         )
         self._docs.add_version(version)
         self._audit.record(
-            action="document.upload",
+            action=audit_action,
             resource_type="document",
             resource_id=str(doc.id),
             org_id=user.organization_id,

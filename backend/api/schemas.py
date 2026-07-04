@@ -92,6 +92,156 @@ class DocumentListOut(BaseModel):
     total: int
 
 
+# --- Confluence ---
+class ConfluenceStatusOut(BaseModel):
+    configured: bool
+    read_only: bool = True
+    base_url: str | None
+    space_key: str
+    default_kb_name: str
+    auth_mode: str
+    email_configured: bool
+    token_configured: bool
+    requires_email: bool
+
+
+class ConfluenceSyncRequest(BaseModel):
+    knowledge_base_id: uuid.UUID | None = None
+    max_pages: int = Field(default=100, ge=1, le=500)
+
+
+class ConfluencePageSyncOut(BaseModel):
+    page_id: str
+    title: str
+    url: str
+    version: int | None
+    document_id: uuid.UUID
+    document_status: str
+    action: str
+
+
+class ConfluenceSyncResponse(BaseModel):
+    knowledge_base_id: uuid.UUID
+    knowledge_base_name: str
+    space_key: str
+    space_name: str
+    total_pages: int
+    created: int
+    updated: int
+    skipped: int
+    documents: list[ConfluencePageSyncOut]
+
+
+# --- Jira ---
+class JiraStatusOut(BaseModel):
+    configured: bool
+    read_only: bool = True
+    base_url: str | None
+    project_key: str
+    board_id: int
+    default_kb_name: str
+    auth_mode: str
+    email_configured: bool
+    token_configured: bool
+    using_atlassian_fallback_credentials: bool
+    requires_email: bool
+
+
+class JiraSyncRequest(BaseModel):
+    knowledge_base_id: uuid.UUID | None = None
+    max_issues: int = Field(default=100, ge=1, le=500)
+
+
+class JiraIssueSyncOut(BaseModel):
+    issue_id: str
+    issue_key: str
+    title: str
+    url: str
+    status: str | None
+    updated_at: str | None
+    document_id: uuid.UUID
+    document_status: str
+    action: str
+
+
+class JiraSyncResponse(BaseModel):
+    knowledge_base_id: uuid.UUID
+    knowledge_base_name: str
+    project_key: str
+    board_id: int
+    board_name: str
+    total_issues: int
+    created: int
+    updated: int
+    skipped: int
+    documents: list[JiraIssueSyncOut]
+
+
+# --- live metrics ---
+class SourceMetricOut(BaseModel):
+    name: str
+    source_type: str
+    documents: int
+    ready_documents: int
+    failed_documents: int
+    last_updated_at: datetime | None
+
+
+class ActivityMetricOut(BaseModel):
+    action: str
+    resource_type: str
+    detail: str | None
+    created_at: datetime
+
+
+class QuestionMetricOut(BaseModel):
+    question: str
+    count: int
+    last_asked_at: datetime
+
+
+class FeedbackMetricOut(BaseModel):
+    helpful: int
+    not_helpful: int
+    total: int
+    helpful_rate: float | None
+
+
+class MetricsOverviewOut(BaseModel):
+    knowledge_bases: int
+    documents_total: int
+    documents_ready: int
+    documents_processing: int
+    documents_failed: int
+    chunks_active: int
+    conversations: int
+    questions_asked: int
+    assistant_answers: int
+    active_users: int
+    avg_latency_ms: int | None
+    feedback: FeedbackMetricOut
+    sources: list[SourceMetricOut]
+    recent_activity: list[ActivityMetricOut]
+    top_questions: list[QuestionMetricOut]
+
+
+# --- web search ---
+class WebSearchStatusOut(BaseModel):
+    configured: bool
+    provider: str
+    default_kb_name: str
+    top_k: int
+    reason: str
+
+
+class ChatCapabilitiesOut(BaseModel):
+    answer_modes: list[str]
+    council_configured: bool
+    council_models: list[str]
+    council_chair_model: str | None
+    council_reason: str
+
+
 # --- search ---
 class SearchRequest(BaseModel):
     query: str = Field(min_length=1, max_length=2000)
@@ -133,6 +283,8 @@ class ConversationOut(ORMModel):
 class AskRequest(BaseModel):
     question: str = Field(min_length=1, max_length=4000)
     regenerate: bool = False
+    source_mode: str = Field(default="knowledge", pattern="^(knowledge|web|blended)$")
+    answer_mode: str = Field(default="fast", pattern="^(fast|council)$")
 
 
 class CitationOut(ORMModel):

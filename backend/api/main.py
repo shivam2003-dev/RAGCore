@@ -7,7 +7,21 @@ from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from starlette.responses import Response
 
 from api.deps import get_redis
-from api.routes import admin, auth, chat, documents, health, knowledge_bases, search
+from api.routes import (
+    admin,
+    auth,
+    chat,
+    confluence,
+    documents,
+    health,
+    jira,
+    knowledge_bases,
+    search,
+    web_search,
+)
+from api.routes import (
+    metrics as product_metrics,
+)
 from core.config import get_settings
 from core.exceptions import AppError
 from core.logging import configure_logging, get_logger
@@ -83,6 +97,10 @@ def create_app() -> FastAPI:
     app.include_router(auth.router, prefix=api)
     app.include_router(knowledge_bases.router, prefix=api)
     app.include_router(documents.router, prefix=api)
+    app.include_router(confluence.router, prefix=api)
+    app.include_router(jira.router, prefix=api)
+    app.include_router(product_metrics.router, prefix=api)
+    app.include_router(web_search.router, prefix=api)
     app.include_router(search.router, prefix=api)
     app.include_router(chat.router, prefix=api)
     app.include_router(admin.router, prefix=api)

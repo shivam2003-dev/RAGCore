@@ -35,6 +35,7 @@ class RetrievalContext:
     kb_id: uuid.UUID
     query: str
     top_k: int
+    kb_ids: list[uuid.UUID] | None = None
     collection_id: uuid.UUID | None = None
     rewritten_query: str | None = None
     conversation_context: str = ""

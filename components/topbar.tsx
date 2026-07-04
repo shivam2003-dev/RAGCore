@@ -1,31 +1,73 @@
-import { Bell, Search, Settings2 } from "lucide-react";
+"use client";
+
+import { FormEvent, useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+import { Bell, CheckCircle2, Search, Settings2, X } from "lucide-react";
 import Link from "next/link";
+import { kimbalApi, type ActivityMetric } from "@/lib/kimbal-api";
 
 export function TopBar() {
+  const router = useRouter();
+  const [query, setQuery] = useState("");
+  const [showNotifications, setShowNotifications] = useState(false);
+  const [notifications, setNotifications] = useState<ActivityMetric[]>([]);
+
+  useEffect(() => {
+    async function load() {
+      try {
+        await kimbalApi.ensureSession();
+        const metrics = await kimbalApi.metricsOverview();
+        setNotifications(metrics.recent_activity.slice(0, 5));
+      } catch {
+        setNotifications([]);
+      }
+    }
+    void load();
+  }, []);
+
+  function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const trimmed = query.trim();
+    if (trimmed) router.push(`/ask?q=${encodeURIComponent(trimmed)}`);
+  }
+
   return (
-    <header className="sticky top-0 z-20 flex h-[64px] items-center justify-between border-b border-line bg-canvas/80 px-8 backdrop-blur-xl">
+    <header className="kimbal-topbar sticky top-0 z-20 flex h-[64px] items-center justify-between border-b border-line bg-canvas/80 px-8 backdrop-blur-xl">
       <p className="text-[14px] text-ink-500">
-        Welcome back, <span className="font-semibold text-ink-900">Shivam</span> 👋
+        Welcome back, <span className="font-semibold text-ink-900">Shivam</span>
       </p>
 
-      <div className="flex items-center gap-3">
-        <button className="relative flex h-10 w-10 items-center justify-center rounded-[12px] text-ink-500 transition hover:bg-white hover:text-ink-900 hover:shadow-[var(--shadow-card)]" aria-label="Notifications">
+      <div className="relative flex items-center gap-3">
+        <button
+          type="button"
+          onClick={() => setShowNotifications((open) => !open)}
+          className="relative flex h-10 w-10 items-center justify-center rounded-[12px] text-ink-500 transition hover:bg-white hover:text-ink-900 hover:shadow-[var(--shadow-card)]"
+          aria-label="Notifications"
+          aria-expanded={showNotifications}
+        >
           <Bell size={18} strokeWidth={2} />
-          <span className="absolute right-1.5 top-1.5 flex h-[15px] w-[15px] items-center justify-center rounded-full bg-rose-500 text-[9px] font-bold text-white ring-2 ring-canvas">
-            3
-          </span>
+          {notifications.length > 0 && (
+            <span className="absolute right-1.5 top-1.5 flex h-[15px] w-[15px] items-center justify-center rounded-full bg-rose-500 text-[9px] font-bold text-white ring-2 ring-canvas">
+              {notifications.length}
+            </span>
+          )}
         </button>
 
-        <label className="flex h-10 w-[300px] cursor-text items-center gap-2.5 rounded-[12px] border border-line bg-white px-3.5 shadow-[var(--shadow-card)] transition focus-within:border-brand-300 focus-within:ring-4 focus-within:ring-brand-50">
+        <form
+          onSubmit={submit}
+          className="flex h-10 w-[300px] cursor-text items-center gap-2.5 rounded-[12px] border border-line bg-white px-3.5 shadow-[var(--shadow-card)] transition focus-within:border-brand-300 focus-within:ring-4 focus-within:ring-brand-50"
+        >
           <Search size={16} className="text-ink-400" strokeWidth={2.2} />
           <input
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
             placeholder="Search anything..."
             className="min-w-0 flex-1 bg-transparent text-[13.5px] text-ink-900 outline-none placeholder:text-ink-400"
           />
           <kbd className="rounded-md border border-line bg-canvas px-1.5 py-0.5 text-[11px] font-medium text-ink-400">
-            ⌘K
+            Enter
           </kbd>
-        </label>
+        </form>
 
         <Link
           href="/settings"
@@ -34,6 +76,35 @@ export function TopBar() {
         >
           <Settings2 size={18} strokeWidth={2} />
         </Link>
+
+        {showNotifications && (
+          <div className="absolute right-0 top-12 w-80 rounded-[14px] border border-line bg-white p-3 shadow-[var(--shadow-pop)]">
+            <div className="flex items-center justify-between px-1 pb-2">
+              <p className="text-[13px] font-bold text-ink-900">Notifications</p>
+              <button
+                type="button"
+                onClick={() => setShowNotifications(false)}
+                aria-label="Close notifications"
+                className="text-ink-400 transition hover:text-ink-700"
+              >
+                <X size={15} />
+              </button>
+            </div>
+            <ul className="space-y-1">
+              {notifications.map((item) => (
+                <li key={`${item.action}-${item.created_at}`} className="flex items-center gap-2 rounded-[10px] bg-canvas px-3 py-2 text-[12.5px] font-medium text-ink-700">
+                  <CheckCircle2 size={14} className="text-emerald-500" />
+                  {item.detail || item.action}
+                </li>
+              ))}
+              {!notifications.length && (
+                <li className="rounded-[10px] bg-canvas px-3 py-2 text-[12.5px] font-medium text-ink-500">
+                  No recent activity yet.
+                </li>
+              )}
+            </ul>
+          </div>
+        )}
       </div>
     </header>
   );

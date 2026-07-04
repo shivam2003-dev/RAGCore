@@ -20,6 +20,8 @@ def configure_logging() -> None:
     settings = get_settings()
     level = logging.DEBUG if settings.app_debug else logging.INFO
     logging.basicConfig(stream=sys.stdout, level=level, format="%(message)s")
+    for noisy_logger in ("httpx", "httpcore", "hpack", "http11"):
+        logging.getLogger(noisy_logger).setLevel(logging.WARNING)
     structlog.configure(
         processors=[
             structlog.contextvars.merge_contextvars,

@@ -58,12 +58,27 @@ export function PageHeader({
   );
 }
 
-export function PrimaryButton({ children, className }: { children: ReactNode; className?: string }) {
+export function PrimaryButton({
+  children,
+  className,
+  type = "button",
+  onClick,
+  disabled,
+}: {
+  children: ReactNode;
+  className?: string;
+  type?: "button" | "submit" | "reset";
+  onClick?: () => void;
+  disabled?: boolean;
+}) {
   return (
     <button
+      type={type}
+      onClick={onClick}
+      disabled={disabled}
       className={cx(
         "inline-flex items-center gap-2 rounded-[10px] bg-brand-500 px-4 py-2.5 text-[13.5px] font-semibold text-white",
-        "shadow-[0_4px_14px_-4px_rgba(91,92,235,0.5)] transition hover:bg-brand-600 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-500",
+        "shadow-[0_4px_14px_-4px_rgba(91,92,235,0.5)] transition hover:bg-brand-600 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-500 disabled:cursor-not-allowed disabled:opacity-60",
         className
       )}
     >
@@ -72,12 +87,27 @@ export function PrimaryButton({ children, className }: { children: ReactNode; cl
   );
 }
 
-export function GhostButton({ children, className }: { children: ReactNode; className?: string }) {
+export function GhostButton({
+  children,
+  className,
+  type = "button",
+  onClick,
+  disabled,
+}: {
+  children: ReactNode;
+  className?: string;
+  type?: "button" | "submit" | "reset";
+  onClick?: () => void;
+  disabled?: boolean;
+}) {
   return (
     <button
+      type={type}
+      onClick={onClick}
+      disabled={disabled}
       className={cx(
         "inline-flex items-center gap-2 rounded-[10px] border border-line bg-white px-4 py-2.5 text-[13.5px] font-semibold text-ink-700",
-        "transition hover:border-brand-200 hover:text-brand-600 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-500",
+        "transition hover:border-brand-200 hover:text-brand-600 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-500 disabled:cursor-not-allowed disabled:opacity-60",
         className
       )}
     >
@@ -135,14 +165,27 @@ export function Badge({
   );
 }
 
-export function Toggle({ on = true, label }: { on?: boolean; label?: string }) {
+export function Toggle({
+  on = true,
+  label,
+  onChange,
+  disabled,
+}: {
+  on?: boolean;
+  label?: string;
+  onChange?: (next: boolean) => void;
+  disabled?: boolean;
+}) {
   return (
     <button
+      type="button"
       role="switch"
       aria-checked={on}
       aria-label={label}
+      disabled={disabled}
+      {...(onChange ? { onClick: () => onChange(!on) } : {})}
       className={cx(
-        "relative h-6 w-11 shrink-0 rounded-full transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-500",
+        "relative h-6 w-11 shrink-0 rounded-full transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-500 disabled:cursor-not-allowed disabled:opacity-60",
         on ? "bg-brand-500" : "bg-ink-300/50"
       )}
     >
@@ -210,14 +253,26 @@ export function Donut({
   const total = data.reduce((s, d) => s + d.value, 0);
   const r = (size - thickness) / 2;
   const c = 2 * Math.PI * r;
-  let offset = 0;
+  const segments = data.reduce<{
+    offset: number;
+    items: Array<{ value: number; color: string; offset: number; index: number }>;
+  }>(
+    (acc, item, index) => {
+      const frac = item.value / total;
+      return {
+        offset: acc.offset + frac,
+        items: [...acc.items, { ...item, offset: acc.offset, index }],
+      };
+    },
+    { offset: 0, items: [] }
+  ).items;
   return (
     <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} aria-hidden>
-      {data.map((d, i) => {
+      {segments.map((d) => {
         const frac = d.value / total;
-        const seg = (
+        return (
           <circle
-            key={i}
+            key={d.index}
             cx={size / 2}
             cy={size / 2}
             r={r}
@@ -225,11 +280,9 @@ export function Donut({
             stroke={d.color}
             strokeWidth={thickness}
             strokeDasharray={`${frac * c - 2} ${c - frac * c + 2}`}
-            strokeDashoffset={-offset * c + c / 4}
+            strokeDashoffset={-d.offset * c + c / 4}
           />
         );
-        offset += frac;
-        return seg;
       })}
     </svg>
   );

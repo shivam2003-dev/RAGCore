@@ -11,6 +11,18 @@ os.environ.update(
     APP_SECRET_KEY="test-secret-key-for-tests-only-abcdef123456",
     UPLOAD_DIR="var/test-uploads",
     RATE_LIMIT_PER_MINUTE="10000",
+    CONFLUENCE_BASE_URL="",
+    CONFLUENCE_API_TOKEN="",
+    CONFLUENCE_EMAIL="",
+    JIRA_BASE_URL="",
+    JIRA_API_TOKEN="",
+    JIRA_EMAIL="",
+    JIRA_BOARD_ID="0",
+    WEB_SEARCH_PROVIDER="fake",
+    WEB_SEARCH_API_KEY="",
+    WEB_SEARCH_BASE_URL="",
+    LLM_COUNCIL_ENABLED="false",
+    LLM_COUNCIL_MODELS="",
 )
 
 import pytest

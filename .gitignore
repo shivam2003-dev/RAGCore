@@ -12,6 +12,7 @@
 
 # testing
 /coverage
+.playwright-cli/
 
 # next.js
 /.next/
@@ -49,3 +50,5 @@ __pycache__/
 .mypy_cache/
 .ruff_cache/
 var/uploads/
+backend/var/uploads/
+backend/var/test-uploads/

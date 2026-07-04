@@ -24,7 +24,10 @@ from repositories.users import UserRepository
 from retrieval.pipeline import RetrievalPipeline
 from services.auth_service import AuthService
 from services.chat_service import ChatService
+from services.confluence_service import ConfluenceSyncService
 from services.document_service import DocumentService
+from services.jira_service import JiraSyncService
+from services.web_search_service import WebSearchService
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login", auto_error=False)
 api_key_scheme = APIKeyHeader(name="x-api-key", auto_error=False)
@@ -106,6 +109,26 @@ def get_document_service(
     )
 
 
+def get_confluence_sync_service(
+    db: DbDep, settings: SettingsDep, embedder: EmbedderDep, background: BackgroundTasks
+) -> ConfluenceSyncService:
+    return ConfluenceSyncService(
+        db=db, settings=settings, embedder=embedder, queue=BackgroundTasksQueue(background)
+    )
+
+
+def get_jira_sync_service(
+    db: DbDep, settings: SettingsDep, embedder: EmbedderDep, background: BackgroundTasks
+) -> JiraSyncService:
+    return JiraSyncService(
+        db=db, settings=settings, embedder=embedder, queue=BackgroundTasksQueue(background)
+    )
+
+
+def get_web_search_service(db: DbDep, settings: SettingsDep, embedder: EmbedderDep) -> WebSearchService:
+    return WebSearchService(db=db, settings=settings, embedder=embedder)
+
+
 def get_retrieval_pipeline(
     db: DbDep, settings: SettingsDep, embedder: EmbedderDep
 ) -> RetrievalPipeline:
@@ -118,12 +141,16 @@ def get_chat_service(
     db: DbDep,
     settings: SettingsDep,
     llm: LLMDep,
+    web_search: Annotated[WebSearchService, Depends(get_web_search_service)],
     retrieval: Annotated[RetrievalPipeline, Depends(get_retrieval_pipeline)],
 ) -> ChatService:
-    return ChatService(db=db, retrieval=retrieval, llm=llm, settings=settings)
+    return ChatService(db=db, retrieval=retrieval, llm=llm, web_search=web_search, settings=settings)
 
 
 AuthServiceDep = Annotated[AuthService, Depends(get_auth_service)]
 DocumentServiceDep = Annotated[DocumentService, Depends(get_document_service)]
+ConfluenceSyncDep = Annotated[ConfluenceSyncService, Depends(get_confluence_sync_service)]
+JiraSyncDep = Annotated[JiraSyncService, Depends(get_jira_sync_service)]
+WebSearchDep = Annotated[WebSearchService, Depends(get_web_search_service)]
 RetrievalDep = Annotated[RetrievalPipeline, Depends(get_retrieval_pipeline)]
 ChatServiceDep = Annotated[ChatService, Depends(get_chat_service)]

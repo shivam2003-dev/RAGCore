@@ -76,11 +76,12 @@ class RetrievalPipeline:
         ctx.time_stage("embedding", embed_started)
 
         candidates = max(self._settings.retrieval_candidate_k, ctx.top_k)
+        kb_scope = ctx.kb_ids or ctx.kb_id
         dense = await self._search.dense_search(
-            ctx.kb_id, query_vec, candidates, ctx.collection_id
+            kb_scope, query_vec, candidates, ctx.collection_id
         )
         sparse = await self._search.sparse_search(
-            ctx.kb_id, ctx.effective_query, candidates, ctx.collection_id
+            kb_scope, ctx.effective_query, candidates, ctx.collection_id
         )
         ctx.chunks = fuse(
             dense,

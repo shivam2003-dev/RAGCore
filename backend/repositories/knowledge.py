@@ -28,6 +28,14 @@ class KnowledgeBaseRepository:
         )
         return list(rows)
 
+    async def get_by_name(self, org_id: uuid.UUID, name: str) -> KnowledgeBase | None:
+        return await self.db.scalar(
+            select(KnowledgeBase).where(
+                KnowledgeBase.organization_id == org_id,
+                KnowledgeBase.name == name,
+            )
+        )
+
 
 class CollectionRepository:
     def __init__(self, db: AsyncSession) -> None:
@@ -58,6 +66,17 @@ class DocumentRepository:
 
     async def get(self, doc_id: uuid.UUID) -> Document | None:
         return await self.db.get(Document, doc_id)
+
+    async def get_by_metadata_value(
+        self, kb_id: uuid.UUID, key: str, value: str
+    ) -> Document | None:
+        return await self.db.scalar(
+            select(Document).where(
+                Document.knowledge_base_id == kb_id,
+                Document.is_deleted.is_(False),
+                Document.doc_metadata[key].as_string() == value,
+            )
+        )
 
     async def list_by_kb(
         self, kb_id: uuid.UUID, limit: int = 50, offset: int = 0

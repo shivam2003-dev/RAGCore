@@ -4,7 +4,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+    model_config = SettingsConfigDict(env_file=(".env", "backend/.env"), env_file_encoding="utf-8", extra="ignore")
 
     # app
     app_env: str = "local"
@@ -44,6 +44,17 @@ class Settings(BaseSettings):
     anthropic_api_key: str = ""
     openrouter_api_key: str = ""
 
+    # Optional "LLM Council" answer mode. When enabled, Ask fans out to
+    # multiple OpenAI-compatible models, then asks a chair model to synthesize.
+    # This is disabled unless models and an API key are configured.
+    llm_council_enabled: bool = False
+    llm_council_models: str = ""
+    llm_council_chair_model: str = ""
+    llm_council_api_key: str = ""
+    llm_council_base_url: str = ""
+    llm_council_max_models: int = 4
+    llm_council_timeout_seconds: float = 120.0
+
     # retrieval
     retrieval_top_k: int = 8
     retrieval_candidate_k: int = 24  # per-arm candidates before fusion
@@ -56,7 +67,7 @@ class Settings(BaseSettings):
 
     # limits
     upload_max_bytes: int = 52_428_800
-    rate_limit_per_minute: int = 60
+    rate_limit_per_minute: int = 300
 
     # caching
     response_cache_ttl_seconds: int = 300
@@ -66,6 +77,38 @@ class Settings(BaseSettings):
 
     # storage
     upload_dir: str = "var/uploads"
+
+    # Confluence Cloud source sync. This integration is intentionally read-only:
+    # the backend only calls GET endpoints and writes synced content locally.
+    confluence_base_url: str = ""
+    confluence_space_key: str = "DevOps1"
+    confluence_api_token: str = ""
+    confluence_email: str = ""
+    confluence_auth_mode: str = "auto"  # auto | basic | bearer
+    confluence_default_kb_name: str = "Confluence DevOps1"
+    confluence_page_limit: int = 100
+    confluence_request_timeout_seconds: float = 20.0
+
+    # Jira Software Cloud source sync. Also read-only: GET board/project/issue
+    # endpoints only, then local document indexing.
+    jira_base_url: str = ""
+    jira_project_key: str = ""
+    jira_board_id: int = 0
+    jira_api_token: str = ""
+    jira_email: str = ""
+    jira_auth_mode: str = "auto"  # auto | basic | bearer
+    jira_default_kb_name: str = "Jira"
+    jira_issue_limit: int = 100
+    jira_request_timeout_seconds: float = 20.0
+
+    # Optional web search for Ask. Disabled by default so the app never fabricates
+    # internet results when no real provider is configured.
+    web_search_provider: str = "disabled"  # disabled | duckduckgo | brave | tavily | searxng | fake
+    web_search_api_key: str = ""
+    web_search_base_url: str = ""
+    web_search_default_kb_name: str = "Web Search"
+    web_search_top_k: int = 5
+    web_search_request_timeout_seconds: float = 10.0
 
 
 @lru_cache
