@@ -6,7 +6,7 @@ Yields typed SSE events; the router only serializes them.
 import re
 import time
 import uuid
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Iterable
 from dataclasses import dataclass
 
 from sqlalchemy import select
@@ -87,6 +87,7 @@ class JiraIssueCountResult:
 class CouncilStatus:
     configured: bool
     models: list[str]
+    available_models: list[str]
     chair_model: str | None
     reason: str
 
@@ -130,6 +131,10 @@ class ChatService:
         regenerate: bool = False,
         source_mode: str = "knowledge",
         answer_mode: str = "fast",
+        assistant_role: str | None = None,
+        assistant_role_prompt: str | None = None,
+        council_models: list[str] | None = None,
+        council_chair_model: str | None = None,
     ) -> AsyncIterator[ChatEvent]:
         started = time.perf_counter()
         source_mode = _normalize_source_mode(source_mode)
@@ -212,7 +217,11 @@ class ChatService:
         )
 
         request = LLMRequest(
-            system=build_system_prompt(chunks),
+            system=build_system_prompt(
+                chunks,
+                role_name=assistant_role,
+                role_prompt=assistant_role_prompt,
+            ),
             messages=[
                 *(ChatMessage(role=m.role, content=m.content) for m in history),
                 ChatMessage(role="user", content=question),
@@ -229,6 +238,10 @@ class ChatService:
                 chunks=chunks,
                 history=history,
                 question=question,
+                assistant_role=assistant_role,
+                assistant_role_prompt=assistant_role_prompt,
+                requested_models=council_models,
+                requested_chair_model=council_chair_model,
             )
             answer_parts.append(answer)
             yield ChatEvent(type="delta", data={"text": answer})
@@ -344,8 +357,16 @@ class ChatService:
         chunks: list[RetrievedChunk],
         history: list[Message],
         question: str,
+        assistant_role: str | None = None,
+        assistant_role_prompt: str | None = None,
+        requested_models: list[str] | None = None,
+        requested_chair_model: str | None = None,
     ) -> tuple[str, LLMUsage, str]:
-        status = llm_council_status(self._settings)
+        status = llm_council_status(
+            self._settings,
+            requested_models=requested_models,
+            requested_chair_model=requested_chair_model,
+        )
         if not status.configured:
             raise ValidationError(f"LLM Council is not configured. {status.reason}")
 
@@ -354,7 +375,7 @@ class ChatService:
         failures: list[str] = []
         candidates: list[tuple[str, str]] = []
         member_system = (
-            f"{build_system_prompt(chunks)}\n\n"
+            f"{build_system_prompt(chunks, role_name=assistant_role, role_prompt=assistant_role_prompt)}\n\n"
             "You are one independent council member. Produce a concise answer grounded only "
             "in the sources. Keep citation markers intact."
         )
@@ -404,7 +425,7 @@ class ChatService:
             f'<candidate model="{model}">\n{text}\n</candidate>' for model, text in candidates
         )
         chair_system = (
-            f"{build_system_prompt(chunks)}\n\n"
+            f"{build_system_prompt(chunks, role_name=assistant_role, role_prompt=assistant_role_prompt)}\n\n"
             "You are the council chair. Candidate answers are advisory analysis, not evidence. "
             "Only the <source> blocks are evidence. Return one final answer with source citation "
             "markers and do not mention the council process."
@@ -693,18 +714,38 @@ def _council_api_key_and_base_url(settings: Settings) -> tuple[str, str]:
     return api_key, base_url
 
 
-def llm_council_status(settings: Settings) -> CouncilStatus:
+DEFAULT_COUNCIL_MODELS = (
+    "anthropic/claude-haiku-4.5",
+    "openai/gpt-4.1-mini",
+    "google/gemini-2.5-flash",
+)
+
+
+def llm_council_status(
+    settings: Settings,
+    *,
+    requested_models: list[str] | None = None,
+    requested_chair_model: str | None = None,
+) -> CouncilStatus:
+    available_models = _council_available_models(settings)
     models = _split_csv(settings.llm_council_models)
     if not models and settings.llm_provider in {"openrouter", "openai"} and settings.llm_model:
         models = [settings.llm_model]
+    if requested_models is not None:
+        models = _normalize_requested_council_models(requested_models)
     max_models = max(1, min(settings.llm_council_max_models, 8))
     models = models[:max_models]
-    chair_model = settings.llm_council_chair_model.strip() or (models[0] if models else None)
+    chair_model = (
+        (requested_chair_model or "").strip()
+        or settings.llm_council_chair_model.strip()
+        or _best_chair_model(models)
+    )
     api_key, _base_url = _council_api_key_and_base_url(settings)
     if not settings.llm_council_enabled:
         return CouncilStatus(
             configured=False,
             models=models,
+            available_models=available_models,
             chair_model=chair_model,
             reason="Set LLM_COUNCIL_ENABLED=true.",
         )
@@ -712,19 +753,81 @@ def llm_council_status(settings: Settings) -> CouncilStatus:
         return CouncilStatus(
             configured=False,
             models=[],
+            available_models=available_models,
             chair_model=None,
             reason="Set LLM_COUNCIL_MODELS to comma-separated OpenAI-compatible model ids.",
+        )
+    if requested_models is not None and len(models) < 2:
+        return CouncilStatus(
+            configured=False,
+            models=models,
+            available_models=available_models,
+            chair_model=chair_model,
+            reason="Select at least two Council models.",
+        )
+    if requested_models is not None and any(model not in available_models for model in models):
+        return CouncilStatus(
+            configured=False,
+            models=models,
+            available_models=available_models,
+            chair_model=chair_model,
+            reason="One or more selected Council models are not allowed by LLM_COUNCIL_AVAILABLE_MODELS.",
+        )
+    if chair_model and chair_model not in models:
+        return CouncilStatus(
+            configured=False,
+            models=models,
+            available_models=available_models,
+            chair_model=chair_model,
+            reason="The Council chair model must be one of the selected models.",
         )
     if not api_key:
         return CouncilStatus(
             configured=False,
             models=models,
+            available_models=available_models,
             chair_model=chair_model,
             reason="Set LLM_COUNCIL_API_KEY, OPENROUTER_API_KEY, or OPENAI_API_KEY.",
         )
     return CouncilStatus(
         configured=True,
         models=models,
+        available_models=available_models,
         chair_model=chair_model,
         reason="configured",
     )
+
+
+def _council_available_models(settings: Settings) -> list[str]:
+    configured = _split_csv(settings.llm_council_available_models)
+    base = configured or list(DEFAULT_COUNCIL_MODELS)
+    extras = _split_csv(settings.llm_council_models)
+    if settings.llm_model:
+        extras.append(settings.llm_model)
+    return _dedupe_model_ids([*base, *extras])
+
+
+def _normalize_requested_council_models(models: list[str]) -> list[str]:
+    return _dedupe_model_ids(model.strip() for model in models if model.strip())[:3]
+
+
+def _dedupe_model_ids(models: Iterable[object]) -> list[str]:
+    seen: set[str] = set()
+    deduped: list[str] = []
+    for model in models:
+        if not isinstance(model, str):
+            continue
+        if model in seen:
+            continue
+        seen.add(model)
+        deduped.append(model)
+    return deduped
+
+
+def _best_chair_model(models: list[str]) -> str | None:
+    if not models:
+        return None
+    for preferred in ("anthropic/claude-haiku-4.5", "anthropic/claude-sonnet-4.5"):
+        if preferred in models:
+            return preferred
+    return models[0]

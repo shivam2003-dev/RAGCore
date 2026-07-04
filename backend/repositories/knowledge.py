@@ -90,6 +90,20 @@ class DocumentRepository:
         )
         return list(rows), total
 
+    async def list_by_org(
+        self, org_id: uuid.UUID, limit: int = 50, offset: int = 0
+    ) -> tuple[list[Document], int]:
+        base = (
+            select(Document)
+            .join(KnowledgeBase, KnowledgeBase.id == Document.knowledge_base_id)
+            .where(KnowledgeBase.organization_id == org_id, Document.is_deleted.is_(False))
+        )
+        total = await self.db.scalar(select(func.count()).select_from(base.subquery())) or 0
+        rows = await self.db.scalars(
+            base.order_by(Document.updated_at.desc()).limit(limit).offset(offset)
+        )
+        return list(rows), total
+
     async def set_status(
         self, doc_id: uuid.UUID, status: DocumentStatus, error: str | None = None
     ) -> None:

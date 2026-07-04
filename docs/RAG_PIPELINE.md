@@ -45,8 +45,30 @@ The CRAG seams already exist:
 - `RetrievalEvaluator`
 - `RetrievalPolicy`
 - `QueryRewriter`
+- `GroundingVerifier`
 
 The current shipped policy accepts results, but the loop is in place for future retry/rewrite behavior.
+
+## CRAG Status
+
+This application has the CRAG extension points and retry loop, but it does not yet ship a full corrective RAG grader.
+
+Implemented now:
+
+- Dense plus sparse retrieval with weighted fusion.
+- Confidence plumbing on retrieval contexts.
+- Protocols for retrieval evaluation, retry policy, query rewriting, and grounding verification.
+- A working policy loop that can rerun retrieval after a rewrite.
+- An accept-always default implementation so the pipeline is stable for production traffic.
+
+Not implemented yet:
+
+- A real retrieval-quality grader that marks retrieved evidence as correct, ambiguous, or irrelevant.
+- A corrective policy that expands or rewrites the query based on grader output.
+- A groundedness verifier that blocks or regenerates unsupported final answers.
+- A web-fallback decision that only triggers when internal retrieval quality is insufficient.
+
+So the honest answer is: CRAG scaffolding exists and is wired into the retrieval pipeline, but production accuracy today comes from hybrid search, citations, source scoping, prompt hierarchy, and optional Council mode. A full CRAG implementation should add an evaluator, corrective policy, grounding verifier, and regression tests before being called complete.
 
 ## Multi-KB Scope
 
@@ -63,6 +85,8 @@ This prevents a local sample or upload KB from hiding production-synced Jira and
 The system prompt is built in `backend/chat/prompts.py`.
 
 Retrieved chunks are wrapped in `<source>` tags. The model is instructed that source text is evidence only and never instructions. Answers must use bracket citations like `[1]`.
+
+Ask can also include an `<assistant_role>` block for SRE, DevOps, Developer, HR, or a generated custom role. This role prompt is advisory only. It can shape persona and workflow, but source-grounding, RBAC, citation, secret handling, and prompt-injection rules stay higher priority.
 
 ## Streaming
 

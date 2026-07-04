@@ -52,7 +52,8 @@ class Settings(BaseSettings):
     llm_council_chair_model: str = ""
     llm_council_api_key: str = ""
     llm_council_base_url: str = ""
-    llm_council_max_models: int = 4
+    llm_council_available_models: str = ""
+    llm_council_max_models: int = 3
     llm_council_timeout_seconds: float = 120.0
 
     # retrieval
@@ -86,7 +87,8 @@ class Settings(BaseSettings):
     confluence_email: str = ""
     confluence_auth_mode: str = "auto"  # auto | basic | bearer
     confluence_default_kb_name: str = "Confluence DevOps1"
-    confluence_page_limit: int = 100
+    confluence_page_limit: int = 100  # API page size, Atlassian Cloud caps this at 100
+    confluence_sync_max_pages: int = 0  # 0 means sync every visible page
     confluence_request_timeout_seconds: float = 20.0
 
     # Jira Software Cloud source sync. Also read-only: GET board/project/issue
@@ -98,7 +100,8 @@ class Settings(BaseSettings):
     jira_email: str = ""
     jira_auth_mode: str = "auto"  # auto | basic | bearer
     jira_default_kb_name: str = "Jira"
-    jira_issue_limit: int = 100
+    jira_issue_limit: int = 100  # API page size, Atlassian Cloud caps this at 100
+    jira_sync_max_issues: int = 0  # 0 means sync every visible issue on the board/project
     jira_request_timeout_seconds: float = 20.0
 
     # Optional web search for Ask. Disabled by default so the app never fabricates

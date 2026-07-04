@@ -132,8 +132,10 @@ class JiraClient:
             url=f"{self._base_url}/jira/software/c/projects/{self._settings.jira_project_key}/boards/{board_id_value}",
         )
 
-    async def iter_board_issues(self, board_id: int, max_issues: int) -> AsyncIterator[JiraIssue]:
-        limit = max(1, min(max_issues, self._settings.jira_issue_limit, 100))
+    async def iter_board_issues(self, board_id: int, max_issues: int | None = None) -> AsyncIterator[JiraIssue]:
+        limit = max(1, min(self._settings.jira_issue_limit, 100))
+        if max_issues is not None:
+            limit = min(limit, max(1, max_issues))
         path = f"rest/software/1.0/board/{board_id}/issue"
         params: dict[str, str | int] = {
             "maxResults": limit,
@@ -143,13 +145,13 @@ class JiraClient:
             params["jql"] = f"project = {self._settings.jira_project_key.strip()}"
         fetched = 0
 
-        while fetched < max_issues:
+        while max_issues is None or fetched < max_issues:
             payload = await self._get(path, params=params)
             issues = _list_of_dicts(payload.get("issues"))
             for row in issues:
                 yield self._parse_issue(row)
                 fetched += 1
-                if fetched >= max_issues:
+                if max_issues is not None and fetched >= max_issues:
                     return
 
             token = _str(payload.get("nextPageToken"))
@@ -261,7 +263,7 @@ class JiraSyncService:
     ) -> JiraSyncResult:
         self._validate_config()
         kb = await self._resolve_kb(user=user, kb_id=kb_id)
-        limit = min(max_issues or self._settings.jira_issue_limit, 500)
+        limit = _sync_limit(max_issues, self._settings.jira_sync_max_issues)
         documents: list[SyncedJiraDocument] = []
 
         async with JiraClient(self._settings) as client:
@@ -396,6 +398,12 @@ def jira_config_status(settings: Settings) -> JsonDict:
         "using_atlassian_fallback_credentials": using_fallback,
         "requires_email": mode == "basic" or (mode == "auto" and bool(token) and not email),
     }
+
+
+def _sync_limit(requested: int | None, configured: int) -> int | None:
+    if requested is not None:
+        return requested
+    return configured if configured > 0 else None
 
 
 def normalize_jira_base_url(raw_url: str) -> str:

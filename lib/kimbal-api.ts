@@ -29,6 +29,7 @@ export type DocumentOut = {
   collection_id: string | null;
   title: string;
   source_type: string;
+  knowledge_base_name: string | null;
   status: string;
   error: string | null;
   current_version: number;
@@ -214,6 +215,7 @@ export type ChatCapabilities = {
   answer_modes: AnswerMode[];
   council_configured: boolean;
   council_models: string[];
+  council_available_models: string[];
   council_chair_model: string | null;
   council_reason: string;
 };
@@ -250,6 +252,7 @@ export type AskStreamEvent =
         message_id?: string;
         timings_ms?: Record<string, number>;
         citations?: RagSource[];
+        model?: string | null;
         source_mode?: SourceMode;
         answer_mode?: AnswerMode;
       };
@@ -259,6 +262,23 @@ export type AskStreamEvent =
 type RequestOptions = Omit<RequestInit, "body"> & {
   body?: unknown;
   auth?: boolean;
+};
+
+export type CouncilConfig = {
+  models: string[];
+  chairModel: string;
+};
+
+export type AssistantRoleConfig = {
+  name: string;
+  prompt: string;
+};
+
+export type RoleGenerateInput = {
+  name: string;
+  goal: string;
+  sourceFocus: string;
+  outputStyle: string;
 };
 
 type DemoIdentity = {
@@ -516,10 +536,13 @@ export class KimbalApi {
     });
   }
 
-  async listDocuments(kbId: string) {
-    return this.request<{ items: DocumentOut[]; total: number }>(
-      `/documents?knowledge_base_id=${encodeURIComponent(kbId)}&limit=100`
-    );
+  async listDocuments(kbId?: string, limit = 50, offset = 0) {
+    const params = new URLSearchParams({
+      limit: String(limit),
+      offset: String(offset),
+    });
+    if (kbId) params.set("knowledge_base_id", kbId);
+    return this.request<{ items: DocumentOut[]; total: number }>(`/documents?${params.toString()}`);
   }
 
   async uploadDocument(kbId: string, file: File) {
@@ -603,13 +626,14 @@ export class KimbalApi {
     return this.cached("confluenceStatus", LIVE_CACHE_MS, () => this.request<ConfluenceStatus>("/confluence/status"));
   }
 
-  async syncConfluence(kbId?: string, maxPages = 100) {
+  async syncConfluence(kbId?: string, maxPages?: number) {
+    const body: { knowledge_base_id: string | null; max_pages?: number } = {
+      knowledge_base_id: kbId ?? null,
+    };
+    if (maxPages !== undefined) body.max_pages = maxPages;
     const result = await this.request<ConfluenceSyncResponse>("/confluence/sync", {
       method: "POST",
-      body: {
-        knowledge_base_id: kbId ?? null,
-        max_pages: maxPages,
-      },
+      body,
     });
     this.clearLiveCache();
     return result;
@@ -619,13 +643,14 @@ export class KimbalApi {
     return this.cached("jiraStatus", LIVE_CACHE_MS, () => this.request<JiraStatus>("/jira/status"));
   }
 
-  async syncJira(kbId?: string, maxIssues = 100) {
+  async syncJira(kbId?: string, maxIssues?: number) {
+    const body: { knowledge_base_id: string | null; max_issues?: number } = {
+      knowledge_base_id: kbId ?? null,
+    };
+    if (maxIssues !== undefined) body.max_issues = maxIssues;
     const result = await this.request<JiraSyncResponse>("/jira/sync", {
       method: "POST",
-      body: {
-        knowledge_base_id: kbId ?? null,
-        max_issues: maxIssues,
-      },
+      body,
     });
     this.clearLiveCache();
     return result;
@@ -643,20 +668,51 @@ export class KimbalApi {
     return this.cached("chatCapabilities", LIVE_CACHE_MS, () => this.request<ChatCapabilities>("/chat/capabilities"));
   }
 
+  async generateRolePrompt(input: RoleGenerateInput) {
+    return this.request<AssistantRoleConfig>("/chat/roles/generate", {
+      method: "POST",
+      body: {
+        name: input.name,
+        goal: input.goal,
+        source_focus: input.sourceFocus,
+        output_style: input.outputStyle,
+      },
+    });
+  }
+
   async *ask(
     conversationId: string,
     question: string,
     sourceMode: SourceMode = "knowledge",
-    answerMode: AnswerMode = "fast"
+    answerMode: AnswerMode = "fast",
+    council?: CouncilConfig,
+    assistantRole?: AssistantRoleConfig
   ): AsyncGenerator<AskStreamEvent> {
     if (!this.token?.access_token) throw new ApiError("Missing session", 401);
+    const body: {
+      question: string;
+      source_mode: SourceMode;
+      answer_mode: AnswerMode;
+      assistant_role?: string;
+      assistant_role_prompt?: string;
+      council_models?: string[];
+      council_chair_model?: string;
+    } = { question, source_mode: sourceMode, answer_mode: answerMode };
+    if (assistantRole?.name && assistantRole.prompt) {
+      body.assistant_role = assistantRole.name;
+      body.assistant_role_prompt = assistantRole.prompt;
+    }
+    if (answerMode === "council" && council) {
+      body.council_models = council.models;
+      body.council_chair_model = council.chairModel;
+    }
     const response = await fetch(`${API_BASE}/conversations/${conversationId}/ask`, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${this.token.access_token}`,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({ question, source_mode: sourceMode, answer_mode: answerMode }),
+      body: JSON.stringify(body),
     });
     if (!response.ok || !response.body) throw await parseError(response);
 

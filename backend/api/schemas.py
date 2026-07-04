@@ -80,6 +80,7 @@ class DocumentOut(ORMModel):
     collection_id: uuid.UUID | None
     title: str
     source_type: str
+    knowledge_base_name: str | None = None
     status: str
     error: str | None
     current_version: int
@@ -107,7 +108,7 @@ class ConfluenceStatusOut(BaseModel):
 
 class ConfluenceSyncRequest(BaseModel):
     knowledge_base_id: uuid.UUID | None = None
-    max_pages: int = Field(default=100, ge=1, le=500)
+    max_pages: int | None = Field(default=None, ge=1, le=100_000)
 
 
 class ConfluencePageSyncOut(BaseModel):
@@ -149,7 +150,7 @@ class JiraStatusOut(BaseModel):
 
 class JiraSyncRequest(BaseModel):
     knowledge_base_id: uuid.UUID | None = None
-    max_issues: int = Field(default=100, ge=1, le=500)
+    max_issues: int | None = Field(default=None, ge=1, le=100_000)
 
 
 class JiraIssueSyncOut(BaseModel):
@@ -238,8 +239,21 @@ class ChatCapabilitiesOut(BaseModel):
     answer_modes: list[str]
     council_configured: bool
     council_models: list[str]
+    council_available_models: list[str]
     council_chair_model: str | None
     council_reason: str
+
+
+class RoleGenerateRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=80)
+    goal: str = Field(min_length=1, max_length=800)
+    source_focus: str = Field(default="", max_length=500)
+    output_style: str = Field(default="", max_length=500)
+
+
+class RoleGenerateResponse(BaseModel):
+    name: str
+    prompt: str
 
 
 # --- search ---
@@ -285,6 +299,10 @@ class AskRequest(BaseModel):
     regenerate: bool = False
     source_mode: str = Field(default="knowledge", pattern="^(knowledge|web|blended)$")
     answer_mode: str = Field(default="fast", pattern="^(fast|council)$")
+    assistant_role: str | None = Field(default=None, max_length=80)
+    assistant_role_prompt: str | None = Field(default=None, max_length=1800)
+    council_models: list[str] | None = Field(default=None, min_length=2, max_length=3)
+    council_chair_model: str | None = Field(default=None, max_length=200)
 
 
 class CitationOut(ORMModel):

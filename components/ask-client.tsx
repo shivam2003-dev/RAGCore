@@ -20,7 +20,6 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   PanelRight,
-  Search,
   Send,
   Share2,
   Sparkles,
@@ -28,15 +27,18 @@ import {
   ThumbsUp,
   User,
   Users,
+  Wrench,
   Zap,
   type LucideIcon,
 } from "lucide-react";
 import { Card, CardLink, GhostButton, cx } from "@/components/ui";
 import {
   kimbalApi,
+  type AssistantRoleConfig,
   type AnswerMode,
   type ChatCapabilities,
   type Conversation,
+  type CouncilConfig,
   type MessageOut,
   type RagSource,
   type SourceMode,
@@ -50,6 +52,10 @@ type Turn = {
   answer: string;
   sources: RagSource[];
   timings: Record<string, number>;
+  sourceMode?: SourceMode;
+  answerMode?: AnswerMode;
+  assistantRole?: string;
+  model?: string | null;
   messageId?: string;
 };
 
@@ -62,6 +68,104 @@ const SOURCE_MODES: Array<{ value: SourceMode; label: string; icon: LucideIcon }
 const ANSWER_MODES: Array<{ value: AnswerMode; label: string; icon: LucideIcon }> = [
   { value: "fast", label: "Fast", icon: Zap },
   { value: "council", label: "Council", icon: Users },
+];
+const COUNCIL_SETTINGS_KEY = "kimbal.council.settings.v1";
+const CUSTOM_ROLE_SETTINGS_KEY = "kimbal.custom.role.v1";
+
+type OrgSpaceId = "sre" | "devops" | "developer" | "hr" | "custom";
+
+type OrgSpace = {
+  id: OrgSpaceId;
+  label: string;
+  shortLabel: string;
+  description: string;
+  prompt: string;
+  placeholder: string;
+  radar: string[];
+  icon: LucideIcon;
+};
+
+const ORG_SPACES: OrgSpace[] = [
+  {
+    id: "sre",
+    label: "SRE Space",
+    shortLabel: "SRE",
+    icon: Zap,
+    description: "Incident triage, reliability, logs, metrics, and production debugging.",
+    placeholder: "Ask SRE questions about incidents, alerts, logs, latency, rollout health...",
+    radar: [
+      "Latest SRE incident response patterns",
+      "Major reliability alerts this week",
+      "SRE conference talks to read",
+      "New observability research and articles",
+    ],
+    prompt:
+      "Act as a senior Site Reliability Engineer for Kimbal. Focus on incident triage, production debugging, reliability risk, service health, logs, metrics, SLO impact, rollback safety, and validation steps. Prefer Jira incidents, operational runbooks, postmortems, Confluence production notes, and deployment evidence. Give tight next actions, commands/checks when supported by sources, severity/blast-radius framing, and escalation criteria.",
+  },
+  {
+    id: "devops",
+    label: "DevOps Space",
+    shortLabel: "DevOps",
+    icon: Layers,
+    description: "Kubernetes, CI/CD, ArgoCD, deployment, access, and infra workflows.",
+    placeholder: "Ask DevOps questions about Kubernetes, ArgoCD, CI/CD, Jira deploy work...",
+    radar: [
+      "Kubernetes security releases and CVEs",
+      "ArgoCD and GitOps best practices this month",
+      "DevOps conference talks and articles",
+      "New CI/CD supply chain hardening guidance",
+    ],
+    prompt:
+      "Act as a senior DevOps engineer for Kimbal. Focus on Kubernetes, CI/CD, ArgoCD, Terraform, deployment safety, release validation, rollback procedure, secrets handling, access requests, and infrastructure automation. Prefer synced Confluence DevOps runbooks, Jira DEVO work items, and uploaded deployment docs. Keep responses operational, ordered, and ready for an engineer to execute.",
+  },
+  {
+    id: "developer",
+    label: "Dev Space",
+    shortLabel: "Dev",
+    icon: Wrench,
+    description: "Code, APIs, services, databases, implementation plans, and debugging.",
+    placeholder: "Ask developer questions about services, APIs, database errors, tickets...",
+    radar: [
+      "New backend engineering research to read",
+      "Postgres debugging articles this week",
+      "API design books and long-form guides",
+      "Major framework releases and migration notes",
+    ],
+    prompt:
+      "Act as a senior software engineer. Focus on code-level diagnosis, API contracts, database behavior, integration bugs, implementation plans, tests, and production-safe changes. Prefer Jira engineering tickets, design docs, runbooks, and uploaded technical documents. Be precise about assumptions, affected components, reproduction steps, and verification.",
+  },
+  {
+    id: "hr",
+    label: "HR Space",
+    shortLabel: "HR",
+    icon: Users,
+    description: "People policy, onboarding, team process, access paths, and internal guidance.",
+    placeholder: "Ask HR questions about onboarding, policy, access path, team process...",
+    radar: [
+      "Remote onboarding practices to compare",
+      "Engineering manager books and articles",
+      "People ops compliance updates",
+      "Developer experience research summaries",
+    ],
+    prompt:
+      "Act as an HR and people-operations assistant for Kimbal. Focus on onboarding, role/process guidance, people policy, access request paths, team communication, and internal operating procedures. Prefer HR policy documents, onboarding docs, and approved internal guidance. Avoid legal, compensation, or private employee claims unless directly supported by sources.",
+  },
+  {
+    id: "custom",
+    label: "Custom Role",
+    shortLabel: "Custom",
+    icon: Sparkles,
+    description: "Build a focused role prompt for a team, workflow, or domain.",
+    placeholder: "Ask with your custom role prompt...",
+    radar: [
+      "Latest news for my custom role",
+      "Research and articles for this role",
+      "Conferences and books for this role",
+      "Risks and alerts for this role",
+    ],
+    prompt:
+      "Act according to the user's custom role prompt. Keep source-grounding, security, and citation rules above the custom role.",
+  },
 ];
 
 function statusLabel(state: ChatState) {
@@ -78,7 +182,80 @@ function sourceTitle(source: RagSource) {
 }
 
 function sourceSnippet(source: RagSource) {
-  return source.snippet ?? source.content ?? "Source chunk returned by hybrid search.";
+  const raw = source.snippet ?? source.content ?? "Source chunk returned by hybrid search.";
+  return cleanSourceSnippet(raw);
+}
+
+function cleanSourceSnippet(value: string) {
+  const lines = value.replace(/\r\n/g, "\n").split("\n");
+  const withoutRenderedTitle = lines.filter((line, index) => {
+    const trimmed = line.trim();
+    if (index === 0 && trimmed.startsWith("# ")) return false;
+    if (/^URL:\s+/i.test(trimmed)) return false;
+    return true;
+  });
+  return withoutRenderedTitle.join(" ").replace(/\s+/g, " ").trim() || value;
+}
+
+function sourceScorePercent(score: number) {
+  return Math.round(Math.min(Math.max(score, 0), 1) * 100);
+}
+
+function answerModeFromModel(model?: string | null): AnswerMode | undefined {
+  if (!model) return undefined;
+  return model.startsWith("llm-council:") ? "council" : "fast";
+}
+
+function modelDisplayName(model?: string | null) {
+  if (!model) return "";
+  return model.replace(/^llm-council:/, "").replace(/^openrouter\//, "");
+}
+
+function sourceModeDescription(mode: SourceMode) {
+  if (mode === "knowledge") return "Retrieval uses synced Jira, Confluence, and uploaded documents.";
+  if (mode === "web") return "Retrieval uses configured web search and stores citable web snippets locally.";
+  return "Retrieval blends internal knowledge with configured web search.";
+}
+
+function councilChoicesFromCapabilities(chat: ChatCapabilities | null) {
+  if (!chat) return [];
+  const choices = chat.council_available_models?.length ? chat.council_available_models : chat.council_models;
+  return Array.from(new Set(choices.filter(Boolean)));
+}
+
+function preferredLeaderModel(models: string[]) {
+  if (!models.length) return "";
+  const preferred = ["anthropic/claude-haiku-4.5", "anthropic/claude-sonnet-4.5"];
+  return preferred.find((model) => models.includes(model)) ?? models[0];
+}
+
+function readStoredCouncilConfig(available: string[]): CouncilConfig | null {
+  if (typeof window === "undefined") return null;
+  const raw = window.localStorage.getItem(COUNCIL_SETTINGS_KEY);
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as Partial<CouncilConfig>;
+    const models = Array.from(new Set((parsed.models ?? []).filter((model) => available.includes(model)))).slice(0, 3);
+    const chairModel = parsed.chairModel && models.includes(parsed.chairModel) ? parsed.chairModel : models[0];
+    return models.length >= 2 && chairModel ? { models, chairModel } : null;
+  } catch {
+    window.localStorage.removeItem(COUNCIL_SETTINGS_KEY);
+    return null;
+  }
+}
+
+function readStoredCustomRole(): AssistantRoleConfig | null {
+  if (typeof window === "undefined") return null;
+  const raw = window.localStorage.getItem(CUSTOM_ROLE_SETTINGS_KEY);
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as Partial<AssistantRoleConfig>;
+    if (!parsed.name?.trim() || !parsed.prompt?.trim()) return null;
+    return { name: parsed.name.trim().slice(0, 80), prompt: parsed.prompt.trim().slice(0, 1800) };
+  } catch {
+    window.localStorage.removeItem(CUSTOM_ROLE_SETTINGS_KEY);
+    return null;
+  }
 }
 
 function sourcesFromMessage(message: MessageOut | undefined): RagSource[] {
@@ -137,7 +314,7 @@ function MarkdownAnswer({ content, busy }: { content: string; busy: boolean }) {
   function flushParagraph() {
     if (!paragraph.length) return;
     blocks.push(
-      <p key={`p-${blocks.length}`} className="text-[14px] leading-7 text-ink-700">
+      <p key={`p-${blocks.length}`} className="text-[13.5px] leading-6 text-ink-700">
         <InlineMarkdown text={paragraph.join(" ")} />
       </p>
     );
@@ -152,7 +329,7 @@ function MarkdownAnswer({ content, busy }: { content: string; busy: boolean }) {
       <Tag
         key={`list-${blocks.length}`}
         className={cx(
-          "space-y-2 pl-5 text-[14px] leading-7 text-ink-700",
+          "space-y-1.5 pl-4 text-[13.5px] leading-6 text-ink-700",
           kind === "ol" ? "list-decimal" : "list-disc"
         )}
       >
@@ -170,17 +347,36 @@ function MarkdownAnswer({ content, busy }: { content: string; busy: boolean }) {
     const line = rawLine.trim();
     if (!line) {
       flushParagraph();
-      flushList();
       continue;
     }
 
-    const heading = line.match(/^\*\*(.+?)\*\*:?\s*$/);
-    if (heading) {
+    const markdownHeading = line.match(/^(#{1,4})\s+(.+)$/);
+    if (markdownHeading) {
+      flushParagraph();
+      flushList();
+      const level = markdownHeading[1].length;
+      const text = markdownHeading[2].replace(/\s+#+$/, "").trim();
+      const className =
+        level === 1
+          ? "text-[17px] font-bold leading-7 text-ink-900"
+          : level === 2
+            ? "pt-1.5 text-[15px] font-bold leading-6 text-ink-900"
+            : "pt-1 text-[14px] font-bold leading-6 text-ink-900";
+      blocks.push(
+        <h3 key={`h-${blocks.length}`} className={className}>
+          <InlineMarkdown text={text} />
+        </h3>
+      );
+      continue;
+    }
+
+    const boldHeading = line.match(/^\*\*(.+?)\*\*:?\s*$/);
+    if (boldHeading) {
       flushParagraph();
       flushList();
       blocks.push(
-        <h3 key={`h-${blocks.length}`} className="pt-2 text-[15px] font-bold text-ink-900">
-          {heading[1]}
+        <h3 key={`h-${blocks.length}`} className="pt-1 text-[14px] font-bold leading-6 text-ink-900">
+          <InlineMarkdown text={boldHeading[1]} />
         </h3>
       );
       continue;
@@ -218,7 +414,7 @@ function MarkdownAnswer({ content, busy }: { content: string; busy: boolean }) {
   }
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-2.5">
       {blocks}
       {busy && <span className="inline-block h-4 w-1.5 animate-pulse rounded-full bg-brand-400 align-middle" />}
     </div>
@@ -248,10 +444,21 @@ export function AskClient() {
   const [answerMode, setAnswerMode] = useState<AnswerMode>("fast");
   const [webStatus, setWebStatus] = useState<WebSearchStatus | null>(null);
   const [chatCapabilities, setChatCapabilities] = useState<ChatCapabilities | null>(null);
+  const [councilModels, setCouncilModels] = useState<string[]>([]);
+  const [councilSize, setCouncilSize] = useState<2 | 3>(3);
+  const [councilChairModel, setCouncilChairModel] = useState("");
   const [viewMode, setViewMode] = useState<"workbench" | "focus">("focus");
   const [focusRailExpanded, setFocusRailExpanded] = useState(false);
   const [focusDrawer, setFocusDrawer] = useState<"sources" | "history" | null>(null);
   const [modePanel, setModePanel] = useState<"web" | "council" | null>(null);
+  const [selectedSpaceId, setSelectedSpaceId] = useState<OrgSpaceId>("devops");
+  const [customRole, setCustomRole] = useState<AssistantRoleConfig | null>(() => readStoredCustomRole());
+  const [customBuilderOpen, setCustomBuilderOpen] = useState(false);
+  const [customRoleGenerating, setCustomRoleGenerating] = useState(false);
+  const [customRoleName, setCustomRoleName] = useState(() => readStoredCustomRole()?.name ?? "");
+  const [customRoleGoal, setCustomRoleGoal] = useState("");
+  const [customRoleSourceFocus, setCustomRoleSourceFocus] = useState("");
+  const [customRoleOutputStyle, setCustomRoleOutputStyle] = useState("");
 
   const loadConversations = useCallback(async () => {
     setLoadingConversations(true);
@@ -272,6 +479,29 @@ export function AskClient() {
     return () => window.clearTimeout(timer);
   }, [loadConversations]);
 
+  function applyCouncilDefaults(chat: ChatCapabilities) {
+    const available = councilChoicesFromCapabilities(chat);
+    if (available.length < 2) {
+      setCouncilModels(available);
+      setCouncilSize(2);
+      setCouncilChairModel(available[0] ?? "");
+      return;
+    }
+
+    const stored = readStoredCouncilConfig(available);
+    const configured = chat.council_models.filter((model) => available.includes(model));
+    const preferred = stored?.models.length ? stored.models : configured.length >= 2 ? configured : available;
+    const size = Math.min(Math.max(preferred.length, 2), 3) as 2 | 3;
+    const models = [...preferred, ...available.filter((model) => !preferred.includes(model))].slice(0, size);
+    const chair =
+      (stored?.chairModel && models.includes(stored.chairModel) && stored.chairModel) ||
+      (chat.council_chair_model && models.includes(chat.council_chair_model) && chat.council_chair_model) ||
+      preferredLeaderModel(models);
+    setCouncilModels(models);
+    setCouncilSize(size);
+    setCouncilChairModel(chair ?? models[0]);
+  }
+
   useEffect(() => {
     let cancelled = false;
     async function loadCapabilities() {
@@ -281,6 +511,7 @@ export function AskClient() {
         if (!cancelled) {
           setWebStatus(web);
           setChatCapabilities(chat);
+          applyCouncilDefaults(chat);
         }
       } catch {
         if (!cancelled) {
@@ -303,13 +534,20 @@ export function AskClient() {
   }, [viewMode]);
 
   useEffect(() => {
-    if (!initialQuestion.trim()) return;
-    if (autoAsked.current) return;
-    autoAsked.current = true;
-    void ask(initialQuestion);
-    // initialQuestion is intentionally captured once per page load.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    if (!councilModels.length) return;
+    const activeModels = councilModels.slice(0, councilSize).filter(Boolean);
+    const uniqueModels = Array.from(new Set(activeModels));
+    const nextChairModel =
+      councilChairModel && uniqueModels.includes(councilChairModel)
+        ? councilChairModel
+        : preferredLeaderModel(uniqueModels);
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem(
+        COUNCIL_SETTINGS_KEY,
+        JSON.stringify({ models: uniqueModels, chairModel: nextChairModel })
+      );
+    }
+  }, [councilChairModel, councilModels, councilSize]);
 
   async function ask(question: string) {
     const trimmed = question.trim();
@@ -324,11 +562,41 @@ export function AskClient() {
       setError(chatCapabilities?.council_reason ?? "LLM Council is not configured.");
       return;
     }
+    const requestedCouncilModels = Array.from(new Set(councilModels.slice(0, councilSize).filter(Boolean)));
+    const availableCouncilModels = councilChoicesFromCapabilities(chatCapabilities);
+    const councilConfig: CouncilConfig | undefined =
+      answerMode === "council" &&
+      requestedCouncilModels.length >= 2 &&
+      requestedCouncilModels.length <= 3 &&
+      requestedCouncilModels.every((model) => availableCouncilModels.includes(model)) &&
+      Boolean(councilChairModel) &&
+      requestedCouncilModels.includes(councilChairModel)
+        ? { models: requestedCouncilModels, chairModel: councilChairModel }
+        : undefined;
+    if (answerMode === "council" && !councilConfig) {
+      setState("error");
+      setError("Select two or three Council models and choose one selected model as chair.");
+      setModePanel("council");
+      return;
+    }
+    const requestSpace = ORG_SPACES.find((space) => space.id === selectedSpaceId) ?? ORG_SPACES[0];
+    const requestAssistantRole: AssistantRoleConfig =
+      requestSpace.id === "custom" && customRole
+        ? customRole
+        : { name: requestSpace.label, prompt: requestSpace.prompt };
     setState("preparing");
     setError("");
     setFeedback("");
     setActionStatus("");
-    setTurn({ question: trimmed, answer: "", sources: [], timings: {} });
+    setTurn({
+      question: trimmed,
+      answer: "",
+      sources: [],
+      timings: {},
+      sourceMode,
+      answerMode,
+      assistantRole: requestAssistantRole.name,
+    });
 
     try {
       const kb = await kimbalApi.ensureKnowledgeBase();
@@ -339,10 +607,22 @@ export function AskClient() {
         setConversationId(conversation.id);
       }
       setState("searching");
-      for await (const event of kimbalApi.ask(activeConversationId, trimmed, sourceMode, answerMode)) {
+      for await (const event of kimbalApi.ask(
+        activeConversationId,
+        trimmed,
+        sourceMode,
+        answerMode,
+        councilConfig,
+        requestAssistantRole
+      )) {
         if (event.type === "sources") {
           const sources = event.data.sources ?? event.data.hits ?? [];
-          setTurn((current) => ({ ...current, sources }));
+          setTurn((current) => ({
+            ...current,
+            sources,
+            sourceMode: event.data.source_mode ?? current.sourceMode,
+            answerMode: event.data.answer_mode ?? current.answerMode,
+          }));
           setState("streaming");
         }
         if (event.type === "delta") {
@@ -355,6 +635,9 @@ export function AskClient() {
             ...current,
             messageId: event.data.message_id,
             timings: event.data.timings_ms ?? current.timings,
+            model: event.data.model ?? current.model,
+            sourceMode: event.data.source_mode ?? current.sourceMode,
+            answerMode: event.data.answer_mode ?? current.answerMode,
           }));
           setState("done");
           void loadConversations();
@@ -368,6 +651,15 @@ export function AskClient() {
       setError(cause instanceof Error ? cause.message : "Unknown error");
     }
   }
+
+  useEffect(() => {
+    if (!initialQuestion.trim()) return;
+    if (autoAsked.current) return;
+    autoAsked.current = true;
+    void ask(initialQuestion);
+    // initialQuestion is intentionally captured once per page load.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -418,6 +710,8 @@ export function AskClient() {
         answer: assistantMessage?.content ?? "",
         sources: sourcesFromMessage(assistantMessage),
         timings: assistantMessage?.timings ?? {},
+        answerMode: answerModeFromModel(assistantMessage?.model),
+        model: assistantMessage?.model ?? null,
         messageId: assistantMessage?.id,
       });
       setInput("");
@@ -491,13 +785,74 @@ export function AskClient() {
   const busy = state === "preparing" || state === "searching" || state === "streaming";
   const hasAnswer = Boolean(turn.answer);
   const webReady = webStatus?.configured === true;
-  const councilReady = chatCapabilities?.council_configured === true;
-  const sourceModeText =
-    sourceMode === "knowledge"
-      ? "Retrieval uses synced Jira, Confluence, and uploaded documents."
-      : sourceMode === "web"
-        ? "Retrieval uses configured web search and stores citable web snippets locally."
-        : "Retrieval blends internal knowledge with configured web search.";
+  const councilAvailableModels = councilChoicesFromCapabilities(chatCapabilities);
+  const activeCouncilModels = councilModels.slice(0, councilSize).filter(Boolean);
+  const uniqueCouncilModels = Array.from(new Set(activeCouncilModels));
+  const councilReady = chatCapabilities?.council_configured === true && councilAvailableModels.length >= 2;
+  const sourceModeText = sourceModeDescription(sourceMode);
+  const answerSourceModeText = sourceModeDescription(turn.sourceMode ?? sourceMode);
+  const selectedSpace = ORG_SPACES.find((space) => space.id === selectedSpaceId) ?? ORG_SPACES[0];
+  const assistantRoleConfig: AssistantRoleConfig =
+    selectedSpace.id === "custom" && customRole
+      ? customRole
+      : { name: selectedSpace.label, prompt: selectedSpace.prompt };
+  const activePlaceholder = selectedSpace.placeholder;
+  const roleModeText =
+    selectedSpace.id === "custom" && !customRole
+      ? "Custom role is not generated yet."
+      : `${assistantRoleConfig.name} active`;
+
+  function chooseOrgSpace(space: OrgSpace) {
+    setSelectedSpaceId(space.id);
+    setActionStatus(`${space.label} selected`);
+    if (space.id === "custom" && !customRole) {
+      setCustomBuilderOpen(true);
+      return;
+    }
+    if (webReady) {
+      setSourceMode("blended");
+    }
+  }
+
+  function runRadarSearch(query: string) {
+    setInput(query);
+    if (webReady) {
+      setSourceMode("blended");
+      setActionStatus("Radar uses internal knowledge plus web search.");
+    } else {
+      setSourceMode("knowledge");
+      setActionStatus(webStatus?.reason ?? "Web search is not configured; using internal knowledge only.");
+    }
+  }
+
+  async function generateCustomRole() {
+    const name = customRoleName.trim() || "Custom Specialist";
+    const goal = customRoleGoal.trim();
+    if (!goal) {
+      setActionStatus("Describe what the custom role should optimize for.");
+      return;
+    }
+    setCustomRoleGenerating(true);
+    setActionStatus("Generating role prompt with the configured LLM");
+    try {
+      const generated = await kimbalApi.generateRolePrompt({
+        name,
+        goal,
+        sourceFocus: customRoleSourceFocus,
+        outputStyle: customRoleOutputStyle,
+      });
+      setCustomRole(generated);
+      setCustomRoleName(generated.name);
+      setSelectedSpaceId("custom");
+      setCustomBuilderOpen(false);
+      window.localStorage.setItem(CUSTOM_ROLE_SETTINGS_KEY, JSON.stringify(generated));
+      setActionStatus(`Custom role generated: ${generated.name}`);
+    } catch (cause) {
+      setActionStatus(cause instanceof Error ? cause.message : "Role generation failed");
+    } finally {
+      setCustomRoleGenerating(false);
+    }
+  }
 
   function chooseSourceMode(next: SourceMode) {
     if ((next === "web" || next === "blended") && !webReady) {
@@ -517,8 +872,29 @@ export function AskClient() {
       return;
     }
     setAnswerMode(next);
-    setModePanel(null);
+    setModePanel(next === "council" ? "council" : null);
     setActionStatus("");
+  }
+
+  function setCouncilModel(index: number, value: string) {
+    const next = [...councilModels];
+    next[index] = value;
+    const selected = Array.from(new Set(next.slice(0, councilSize).filter(Boolean)));
+    setCouncilModels(next);
+    if (selected.length && (!councilChairModel || !selected.includes(councilChairModel))) {
+      setCouncilChairModel(preferredLeaderModel(selected));
+    }
+  }
+
+  function setCouncilModelCount(size: 2 | 3) {
+    const fallback = councilAvailableModels.filter((model) => !councilModels.includes(model));
+    const next = [...councilModels, ...fallback].slice(0, size);
+    const selected = Array.from(new Set(next.filter(Boolean)));
+    setCouncilSize(size);
+    setCouncilModels(next);
+    if (selected.length && (!councilChairModel || !selected.includes(councilChairModel))) {
+      setCouncilChairModel(preferredLeaderModel(selected));
+    }
   }
 
   function renderModeControls(compact = false) {
@@ -553,13 +929,19 @@ export function AskClient() {
           {ANSWER_MODES.map((mode) => {
             const Icon = mode.icon;
             const unavailable = mode.value === "council" && !councilReady;
+            const title =
+              unavailable
+                ? (chatCapabilities?.council_reason ?? "LLM Council is not configured.")
+                : mode.value === "council"
+                  ? `Council mode: choose ${councilReady ? "2-3" : "available"} models and one chair`
+                  : mode.label;
             return (
               <button
                 key={mode.value}
                 type="button"
                 disabled={busy}
                 aria-pressed={answerMode === mode.value}
-                title={unavailable ? (chatCapabilities?.council_reason ?? "LLM Council is not configured.") : mode.label}
+                title={title}
                 onClick={() => chooseAnswerMode(mode.value)}
                 className={cx(
                   "inline-flex h-8 items-center gap-1.5 rounded-[9px] px-2.5 text-[12px] font-semibold transition",
@@ -580,6 +962,12 @@ export function AskClient() {
   function renderModePanel() {
     if (!modePanel) return null;
     const isWeb = modePanel === "web";
+    const councilText =
+      councilReady && uniqueCouncilModels.length > 1
+        ? `Ready with ${uniqueCouncilModels.join(", ")}. Chair: ${councilChairModel || uniqueCouncilModels[0]}.`
+        : councilReady
+          ? "Select two or three models below."
+          : (chatCapabilities?.council_reason ?? "LLM Council is not configured.");
     return (
       <div className="mt-3 rounded-[14px] border border-line bg-white px-4 py-3 text-[12.5px] shadow-[var(--shadow-card)]">
         <div className="flex items-start justify-between gap-3">
@@ -590,10 +978,71 @@ export function AskClient() {
                 ? webReady
                   ? `Ready through ${webStatus?.provider ?? "web search"}.`
                   : (webStatus?.reason ?? "Web search is not configured.")
-                : councilReady
-                  ? `Ready with ${chatCapabilities?.council_models.join(", ") || "configured models"}.`
-                  : (chatCapabilities?.council_reason ?? "LLM Council is not configured.")}
+                : councilText}
             </p>
+            {!isWeb && councilReady && (
+              <div className="mt-3 space-y-3">
+                <div className="inline-flex rounded-[10px] border border-line bg-canvas p-1">
+                  {[2, 3].map((size) => {
+                    const unavailable = councilAvailableModels.length < size;
+                    return (
+                      <button
+                        key={size}
+                        type="button"
+                        disabled={unavailable}
+	                        onClick={() => setCouncilModelCount(size as 2 | 3)}
+                        className={cx(
+                          "rounded-[8px] px-2.5 py-1 text-[12px] font-semibold transition disabled:cursor-not-allowed disabled:opacity-45",
+                          councilSize === size ? "bg-white text-ink-900 shadow-[var(--shadow-card)]" : "text-ink-500"
+                        )}
+                      >
+                        {size} models
+                      </button>
+                    );
+                  })}
+                </div>
+                <div className="grid grid-cols-1 gap-2 md:grid-cols-3">
+                  {Array.from({ length: councilSize }).map((_, index) => (
+                    <label key={index} className="block">
+                      <span className="mb-1 block text-[11px] font-bold uppercase tracking-[0.08em] text-ink-400">
+                        Member {index + 1}
+                      </span>
+                      <select
+                        value={councilModels[index] ?? ""}
+                        onChange={(event) => setCouncilModel(index, event.target.value)}
+                        className="h-9 w-full rounded-[10px] border border-line bg-white px-2 text-[12px] font-semibold text-ink-700 outline-none transition focus:border-brand-300 focus:ring-4 focus:ring-brand-50"
+                      >
+                        {councilAvailableModels.map((model) => (
+                          <option
+                            key={model}
+                            value={model}
+                            disabled={activeCouncilModels.some((selected, selectedIndex) => selected === model && selectedIndex !== index)}
+                          >
+                            {model}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  ))}
+                </div>
+                <label className="block max-w-sm">
+                  <span className="mb-1 block text-[11px] font-bold uppercase tracking-[0.08em] text-ink-400">
+                    Chair model
+                  </span>
+                  <select
+                    value={councilChairModel}
+                    onChange={(event) => setCouncilChairModel(event.target.value)}
+                    className="h-9 w-full rounded-[10px] border border-line bg-white px-2 text-[12px] font-semibold text-ink-700 outline-none transition focus:border-brand-300 focus:ring-4 focus:ring-brand-50"
+                  >
+                    {uniqueCouncilModels.map((model) => (
+                      <option key={model} value={model}>
+                        {model}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+            )}
           </div>
           <button
             type="button"
@@ -608,9 +1057,9 @@ export function AskClient() {
     );
   }
 
-  function renderActionButtons() {
+  function renderActionButtons(compact = false) {
     return (
-      <div className="flex flex-wrap items-center gap-2.5 border-t border-line pt-4">
+      <div className={cx("flex flex-wrap items-center gap-2 border-t border-line", compact ? "pt-3" : "pt-4")}>
         <button
           type="button"
           onClick={() => void rate(1)}
@@ -645,21 +1094,21 @@ export function AskClient() {
           <Share2 size={14} />
           Share
         </button>
-        {actionStatus && <span className="ml-auto text-[12px] font-semibold text-ink-500">{actionStatus}</span>}
+        {actionStatus && <span className="ml-auto text-[11.5px] font-semibold text-ink-500">{actionStatus}</span>}
       </div>
     );
   }
 
   function renderSourcesList(limit = 6) {
     return (
-      <ul className="mt-4 space-y-4">
+      <ul className="mt-3 space-y-3">
         {turn.sources.slice(0, limit).map((source, index) => {
           const isWeb = source.source_type === "web";
           const SourceIcon = isWeb ? Globe : FileText;
           return (
-            <li key={`${source.chunk_id}-${index}`} className="flex items-start gap-3">
-              <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-[9px] border border-line bg-white text-brand-500">
-                <SourceIcon size={16} />
+            <li key={`${source.chunk_id}-${index}`} className="flex items-start gap-2.5">
+              <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-[8px] border border-line bg-white text-brand-500">
+                <SourceIcon size={14} />
               </span>
               <div className="min-w-0 flex-1">
                 {source.url ? (
@@ -667,20 +1116,20 @@ export function AskClient() {
                     href={source.url}
                     target="_blank"
                     rel="noreferrer"
-                    className="block truncate text-[13px] font-semibold text-ink-900 hover:text-brand-600"
+                    className="block truncate text-[12.5px] font-semibold text-ink-900 hover:text-brand-600"
                   >
                     [{source.marker ?? index + 1}] {sourceTitle(source)}
                   </a>
                 ) : (
-                  <p className="truncate text-[13px] font-semibold text-ink-900">
+                  <p className="truncate text-[12.5px] font-semibold text-ink-900">
                     [{source.marker ?? index + 1}] {sourceTitle(source)}
                   </p>
                 )}
-                <p className="line-clamp-2 text-[11.5px] text-ink-500">{sourceSnippet(source)}</p>
+                <p className="line-clamp-2 text-[11px] leading-4 text-ink-500">{sourceSnippet(source)}</p>
               </div>
               {typeof source.score === "number" && (
-                <span className="rounded-md bg-emerald-50 px-1.5 py-0.5 text-[11.5px] font-bold text-emerald-600">
-                  {Math.round(source.score * 100)}%
+                <span className="rounded-md bg-emerald-50 px-1.5 py-0.5 text-[11px] font-bold text-emerald-600">
+                  {sourceScorePercent(source.score)}%
                 </span>
               )}
             </li>
@@ -726,6 +1175,152 @@ export function AskClient() {
           <li className="py-2.5 text-[12.5px] text-ink-500">No previous conversations yet.</li>
         )}
       </ul>
+    );
+  }
+
+  function renderSpaceTabs(compact = false) {
+    return (
+      <div className={cx("flex flex-wrap items-center justify-center gap-2", compact ? "max-w-[820px]" : "")}>
+        {ORG_SPACES.map((space) => {
+          const Icon = space.icon;
+          const selected = selectedSpaceId === space.id;
+          return (
+            <button
+              key={space.id}
+              type="button"
+              onClick={() => chooseOrgSpace(space)}
+              className={cx(
+                "inline-flex items-center gap-2 rounded-full px-3 py-2 text-[13px] font-semibold transition",
+                selected
+                  ? "bg-ink-900 text-white shadow-[var(--shadow-card)]"
+                  : "text-ink-500 hover:bg-white hover:text-ink-900 hover:shadow-[var(--shadow-card)]"
+              )}
+              title={space.description}
+            >
+              <Icon size={14} />
+              {space.label}
+            </button>
+          );
+        })}
+      </div>
+    );
+  }
+
+  function renderRadarChips() {
+    return (
+      <div className="mt-4 flex max-w-[820px] flex-wrap justify-center gap-2">
+        {selectedSpace.radar.map((item) => (
+          <button
+            key={item}
+            type="button"
+            onClick={() => runRadarSearch(`${item} for ${selectedSpace.shortLabel} teams`)}
+            className="rounded-full border border-[#e8e5dc] bg-white px-3 py-1.5 text-[12px] font-semibold text-ink-500 shadow-[var(--shadow-card)] transition hover:border-ink-200 hover:text-ink-900"
+          >
+            {item}
+          </button>
+        ))}
+      </div>
+    );
+  }
+
+  function renderCustomRoleBuilder() {
+    if (!customBuilderOpen) return null;
+    return (
+      <div className="mt-3 w-full rounded-[16px] border border-line bg-white p-4 text-left shadow-[var(--shadow-card)]">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <p className="text-[14px] font-bold text-ink-900">Custom role builder</p>
+            <p className="mt-1 text-[12.5px] leading-5 text-ink-500">
+              Answer these prompts once. Kimbal uses the configured LLM to generate a reusable background role prompt.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => setCustomBuilderOpen(false)}
+            className="rounded-full p-1.5 text-ink-400 transition hover:bg-canvas hover:text-ink-900"
+            aria-label="Close custom role builder"
+          >
+            <Minimize2 size={15} />
+          </button>
+        </div>
+        <div className="mt-3 grid gap-3 md:grid-cols-2">
+          <label className="block">
+            <span className="mb-1 block text-[11px] font-bold uppercase tracking-[0.08em] text-ink-400">Role name</span>
+            <input
+              value={customRoleName}
+              onChange={(event) => setCustomRoleName(event.target.value)}
+              placeholder="Security Architect, SRE Lead, HR Ops Partner"
+              className="h-9 w-full rounded-[10px] border border-line bg-white px-3 text-[12.5px] font-semibold text-ink-700 outline-none transition focus:border-brand-300 focus:ring-4 focus:ring-brand-50"
+            />
+          </label>
+          <label className="block">
+            <span className="mb-1 block text-[11px] font-bold uppercase tracking-[0.08em] text-ink-400">Source focus</span>
+            <input
+              value={customRoleSourceFocus}
+              onChange={(event) => setCustomRoleSourceFocus(event.target.value)}
+              placeholder="security Jira, zero-day advisories, architecture docs"
+              className="h-9 w-full rounded-[10px] border border-line bg-white px-3 text-[12.5px] font-semibold text-ink-700 outline-none transition focus:border-brand-300 focus:ring-4 focus:ring-brand-50"
+            />
+          </label>
+          <label className="block md:col-span-2">
+            <span className="mb-1 block text-[11px] font-bold uppercase tracking-[0.08em] text-ink-400">What should this role optimize for?</span>
+            <textarea
+              value={customRoleGoal}
+              onChange={(event) => setCustomRoleGoal(event.target.value)}
+              placeholder="Help security engineers assess risk, explain impact, and produce prioritized remediation steps."
+              className="min-h-[74px] w-full resize-none rounded-[10px] border border-line bg-white px-3 py-2 text-[12.5px] font-medium leading-5 text-ink-700 outline-none transition focus:border-brand-300 focus:ring-4 focus:ring-brand-50"
+            />
+          </label>
+          <label className="block md:col-span-2">
+            <span className="mb-1 block text-[11px] font-bold uppercase tracking-[0.08em] text-ink-400">Output style</span>
+            <input
+              value={customRoleOutputStyle}
+              onChange={(event) => setCustomRoleOutputStyle(event.target.value)}
+              placeholder="Brief risk summary, evidence, remediation plan, owner questions"
+              className="h-9 w-full rounded-[10px] border border-line bg-white px-3 text-[12.5px] font-semibold text-ink-700 outline-none transition focus:border-brand-300 focus:ring-4 focus:ring-brand-50"
+            />
+          </label>
+        </div>
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+          <p className="text-[11.5px] font-medium text-ink-400">Stored in this browser and sent with Ask requests.</p>
+          <button
+            type="button"
+            disabled={customRoleGenerating}
+            onClick={() => void generateCustomRole()}
+            className="inline-flex items-center gap-2 rounded-[10px] bg-ink-900 px-3.5 py-2 text-[12.5px] font-semibold text-white transition hover:bg-ink-800 disabled:cursor-wait disabled:opacity-60"
+          >
+            {customRoleGenerating ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
+            {customRoleGenerating ? "Generating" : "Generate role"}
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  function renderRunBadge() {
+    const mode = turn.answerMode ?? answerModeFromModel(turn.model);
+    if (!mode && !turn.model) return null;
+    const model = modelDisplayName(turn.model);
+    return (
+      <span
+        className={cx(
+          "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold",
+          mode === "council" ? "bg-ink-900 text-white" : "bg-brand-50 text-brand-600"
+        )}
+      >
+        {mode === "council" ? "Council" : "Fast"}
+        {model && <span className="max-w-[220px] truncate opacity-80">- {model}</span>}
+      </span>
+    );
+  }
+
+  function renderRoleBadge() {
+    const name = turn.assistantRole ?? assistantRoleConfig.name;
+    return (
+      <span className="inline-flex items-center gap-1 rounded-full bg-[#f3f1ea] px-2 py-0.5 text-[11px] font-semibold text-ink-600">
+        <Sparkles size={11} />
+        {name}
+      </span>
     );
   }
 
@@ -833,16 +1428,10 @@ export function AskClient() {
               <Link href="/" className="text-ink-400 transition hover:text-ink-900" aria-label="Back to home">
                 <ArrowLeft size={18} />
               </Link>
-              <p className="text-[14px] font-semibold text-ink-700">Kimbal Council</p>
+              <p className="text-[14px] font-semibold text-ink-700">{selectedSpace.label}</p>
             </div>
             {!turn.question && (
-              <div className="hidden items-center gap-6 text-[13px] font-semibold text-ink-500 md:flex">
-                <span>Discover</span>
-                <span>Finance</span>
-                <span>Health</span>
-                <span>Academic</span>
-                <span>Patents</span>
-              </div>
+              <div className="hidden md:block">{renderSpaceTabs(true)}</div>
             )}
             <div className="flex items-center gap-2">
               <span
@@ -875,29 +1464,31 @@ export function AskClient() {
             )}
 
             {turn.question && (
-              <div className="mb-6 w-full space-y-4">
+              <div className="mb-5 w-full space-y-3">
                 <div className="flex justify-end">
-                  <div className="max-w-[680px] rounded-[18px] rounded-tr-[5px] bg-ink-900 px-5 py-3 text-[14px] font-medium leading-6 text-white shadow-[var(--shadow-pop)]">
+                  <div className="max-w-[680px] rounded-[16px] rounded-tr-[5px] bg-ink-900 px-4 py-2.5 text-[13.5px] font-medium leading-6 text-white shadow-[var(--shadow-pop)]">
                     {turn.question}
                   </div>
                 </div>
-                <Card className="p-6">
-                  <div className="flex items-center gap-2.5">
-                    <span className="flex h-8 w-8 items-center justify-center rounded-[10px] bg-brand-50 text-brand-500">
-                      <Sparkles size={15} />
+                <Card className="p-5">
+                  <div className="flex flex-wrap items-center gap-2.5">
+                    <span className="flex h-7 w-7 items-center justify-center rounded-[9px] bg-brand-50 text-brand-500">
+                      <Sparkles size={14} />
                     </span>
-                    <p className="text-[14.5px] font-semibold text-ink-900">Kimbal AI</p>
+                    <p className="text-[14px] font-semibold text-ink-900">Kimbal AI</p>
+                    {renderRoleBadge()}
+                    {renderRunBadge()}
                   </div>
                   {error ? (
                     <div className="mt-4 rounded-[12px] border border-rose-100 bg-rose-50 px-4 py-3 text-[13px] text-rose-700">
                       {error}
                     </div>
                   ) : (
-                    <div className="mt-5 min-h-[180px]">
+                    <div className="mt-4">
                       <MarkdownAnswer content={hasAnswer ? turn.answer : ""} busy={busy} />
                     </div>
                   )}
-                  <div className="mt-5">{renderActionButtons()}</div>
+                  <div className="mt-4">{renderActionButtons(true)}</div>
                 </Card>
               </div>
             )}
@@ -909,7 +1500,7 @@ export function AskClient() {
               <input
                 value={input}
                 onChange={(event) => setInput(event.target.value)}
-                placeholder="Ask with internal knowledge, web search, or council mode..."
+                placeholder={activePlaceholder}
                 className="h-12 w-full bg-transparent px-3 text-[15px] outline-none placeholder:text-ink-400"
               />
               <div className="mt-2 flex flex-wrap items-center justify-between gap-3 border-t border-[#f0eee8] pt-3">
@@ -925,17 +1516,9 @@ export function AskClient() {
               </div>
               {renderModePanel()}
             </form>
+            {renderCustomRoleBuilder()}
             {!turn.question && (
-              <div className="mt-6 grid w-full grid-cols-1 gap-3 md:grid-cols-2">
-                <button type="button" className="rounded-[14px] border border-line bg-white p-4 text-left shadow-[var(--shadow-card)]">
-                  <span className="flex items-center gap-2 text-[14px] font-bold text-ink-900"><Search size={16} /> Search anything</span>
-                  <span className="mt-1 block text-[12.5px] text-ink-500">Fast cited answers from trusted internal and web sources.</span>
-                </button>
-                <button type="button" className="rounded-[14px] border border-line bg-white p-4 text-left shadow-[var(--shadow-card)]">
-                  <span className="flex items-center gap-2 text-[14px] font-bold text-ink-900"><Users size={16} /> Council mode</span>
-                  <span className="mt-1 block text-[12.5px] text-ink-500">Run a multi-pass answer review with your configured model.</span>
-                </button>
-              </div>
+              renderRadarChips()
             )}
             <p className="mt-4 text-[12px] font-semibold text-ink-400">
               Kimbal can make mistakes. Please verify.
@@ -980,7 +1563,7 @@ export function AskClient() {
             <ArrowLeft size={18} />
           </Link>
           <h1 className="text-[17px] font-bold text-ink-900">
-            Ask Kimbal <span className="font-normal text-ink-500">(Powered by RAG)</span>
+            Ask Kimbal <span className="font-normal text-ink-500">({selectedSpace.label})</span>
           </h1>
           <div className="ml-auto flex items-center gap-2">
             <GhostButton className="px-3 py-2 text-[12.5px]" disabled={busy} onClick={startNewChat}>
@@ -1006,15 +1589,20 @@ export function AskClient() {
         </div>
 
         <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+          {renderSpaceTabs()}
+          <p className="text-[12.5px] font-medium text-ink-500">{roleModeText}</p>
+        </div>
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
           {renderModeControls()}
           <p className="text-[12.5px] font-medium text-ink-500">{sourceModeText}</p>
         </div>
         {renderModePanel()}
+        {renderCustomRoleBuilder()}
 
         {turn.question && (
-          <div className="mt-5 flex items-start justify-end gap-3">
+          <div className="mt-4 flex items-start justify-end gap-3">
             <div>
-              <div className="rounded-[16px] rounded-tr-[4px] bg-gradient-to-r from-brand-500 to-brand-600 px-5 py-3.5 text-[14px] font-medium text-white shadow-[var(--shadow-pop)]">
+              <div className="rounded-[15px] rounded-tr-[4px] bg-gradient-to-r from-brand-500 to-brand-600 px-4 py-2.5 text-[13.5px] font-medium leading-6 text-white shadow-[var(--shadow-pop)]">
                 {turn.question}
               </div>
               <p className="mt-1.5 text-right text-[11.5px] text-ink-400">Now</p>
@@ -1025,33 +1613,37 @@ export function AskClient() {
           </div>
         )}
 
-        <Card className="mt-2 p-6">
-          <div className="flex items-center gap-2.5">
-            <span className="flex h-8 w-8 items-center justify-center rounded-[10px] bg-brand-50 text-brand-500">
-              <Sparkles size={15} />
-            </span>
-            <p className="text-[14.5px] font-semibold text-ink-900">Kimbal AI</p>
-          </div>
-
-          {error ? (
-            <div className="mt-4 rounded-[12px] border border-rose-100 bg-rose-50 px-4 py-3 text-[13px] text-rose-700">
-              {error}
+        {(turn.question || error || busy) && (
+          <Card className="mt-2 p-5">
+            <div className="flex flex-wrap items-center gap-2.5">
+              <span className="flex h-7 w-7 items-center justify-center rounded-[9px] bg-brand-50 text-brand-500">
+                <Sparkles size={14} />
+              </span>
+              <p className="text-[14px] font-semibold text-ink-900">Kimbal AI</p>
+              {renderRoleBadge()}
+              {renderRunBadge()}
             </div>
-          ) : (
-            <div className="mt-5 min-h-[220px]">
-              <MarkdownAnswer content={hasAnswer ? turn.answer : ""} busy={busy} />
+
+            {error ? (
+              <div className="mt-4 rounded-[12px] border border-rose-100 bg-rose-50 px-4 py-3 text-[13px] text-rose-700">
+                {error}
+              </div>
+            ) : (
+              <div className="mt-4">
+                <MarkdownAnswer content={hasAnswer ? turn.answer : ""} busy={busy} />
+              </div>
+            )}
+
+            <div className="mt-4 flex items-start gap-2 rounded-[10px] border border-brand-100 bg-brand-50/60 px-3 py-2.5">
+              <Info size={14} className="mt-0.5 shrink-0 text-brand-500" />
+              <p className="text-[12.5px] leading-5 text-ink-700">
+                {answerSourceModeText} Citation markers such as <span className="font-semibold text-brand-600">[1]</span> map to the source chunks in the right rail.
+              </p>
             </div>
-          )}
 
-          <div className="mt-5 flex items-start gap-2.5 rounded-[12px] border border-brand-100 bg-brand-50/60 px-4 py-3">
-            <Info size={15} className="mt-0.5 shrink-0 text-brand-500" />
-            <p className="text-[13px] leading-relaxed text-ink-700">
-              {sourceModeText} Citation markers such as <span className="font-semibold text-brand-600">[1]</span> map to the source chunks in the right rail.
-            </p>
-          </div>
-
-          <div className="mt-5">{renderActionButtons()}</div>
-        </Card>
+            <div className="mt-4">{renderActionButtons(true)}</div>
+          </Card>
+        )}
 
         <form
           onSubmit={submit}
@@ -1060,7 +1652,7 @@ export function AskClient() {
           <input
             value={input}
             onChange={(event) => setInput(event.target.value)}
-            placeholder="Ask across synced Jira, Confluence, and uploaded documents..."
+            placeholder={activePlaceholder}
             className="h-10 min-w-0 flex-1 bg-transparent text-[14px] outline-none placeholder:text-ink-400"
           />
           <button
@@ -1072,6 +1664,7 @@ export function AskClient() {
             {busy ? <Loader2 size={15} className="animate-spin" /> : <Send size={15} />}
           </button>
         </form>
+        {!turn.question && renderRadarChips()}
       </div>
 
       <div className="col-span-4 space-y-5 animate-rise-1">

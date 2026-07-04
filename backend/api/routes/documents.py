@@ -33,19 +33,31 @@ async def upload_document(
 
 @router.get("", response_model=DocumentListOut)
 async def list_documents(
-    knowledge_base_id: uuid.UUID,
     user: CurrentUser,
     db: DbDep,
+    knowledge_base_id: uuid.UUID | None = None,
     limit: int = 50,
     offset: int = 0,
 ) -> DocumentListOut:
-    kb = await KnowledgeBaseRepository(db).get(knowledge_base_id, user.organization_id)
-    if kb is None:
-        raise NotFoundError("Knowledge base not found")
-    docs, total = await DocumentRepository(db).list_by_kb(
-        knowledge_base_id, limit=min(limit, 200), offset=offset
+    repo = DocumentRepository(db)
+    bounded_limit = min(max(limit, 1), 1000)
+    kb_names = {kb.id: kb.name for kb in await KnowledgeBaseRepository(db).list_by_org(user.organization_id)}
+    if knowledge_base_id is not None:
+        kb = await KnowledgeBaseRepository(db).get(knowledge_base_id, user.organization_id)
+        if kb is None:
+            raise NotFoundError("Knowledge base not found")
+        docs, total = await repo.list_by_kb(knowledge_base_id, limit=bounded_limit, offset=offset)
+    else:
+        docs, total = await repo.list_by_org(user.organization_id, limit=bounded_limit, offset=offset)
+    return DocumentListOut(
+        items=[
+            DocumentOut.model_validate(d).model_copy(
+                update={"knowledge_base_name": kb_names.get(d.knowledge_base_id)}
+            )
+            for d in docs
+        ],
+        total=total,
     )
-    return DocumentListOut(items=[DocumentOut.model_validate(d) for d in docs], total=total)
 
 
 @router.get("/{document_id}", response_model=DocumentOut)

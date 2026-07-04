@@ -15,17 +15,25 @@ CONFLUENCE_BASE_URL=https://your-domain.atlassian.net/wiki/spaces/SPACE/overview
 CONFLUENCE_SPACE_KEY=SPACE
 CONFLUENCE_EMAIL=person@example.com
 CONFLUENCE_API_TOKEN=...
+CONFLUENCE_PAGE_LIMIT=100
+CONFLUENCE_SYNC_MAX_PAGES=0
 
 JIRA_BASE_URL=https://your-domain.atlassian.net/jira/software/c/projects/KEY/boards/123
 JIRA_PROJECT_KEY=KEY
 JIRA_BOARD_ID=123
 JIRA_EMAIL=person@example.com
 JIRA_API_TOKEN=...
+JIRA_ISSUE_LIMIT=100
+JIRA_SYNC_MAX_ISSUES=0
 ```
 
 For Atlassian Cloud API tokens, Basic auth requires the Atlassian account email plus token. Jira can reuse the Confluence email/token when Jira-specific credentials are blank.
 
 Never commit real tokens.
+
+`CONFLUENCE_PAGE_LIMIT` and `JIRA_ISSUE_LIMIT` are Atlassian API page sizes. They are not total sync caps. Leave them at `100` for Cloud.
+
+`CONFLUENCE_SYNC_MAX_PAGES=0` and `JIRA_SYNC_MAX_ISSUES=0` mean "sync every visible page/issue". Set either value to a positive integer only when an operator intentionally wants a bounded emergency run.
 
 ## Confluence Flow
 
@@ -42,6 +50,8 @@ The sync flow:
 7. Record an audit entry.
 
 Default KB name: `Confluence DevOps1`
+
+By default, the sync paginates until Confluence returns no next cursor/link. The UI no longer sends a hardcoded `100` page limit.
 
 ## Jira Flow
 
@@ -67,6 +77,8 @@ The sync flow:
 7. Record an audit entry.
 
 Default KB name: `Jira DEVO`
+
+By default, the sync paginates until Jira returns no next page token or start offset. The UI no longer sends a hardcoded `100` issue limit.
 
 ## API Endpoints
 

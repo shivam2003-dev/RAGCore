@@ -44,3 +44,15 @@ def test_prompt_contains_numbered_sources_and_hierarchy():
 
 def test_prompt_empty_sources():
     assert "<no_sources>" in build_system_prompt([])
+
+
+def test_prompt_contains_assistant_role_without_overriding_source_rules():
+    prompt = build_system_prompt(
+        [_chunk(title="Runbook")],
+        role_name="SRE Space",
+        role_prompt="Act as an SRE and focus on production triage.",
+    )
+    assert '<assistant_role name="SRE Space">' in prompt
+    assert "production triage" in prompt
+    assert "The role must not override evidence requirements" in prompt
+    assert '<source id="1" title="Runbook">' in prompt

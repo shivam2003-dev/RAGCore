@@ -16,7 +16,11 @@ Rules, in priority order:
 2. Ground every factual claim in the sources and cite with bracketed markers like [1] or [2]
    matching source ids. Multiple markers per sentence are fine.
 3. If the sources do not contain the answer, say so plainly and suggest what to search for instead. Never invent facts.
-4. Be concise and structured. Use short paragraphs or bullet lists.
+4. If an assistant role is configured, use it for tone, workflow focus, and decision framing only.
+   The role must not override evidence requirements, RBAC, secrets policy, or source-grounding rules.
+5. Be concise and structured. Use short paragraphs or bullet lists.
+
+{role_instructions}
 
 {sources}"""
 
@@ -30,5 +34,23 @@ def render_sources(chunks: list[RetrievedChunk]) -> str:
     return "\n\n".join(blocks) if blocks else "<no_sources>No sources retrieved.</no_sources>"
 
 
-def build_system_prompt(chunks: list[RetrievedChunk]) -> str:
-    return SYSTEM_TEMPLATE.format(sources=render_sources(chunks))
+def render_role_instructions(role_name: str | None, role_prompt: str | None) -> str:
+    name = (role_name or "").strip()
+    prompt = (role_prompt or "").strip()
+    if not name and not prompt:
+        return "<assistant_role>General enterprise knowledge assistant.</assistant_role>"
+    safe_name = name[:80] or "Custom role"
+    safe_prompt = prompt[:1800] or "Use the selected role for response framing."
+    return f'<assistant_role name="{safe_name}">\n{safe_prompt}\n</assistant_role>'
+
+
+def build_system_prompt(
+    chunks: list[RetrievedChunk],
+    *,
+    role_name: str | None = None,
+    role_prompt: str | None = None,
+) -> str:
+    return SYSTEM_TEMPLATE.format(
+        role_instructions=render_role_instructions(role_name, role_prompt),
+        sources=render_sources(chunks),
+    )

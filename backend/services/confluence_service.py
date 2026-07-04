@@ -122,8 +122,10 @@ class ConfluenceClient:
             url=self._absolute_url(_str(links.get("webui")) or f"/spaces/{space_key}/overview"),
         )
 
-    async def iter_pages(self, space: ConfluenceSpace, max_pages: int) -> AsyncIterator[ConfluencePage]:
-        page_limit = max(1, min(self._settings.confluence_page_limit, 100, max_pages))
+    async def iter_pages(self, space: ConfluenceSpace, max_pages: int | None = None) -> AsyncIterator[ConfluencePage]:
+        page_limit = max(1, min(self._settings.confluence_page_limit, 100))
+        if max_pages is not None:
+            page_limit = min(page_limit, max(1, max_pages))
         path_or_url = f"api/v2/spaces/{space.id}/pages"
         params: dict[str, str | int] | None = {
             "limit": page_limit,
@@ -132,7 +134,7 @@ class ConfluenceClient:
         }
         fetched = 0
 
-        while fetched < max_pages:
+        while max_pages is None or fetched < max_pages:
             payload = await self._get(path_or_url, params=params)
             rows = _list_of_dicts(payload.get("results"))
             for row in rows:
@@ -141,7 +143,7 @@ class ConfluenceClient:
                     page = await self.get_page_by_id(page.id)
                 yield page
                 fetched += 1
-                if fetched >= max_pages:
+                if max_pages is not None and fetched >= max_pages:
                     return
 
             next_url = _next_link(payload)
@@ -243,7 +245,7 @@ class ConfluenceSyncService:
     ) -> ConfluenceSyncResult:
         self._validate_config()
         kb = await self._resolve_kb(user=user, kb_id=kb_id)
-        limit = min(max_pages or self._settings.confluence_page_limit, 500)
+        limit = _sync_limit(max_pages, self._settings.confluence_sync_max_pages)
         documents: list[SyncedConfluenceDocument] = []
 
         async with ConfluenceClient(self._settings) as client:
@@ -375,6 +377,12 @@ def confluence_config_status(settings: Settings) -> JsonDict:
         "token_configured": bool(token),
         "requires_email": mode == "basic" or (mode == "auto" and bool(token) and not email),
     }
+
+
+def _sync_limit(requested: int | None, configured: int) -> int | None:
+    if requested is not None:
+        return requested
+    return configured if configured > 0 else None
 
 
 def normalize_confluence_wiki_root(raw_url: str) -> str:

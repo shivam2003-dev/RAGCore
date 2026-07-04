@@ -4,11 +4,11 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { Cloud, Clock, Database, FileText, Loader2, Plus, RefreshCw, ShieldCheck, SquareKanban } from "lucide-react";
 import { Badge, Card, CardLink, GhostButton, PageHeader, PrimaryButton } from "@/components/ui";
-import { kimbalApi, type ConfluenceStatus, type DocumentOut, type JiraStatus, type KnowledgeBase } from "@/lib/kimbal-api";
+import { kimbalApi, type ConfluenceStatus, type JiraStatus, type KnowledgeBase } from "@/lib/kimbal-api";
 
 type SourceRow = {
   kb: KnowledgeBase;
-  docs: DocumentOut[];
+  docsTotal: number;
 };
 
 const LEGACY_SEED_KB_NAME = "Kimbal Local Runbook";
@@ -33,8 +33,8 @@ export function KnowledgeSourcesClient() {
       ]);
       const rows = await Promise.all(
         kbs.map(async (kb) => {
-          const docs = await kimbalApi.listDocuments(kb.id);
-          return { kb, docs: docs.items };
+          const docs = await kimbalApi.listDocuments(kb.id, 1);
+          return { kb, docsTotal: docs.total };
         })
       );
       const visibleRows = rows.filter(({ kb }) => kb.name !== LEGACY_SEED_KB_NAME);
@@ -54,7 +54,7 @@ export function KnowledgeSourcesClient() {
     setStatus("Syncing Confluence DevOps1");
     try {
       await kimbalApi.ensureSession();
-      const result = await kimbalApi.syncConfluence(undefined, 100);
+      const result = await kimbalApi.syncConfluence();
       setStatus(
         `Confluence sync queued: ${result.created} created, ${result.updated} updated, ${result.skipped} unchanged`
       );
@@ -71,7 +71,7 @@ export function KnowledgeSourcesClient() {
     setStatus("Syncing Jira DEVO");
     try {
       await kimbalApi.ensureSession();
-      const result = await kimbalApi.syncJira(undefined, 100);
+      const result = await kimbalApi.syncJira();
       setStatus(
         `Jira sync queued: ${result.created} created, ${result.updated} updated, ${result.skipped} unchanged`
       );
@@ -201,7 +201,7 @@ export function KnowledgeSourcesClient() {
       </Card>
 
       <div className="grid grid-cols-3 gap-5 animate-rise-1">
-        {sources.map(({ kb, docs }) => (
+        {sources.map(({ kb, docsTotal }) => (
           <Card key={kb.id} className="group p-5 transition hover:shadow-[var(--shadow-pop)]">
             <div className="flex items-start justify-between">
               <span className="flex h-11 w-11 items-center justify-center rounded-[13px] border border-line bg-white text-brand-500 shadow-[var(--shadow-card)]">
@@ -215,10 +215,10 @@ export function KnowledgeSourcesClient() {
               <Link
                 href={documentsHref(kb)}
                 className="inline-flex items-center gap-1.5 rounded-md transition hover:text-brand-600"
-                aria-label={`View ${docs.length} documents in ${kb.name}`}
+                aria-label={`View ${docsTotal} documents in ${kb.name}`}
               >
                 <FileText size={13} className="text-ink-400" />
-                <strong className="font-semibold text-ink-900">{docs.length}</strong> docs
+                <strong className="font-semibold text-ink-900">{docsTotal}</strong> docs
               </Link>
               <span className="inline-flex items-center gap-1.5">
                 <Clock size={13} className="text-ink-400" />

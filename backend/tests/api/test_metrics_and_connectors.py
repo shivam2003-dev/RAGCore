@@ -44,4 +44,23 @@ async def test_web_search_and_chat_capabilities_are_explicit(client, auth_header
     chat_body = chat.json()
     assert chat_body["answer_modes"] == ["fast", "council"]
     assert chat_body["council_configured"] is False
+    assert isinstance(chat_body["council_available_models"], list)
     assert "key" not in str(chat_body).lower()
+
+
+async def test_role_prompt_generation_uses_configured_llm(client, auth_headers):
+    resp = await client.post(
+        "/api/v1/chat/roles/generate",
+        json={
+            "name": "Security Architect",
+            "goal": "triage zero-day risk and produce remediation plans",
+            "source_focus": "security Jira, Confluence advisories, and web alerts",
+            "output_style": "risk summary, evidence, next actions",
+        },
+        headers=auth_headers,
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["name"] == "Security Architect"
+    assert "zero-day risk" in body["prompt"]
+    assert "source-grounding" in body["prompt"]

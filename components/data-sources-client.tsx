@@ -15,6 +15,11 @@ function formatDate(value: string | null) {
   return new Date(value).toLocaleString([], { dateStyle: "medium", timeStyle: "short" });
 }
 
+function pendingDocuments(source: { documents: number; ready_documents: number; failed_documents: number } | undefined) {
+  if (!source) return 0;
+  return Math.max(0, source.documents - source.ready_documents - source.failed_documents);
+}
+
 export function DataSourcesClient() {
   const { metrics, confluence, jira, loading, error, refresh } = useLiveMetrics();
   const [syncing, setSyncing] = useState(false);
@@ -25,7 +30,7 @@ export function DataSourcesClient() {
     setSyncing(true);
     setStatus("Syncing Confluence");
     try {
-      const result = await kimbalApi.syncConfluence(undefined, 100);
+      const result = await kimbalApi.syncConfluence();
       setStatus(`${result.total_pages} Confluence pages queued`);
       await refresh();
     } catch (cause) {
@@ -39,7 +44,7 @@ export function DataSourcesClient() {
     setSyncingJira(true);
     setStatus("Syncing Jira");
     try {
-      const result = await kimbalApi.syncJira(undefined, 100);
+      const result = await kimbalApi.syncJira();
       setStatus(`${result.total_issues} Jira issues queued`);
       await refresh();
     } catch (cause) {
@@ -52,6 +57,10 @@ export function DataSourcesClient() {
   const confluenceSource = metrics?.sources.find((source) => source.name.toLowerCase() === "confluence");
   const jiraSource = metrics?.sources.find((source) => source.name.toLowerCase() === "jira");
   const visibleSources = metrics?.sources.filter((source) => !["confluence", "jira"].includes(source.name.toLowerCase())) ?? [];
+  const totalPending = Math.max(
+    0,
+    (metrics?.documents_total ?? 0) - (metrics?.documents_ready ?? 0) - (metrics?.documents_failed ?? 0)
+  );
 
   return (
     <div>
@@ -92,9 +101,9 @@ export function DataSourcesClient() {
 
       <div className="grid grid-cols-4 gap-5 animate-rise-1">
         {[
-          { label: "Indexed source types", value: metrics?.sources.length ?? 0 },
-          { label: "Documents indexed", value: metrics?.documents_total ?? 0 },
+          { label: "Documents synced", value: metrics?.documents_total ?? 0 },
           { label: "Ready documents", value: metrics?.documents_ready ?? 0 },
+          { label: "Pending ingestion", value: totalPending },
           { label: "Failed documents", value: metrics?.documents_failed ?? 0 },
         ].map((stat) => (
           <Card key={stat.label} className="p-5">
@@ -120,6 +129,7 @@ export function DataSourcesClient() {
               <th className="py-3 pl-5 font-bold">Source</th>
               <th className="font-bold">Documents</th>
               <th className="font-bold">Ready</th>
+              <th className="font-bold">Pending</th>
               <th className="font-bold">Failed</th>
               <th className="font-bold">Last local update</th>
               <th className="pr-5 font-bold">Status</th>
@@ -138,6 +148,7 @@ export function DataSourcesClient() {
                 </td>
                 <td className="text-[13px] font-semibold text-ink-900">{number(confluenceSource?.documents ?? 0)}</td>
                 <td className="text-[13px] text-ink-700">{number(confluenceSource?.ready_documents ?? 0)}</td>
+                <td className="text-[13px] text-ink-700">{number(pendingDocuments(confluenceSource))}</td>
                 <td className="text-[13px] text-ink-700">{number(confluenceSource?.failed_documents ?? 0)}</td>
                 <td className="text-[13px] text-ink-500">{formatDate(confluenceSource?.last_updated_at ?? null)}</td>
                 <td className="pr-5">
@@ -162,6 +173,7 @@ export function DataSourcesClient() {
                 </td>
                 <td className="text-[13px] font-semibold text-ink-900">{number(jiraSource?.documents ?? 0)}</td>
                 <td className="text-[13px] text-ink-700">{number(jiraSource?.ready_documents ?? 0)}</td>
+                <td className="text-[13px] text-ink-700">{number(pendingDocuments(jiraSource))}</td>
                 <td className="text-[13px] text-ink-700">{number(jiraSource?.failed_documents ?? 0)}</td>
                 <td className="text-[13px] text-ink-500">{formatDate(jiraSource?.last_updated_at ?? null)}</td>
                 <td className="pr-5">
@@ -184,6 +196,7 @@ export function DataSourcesClient() {
                 </td>
                 <td className="text-[13px] font-semibold text-ink-900">{number(source.documents)}</td>
                 <td className="text-[13px] text-ink-700">{number(source.ready_documents)}</td>
+                <td className="text-[13px] text-ink-700">{number(pendingDocuments(source))}</td>
                 <td className="text-[13px] text-ink-700">{number(source.failed_documents)}</td>
                 <td className="text-[13px] text-ink-500">{formatDate(source.last_updated_at)}</td>
                 <td className="pr-5">
@@ -197,7 +210,7 @@ export function DataSourcesClient() {
 
             {!loading && !confluence && !jira && !visibleSources.length && (
               <tr>
-                <td className="px-5 py-6 text-[13px] text-ink-500" colSpan={6}>
+                <td className="px-5 py-6 text-[13px] text-ink-500" colSpan={7}>
                   No sources are configured or indexed yet.
                 </td>
               </tr>

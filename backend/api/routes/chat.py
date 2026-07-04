@@ -5,7 +5,7 @@ from collections.abc import AsyncIterator
 from fastapi import APIRouter
 from sse_starlette.sse import EventSourceResponse
 
-from api.deps import ChatServiceDep, CurrentUser, DbDep, SettingsDep
+from api.deps import ChatServiceDep, CurrentUser, DbDep, LLMDep, SettingsDep
 from api.schemas import (
     AskRequest,
     ChatCapabilitiesOut,
@@ -13,9 +13,12 @@ from api.schemas import (
     ConversationOut,
     FeedbackCreate,
     MessageOut,
+    RoleGenerateRequest,
+    RoleGenerateResponse,
 )
-from core.exceptions import AppError, NotFoundError
+from core.exceptions import AppError, NotFoundError, ProviderError
 from database.base import utcnow
+from llm.base import ChatMessage, LLMProvider, LLMRequest
 from models import Feedback
 from repositories.conversations import (
     ConversationRepository,
@@ -48,9 +51,45 @@ async def chat_capabilities(_user: CurrentUser, settings: SettingsDep) -> ChatCa
         answer_modes=["fast", "council"],
         council_configured=status.configured,
         council_models=status.models,
+        council_available_models=status.available_models,
         council_chair_model=status.chair_model,
         council_reason=status.reason,
     )
+
+
+@router.post("/chat/roles/generate", response_model=RoleGenerateResponse)
+async def generate_role_prompt(
+    body: RoleGenerateRequest, _user: CurrentUser, llm: LLMDep
+) -> RoleGenerateResponse:
+    system = (
+        "You are the Kimbal role prompt generator. Return valid JSON only with keys "
+        '"name" and "prompt". Build a safe background role prompt for an enterprise '
+        "RAG assistant. The role may guide persona, source preference, workflow, and "
+        "format, but it must never override RBAC, citation, source-grounding, secret "
+        "handling, PII, or security rules. Keep prompt under 1700 characters."
+    )
+    payload = {
+        "name": body.name,
+        "goal": body.goal,
+        "source_focus": body.source_focus,
+        "output_style": body.output_style,
+    }
+    raw = await _collect_llm_text(
+        llm,
+        LLMRequest(
+            system=system,
+            messages=[
+                ChatMessage(
+                    role="user",
+                    content=f"Create a reusable role prompt from this JSON:\n{json.dumps(payload)}",
+                )
+            ],
+            max_tokens=650,
+            temperature=0.2,
+        ),
+    )
+    name, prompt = _parse_role_generation(raw=raw, fallback_name=body.name)
+    return RoleGenerateResponse(name=name, prompt=prompt)
 
 
 @router.get("/conversations/{conversation_id}/messages", response_model=list[MessageOut])
@@ -89,6 +128,10 @@ async def ask(
                 regenerate=body.regenerate,
                 source_mode=body.source_mode,
                 answer_mode=body.answer_mode,
+                assistant_role=body.assistant_role,
+                assistant_role_prompt=body.assistant_role_prompt,
+                council_models=body.council_models,
+                council_chair_model=body.council_chair_model,
             ):
                 yield {"event": event.type, "data": json.dumps(event.data)}
         except AppError as exc:
@@ -117,3 +160,34 @@ async def submit_feedback(body: FeedbackCreate, user: CurrentUser, db: DbDep) ->
     )
     await db.commit()
     return {"status": "recorded"}
+
+
+async def _collect_llm_text(llm: LLMProvider, request: LLMRequest) -> str:
+    parts: list[str] = []
+    async for delta in llm.stream(request):
+        if delta.text:
+            parts.append(delta.text)
+    return "".join(parts).strip()
+
+
+def _parse_role_generation(*, raw: str, fallback_name: str) -> tuple[str, str]:
+    text = raw.strip()
+    try:
+        parsed = json.loads(text)
+    except json.JSONDecodeError:
+        start = text.find("{")
+        end = text.rfind("}")
+        if start < 0 or end <= start:
+            raise ProviderError("Role generator returned invalid JSON") from None
+        try:
+            parsed = json.loads(text[start : end + 1])
+        except json.JSONDecodeError as exc:
+            raise ProviderError("Role generator returned invalid JSON") from exc
+
+    if not isinstance(parsed, dict):
+        raise ProviderError("Role generator returned invalid JSON")
+    name = str(parsed.get("name") or fallback_name).strip()[:80]
+    prompt = str(parsed.get("prompt") or "").strip()[:1800]
+    if not name or not prompt:
+        raise ProviderError("Role generator returned an empty role prompt")
+    return name, prompt

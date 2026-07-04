@@ -1,14 +1,15 @@
 "use client";
 
-import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
+import { ChangeEvent, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { ArrowUpDown, Eye, FileText, Loader2, MoreHorizontal, RefreshCw, Search, Trash2, Upload } from "lucide-react";
-import { Card, PageHeader, PrimaryButton, GhostButton, Badge, cx } from "@/components/ui";
+import { Card, PageHeader, PrimaryButton, GhostButton, Badge } from "@/components/ui";
 import { kimbalApi, type DocumentOut, type KnowledgeBase } from "@/lib/kimbal-api";
 
-const freshTone = { indexed: "green", uploaded: "amber", failed: "red", deleted: "gray" } as const;
+const freshTone = { ready: "green", processing: "amber", uploaded: "amber", failed: "red", deleted: "gray" } as const;
 const LEGACY_SEED_KB_NAME = "Kimbal Local Runbook";
+const PAGE_SIZE = 500;
 
 export function DocumentsClient() {
   const searchParams = useSearchParams();
@@ -18,11 +19,13 @@ export function DocumentsClient() {
   const [kb, setKb] = useState<KnowledgeBase | null>(null);
   const [knowledgeBases, setKnowledgeBases] = useState<KnowledgeBase[]>([]);
   const [docs, setDocs] = useState<Array<DocumentOut & { knowledge_base_name: string }>>([]);
+  const [totalDocs, setTotalDocs] = useState(0);
+  const [page, setPage] = useState(0);
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState("Loading documents");
   const [busy, setBusy] = useState(false);
 
-  async function refresh() {
+  async function refresh(pageOverride = page) {
     setBusy(true);
     try {
       await kimbalApi.ensureSession();
@@ -36,15 +39,20 @@ export function DocumentsClient() {
       }
       setKnowledgeBases(visibleKbs);
       setKb(visibleKbs.find((item) => item.name === "Kimbal Local Uploads") ?? visibleKbs[0]);
-      const lists = await Promise.all(
-        visibleKbs.map(async (item) => {
-          const list = await kimbalApi.listDocuments(item.id);
-          return list.items.map((doc) => ({ ...doc, knowledge_base_name: item.name }));
-        })
-      );
-      const allDocs = lists.flat().sort((a, b) => b.updated_at.localeCompare(a.updated_at));
-      setDocs(allDocs);
-      setStatus(`${allDocs.length} documents loaded`);
+      const kbById = new Map(visibleKbs.map((item) => [item.id, item.name]));
+      const sourceKb = sourceFilter
+        ? visibleKbs.find((item) => item.name.toLowerCase() === sourceFilter.toLowerCase())
+        : undefined;
+      const selectedKbId = kbFilter || sourceKb?.id;
+      const list = await kimbalApi.listDocuments(selectedKbId || undefined, PAGE_SIZE, pageOverride * PAGE_SIZE);
+      const pageDocs = list.items.map((doc) => ({
+        ...doc,
+        knowledge_base_name: doc.knowledge_base_name ?? kbById.get(doc.knowledge_base_id) ?? "Unknown source",
+      }));
+      setDocs(pageDocs);
+      setTotalDocs(list.total);
+      setPage(pageOverride);
+      setStatus(`${list.total} documents available across all pages`);
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "Failed to load documents");
     } finally {
@@ -61,7 +69,7 @@ export function DocumentsClient() {
       const nextKb = kb?.name === "Kimbal Local Uploads" ? kb : await kimbalApi.ensureUploadKnowledgeBase();
       await kimbalApi.uploadDocument(nextKb.id, file);
       event.target.value = "";
-      await refresh();
+      await refresh(0);
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "Upload failed");
       setBusy(false);
@@ -71,42 +79,44 @@ export function DocumentsClient() {
   async function reindex(doc: DocumentOut) {
     setStatus(`Re-indexing ${doc.title}`);
     await kimbalApi.reindexDocument(doc.id);
-    await refresh();
+    await refresh(page);
   }
 
   async function remove(doc: DocumentOut) {
     setStatus(`Deleting ${doc.title}`);
     await kimbalApi.deleteDocument(doc.id);
-    await refresh();
+    await refresh(page);
   }
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
-      void refresh();
+      void refresh(0);
     }, 0);
     return () => window.clearTimeout(timer);
-  }, []);
+    // Reload when URL source filters change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [kbFilter, sourceFilter]);
 
-  const activeFilterLabel = useMemo(() => {
-    if (kbFilter) return knowledgeBases.find((item) => item.id === kbFilter)?.name ?? "Selected source";
-    if (sourceFilter) return sourceFilter;
-    return "";
-  }, [kbFilter, knowledgeBases, sourceFilter]);
+  const activeFilterLabel = kbFilter
+    ? (knowledgeBases.find((item) => item.id === kbFilter)?.name ?? "Selected source")
+    : sourceFilter;
 
-  const filtered = useMemo(() => {
-    const needle = query.toLowerCase().trim();
-    return docs.filter((doc) => {
-      if (kbFilter && doc.knowledge_base_id !== kbFilter) return false;
-      if (sourceFilter && doc.knowledge_base_name.toLowerCase() !== sourceFilter.toLowerCase()) return false;
-      if (!needle) return true;
-      return (
-        doc.title.toLowerCase().includes(needle) ||
-        doc.status.toLowerCase().includes(needle) ||
-        doc.source_type.toLowerCase().includes(needle) ||
-        doc.knowledge_base_name.toLowerCase().includes(needle)
-      );
-    });
-  }, [docs, kbFilter, query, sourceFilter]);
+  const pageCount = Math.max(1, Math.ceil(totalDocs / PAGE_SIZE));
+  const canPrevious = page > 0;
+  const canNext = page + 1 < pageCount;
+
+  const needle = query.toLowerCase().trim();
+  const filtered = docs.filter((doc) => {
+    if (kbFilter && doc.knowledge_base_id !== kbFilter) return false;
+    if (sourceFilter && doc.knowledge_base_name.toLowerCase() !== sourceFilter.toLowerCase()) return false;
+    if (!needle) return true;
+    return (
+      doc.title.toLowerCase().includes(needle) ||
+      doc.status.toLowerCase().includes(needle) ||
+      doc.source_type.toLowerCase().includes(needle) ||
+      doc.knowledge_base_name.toLowerCase().includes(needle)
+    );
+  });
 
   return (
     <div>
@@ -145,11 +155,11 @@ export function DocumentsClient() {
             <input
               value={query}
               onChange={(event) => setQuery(event.target.value)}
-              placeholder="Search documents by title or status..."
+              placeholder="Search loaded documents by title or status..."
               className="min-w-0 flex-1 bg-transparent text-[13.5px] outline-none placeholder:text-ink-400"
             />
           </label>
-          <GhostButton onClick={() => void refresh()} disabled={busy}>
+          <GhostButton onClick={() => void refresh(page)} disabled={busy}>
             {busy ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />} Refresh
           </GhostButton>
           <GhostButton onClick={() => setDocs((items) => [...items].sort((a, b) => b.updated_at.localeCompare(a.updated_at)))}>
@@ -234,22 +244,29 @@ export function DocumentsClient() {
 
         <div className="flex items-center justify-between border-t border-line px-5 py-3.5 text-[12.5px] text-ink-500">
           <span>
-            Showing {filtered.length} of {docs.length} indexed documents
+            Showing {filtered.length} of {totalDocs} documents
             {activeFilterLabel ? ` · filtered by ${activeFilterLabel}` : ""}
           </span>
           <div className="flex gap-1.5">
-            {["1"].map((page, index) => (
-              <button
-                key={page}
-                type="button"
-                className={cx(
-                  "flex h-8 min-w-8 items-center justify-center rounded-[8px] px-2 text-[12.5px] font-semibold transition",
-                  index === 0 ? "bg-brand-500 text-white" : "text-ink-500 hover:bg-canvas"
-                )}
-              >
-                {page}
-              </button>
-            ))}
+            <button
+              type="button"
+              disabled={!canPrevious || busy}
+              onClick={() => void refresh(page - 1)}
+              className="flex h-8 min-w-8 items-center justify-center rounded-[8px] px-2 text-[12.5px] font-semibold text-ink-500 transition hover:bg-canvas disabled:cursor-not-allowed disabled:opacity-45"
+            >
+              Previous
+            </button>
+            <span className="flex h-8 min-w-8 items-center justify-center rounded-[8px] bg-brand-500 px-2 text-[12.5px] font-semibold text-white">
+              {page + 1} / {pageCount}
+            </span>
+            <button
+              type="button"
+              disabled={!canNext || busy}
+              onClick={() => void refresh(page + 1)}
+              className="flex h-8 min-w-8 items-center justify-center rounded-[8px] px-2 text-[12.5px] font-semibold text-ink-500 transition hover:bg-canvas disabled:cursor-not-allowed disabled:opacity-45"
+            >
+              Next
+            </button>
           </div>
         </div>
       </Card>
