@@ -17,6 +17,7 @@ import {
   Maximize2,
   MessageSquarePlus,
   Minimize2,
+  Newspaper,
   PanelLeftClose,
   PanelLeftOpen,
   PanelRight,
@@ -32,6 +33,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { Card, CardLink, GhostButton, cx } from "@/components/ui";
+import { DiscoverClient } from "@/components/discover-client";
 import {
   kimbalApi,
   type AssistantRoleConfig,
@@ -463,7 +465,7 @@ export function AskClient() {
   const [councilChairModel, setCouncilChairModel] = useState("");
   const [viewMode, setViewMode] = useState<"workbench" | "focus">("focus");
   const [focusRailExpanded, setFocusRailExpanded] = useState(false);
-  const [focusDrawer, setFocusDrawer] = useState<"sources" | "history" | null>(null);
+  const [focusDrawer, setFocusDrawer] = useState<"sources" | "history" | "discover" | null>(null);
   const [highlightedMarker, setHighlightedMarker] = useState<number | null>(null);
   const [modePanel, setModePanel] = useState<"web" | "council" | null>(null);
   const [selectedSpaceId, setSelectedSpaceId] = useState<OrgSpaceId>("devops");
@@ -1441,6 +1443,19 @@ export function AskClient() {
               <BookOpen size={18} />
               {focusRailExpanded && "Sources"}
             </button>
+            <button
+              type="button"
+              onClick={() => setFocusDrawer(focusDrawer === "discover" ? null : "discover")}
+              title="Discover"
+              className={cx(
+                "flex h-10 items-center gap-3 rounded-full transition hover:bg-white hover:shadow-[var(--shadow-card)]",
+                focusRailExpanded ? "w-full px-3 text-[13px] font-semibold" : "w-10 justify-center",
+                focusDrawer === "discover" ? "bg-white text-ink-900 shadow-[var(--shadow-card)]" : "text-ink-500"
+              )}
+            >
+              <Newspaper size={18} />
+              {focusRailExpanded && "Discover"}
+            </button>
           </div>
           {focusRailExpanded && (
             <div className="mt-8 w-full space-y-3 text-[12.5px] font-semibold text-ink-500">
@@ -1594,12 +1609,14 @@ export function AskClient() {
             <div className="flex items-start justify-between gap-3">
               <div>
                 <p className="text-[17px] font-bold text-ink-900">
-                  {focusDrawer === "sources" ? "Sources" : "Past Chats"}
+                  {focusDrawer === "sources" ? "Sources" : focusDrawer === "discover" ? "Discover" : "Past Chats"}
                 </p>
                 <p className="mt-1 text-[12.5px] text-ink-500">
                   {focusDrawer === "sources"
                     ? "Current answer evidence and web links."
-                    : "Backend conversation history."}
+                    : focusDrawer === "discover"
+                      ? "Live department updates and alerts."
+                      : "Backend conversation history."}
                 </p>
               </div>
               <button
@@ -1611,7 +1628,7 @@ export function AskClient() {
                 <Minimize2 size={17} />
               </button>
             </div>
-            {focusDrawer === "sources" ? renderSourcesList(12) : renderHistoryList()}
+            {focusDrawer === "sources" ? renderSourcesList(12) : focusDrawer === "discover" ? <div className="mt-5"><DiscoverClient surface="ask" /></div> : renderHistoryList()}
           </aside>
         )}
       </div>
@@ -1735,6 +1752,8 @@ export function AskClient() {
       </div>
 
       <div className="col-span-4 space-y-5 animate-rise-1">
+        <DiscoverClient surface="ask" />
+
         <Card className="p-5">
           <div className="flex items-center justify-between">
             <p className="flex items-center gap-2 text-[15px] font-bold text-ink-900">

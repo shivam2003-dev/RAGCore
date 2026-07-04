@@ -2,7 +2,9 @@
 
 import {
   Activity,
+  AlertCircle,
   CircleCheck,
+  Clock3,
   Database,
   FileText,
   HelpCircle,
@@ -12,6 +14,7 @@ import {
   Plug,
   Sparkles,
   Target,
+  type LucideIcon,
 } from "lucide-react";
 import { Badge, Card, CardLink, CardTitle, Donut, ProgressBar } from "@/components/ui";
 import { HomeAsk } from "@/components/home-ask";
@@ -32,6 +35,15 @@ function timeAgo(value: string) {
   return `${Math.floor(hours / 24)} day ago`;
 }
 
+const sourceColors = ["#5b5ceb", "#38bdf8", "#10b981", "#f59e0b", "#8583f1", "#94a3b8"];
+
+type HealthRow = {
+  label: string;
+  value: number;
+  icon: LucideIcon;
+  tone: string;
+};
+
 export function HomeClient() {
   const { metrics, loading, error } = useLiveMetrics();
   const readyRate = metrics?.documents_total
@@ -40,13 +52,18 @@ export function HomeClient() {
   const feedbackRate = metrics?.feedback.helpful_rate != null
     ? Math.round(metrics.feedback.helpful_rate * 100)
     : null;
-  const sourceTotal = metrics?.sources.reduce((sum, source) => sum + source.documents, 0) ?? 0;
-  const donutData = metrics?.sources.length
-    ? metrics.sources.map((source, index) => ({
-        value: sourceTotal ? Math.max(1, Math.round((source.documents / sourceTotal) * 100)) : 1,
-        color: ["#5b5ceb", "#38bdf8", "#10b981", "#f59e0b", "#8583f1", "#cbd5e1"][index % 6],
+  const readySources = metrics?.sources.filter((source) => source.ready_documents > 0) ?? [];
+  const donutData = readySources.length
+    ? readySources.map((source, index) => ({
+        value: source.ready_documents,
+        color: sourceColors[index % sourceColors.length],
       }))
     : [];
+  const healthRows: HealthRow[] = [
+    { label: "Ready documents", value: metrics?.documents_ready ?? 0, icon: CircleCheck, tone: "text-emerald-500" },
+    { label: "Pending ingestion", value: metrics?.documents_processing ?? 0, icon: Clock3, tone: "text-amber-500" },
+    { label: "Failed documents", value: metrics?.documents_failed ?? 0, icon: AlertCircle, tone: "text-rose-500" },
+  ];
 
   return (
     <div className="space-y-6">
@@ -72,20 +89,20 @@ export function HomeClient() {
         <Card className="col-span-3 p-5">
           <CardTitle icon={Plug} title="Indexed Sources" tint="bg-brand-50 text-brand-500" />
           <p className="mt-3 text-[26px] font-bold text-ink-900">
-            {loading ? <Loader2 size={22} className="animate-spin text-brand-500" /> : number(metrics?.sources.length ?? 0)}
+            {loading ? <Loader2 size={22} className="animate-spin text-brand-500" /> : number(readySources.length)}
           </p>
-          <p className="text-[12px] text-ink-500">Source types with indexed documents</p>
+          <p className="text-[12px] text-ink-500">Source types with ready indexed documents</p>
           <ul className="mt-3 space-y-2">
-            {metrics?.sources.slice(0, 5).map((source) => (
+            {readySources.slice(0, 5).map((source) => (
               <li key={`${source.name}-${source.source_type}`} className="flex items-center gap-2.5">
                 <Database size={16} className="text-brand-500" />
                 <span className="flex-1 text-[13px] font-medium text-ink-700">{source.name}</span>
                 <span className="rounded-md bg-canvas px-1.5 py-0.5 text-[11.5px] font-semibold text-ink-500">
-                  {number(source.documents)}
+                  {number(source.ready_documents)}
                 </span>
               </li>
             ))}
-            {!loading && !metrics?.sources.length && (
+            {!loading && !readySources.length && (
               <li className="rounded-[10px] bg-canvas px-3 py-2 text-[12.5px] text-ink-500">
                 No documents indexed yet.
               </li>
@@ -185,14 +202,17 @@ export function HomeClient() {
           <div className="mt-5 flex items-center gap-6">
             {donutData.length ? <Donut data={donutData} /> : <div className="h-[128px] w-[128px] rounded-full bg-canvas" />}
             <ul className="flex-1 space-y-2.5">
-              {metrics?.sources.slice(0, 6).map((source) => (
+              {readySources.slice(0, 6).map((source, index) => (
                 <li key={source.name} className="flex items-center gap-2.5 text-[12.5px]">
-                  <span className="h-2.5 w-2.5 rounded-full bg-brand-400" />
+                  <span
+                    className="h-2.5 w-2.5 rounded-full"
+                    style={{ backgroundColor: sourceColors[index % sourceColors.length] }}
+                  />
                   <span className="flex-1 font-medium text-ink-700">{source.name}</span>
-                  <span className="font-semibold text-ink-500">{number(source.documents)}</span>
+                  <span className="font-semibold text-ink-500">{number(source.ready_documents)}</span>
                 </li>
               ))}
-              {!loading && !metrics?.sources.length && (
+              {!loading && !readySources.length && (
                 <li className="text-[12.5px] text-ink-500">No indexed source mix yet.</li>
               )}
             </ul>
@@ -214,13 +234,9 @@ export function HomeClient() {
             <ProgressBar value={readyRate ?? 0} />
           </div>
           <ul className="mt-4 space-y-3">
-            {[
-              ["Ready documents", metrics?.documents_ready ?? 0],
-              ["Processing documents", metrics?.documents_processing ?? 0],
-              ["Failed documents", metrics?.documents_failed ?? 0],
-            ].map(([label, value]) => (
+            {healthRows.map(({ label, value, icon: Icon, tone }) => (
               <li key={label} className="flex items-center gap-2.5 text-[13px]">
-                <CircleCheck size={15} className="text-emerald-500" />
+                <Icon size={15} className={tone} />
                 <span className="flex-1 font-medium text-ink-700">{label}</span>
                 <span className="font-semibold text-ink-900">{value}</span>
               </li>

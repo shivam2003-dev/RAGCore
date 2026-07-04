@@ -53,7 +53,7 @@ function countLabel(value: number) {
   return new Intl.NumberFormat().format(value);
 }
 
-export function DiscoverClient() {
+export function DiscoverClient({ surface = "page" }: { surface?: "page" | "ask" }) {
   const [department, setDepartment] = useState("for-you");
   const [feed, setFeed] = useState<DiscoverFeed | null>(null);
   const [loading, setLoading] = useState(true);
@@ -94,6 +94,94 @@ export function DiscoverClient() {
     return () => window.clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [department]);
+
+  if (surface === "ask") {
+    const compactItems = [
+      ...(feed?.alerts ?? []),
+      ...(feed?.research ?? []),
+      ...(feed?.articles ?? []),
+    ].filter((item, index, rows) => rows.findIndex((row) => row.id === item.id) === index);
+
+    return (
+      <Card className="p-5">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <p className="flex items-center gap-2 text-[15px] font-bold text-ink-900">
+              <Newspaper size={16} className="text-brand-500" />
+              Discover
+            </p>
+            <p className="mt-1 text-[12.5px] text-ink-500">Live department radar.</p>
+          </div>
+          <button
+            type="button"
+            onClick={() => void load(department, true)}
+            disabled={loading || refreshing}
+            className="flex h-8 w-8 items-center justify-center rounded-full border border-line bg-white text-ink-500 transition hover:text-brand-600 disabled:opacity-50"
+            aria-label="Refresh Discover"
+          >
+            {refreshing ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
+          </button>
+        </div>
+
+        <div className="mt-3 flex gap-1.5 overflow-x-auto pb-1">
+          {(departments.length ? departments : fallbackDepartments()).slice(0, 6).map((item) => {
+            const Icon = departmentIcons[item.id] ?? Newspaper;
+            const active = department === item.id;
+            return (
+              <button
+                key={item.id}
+                type="button"
+                onClick={() => setDepartment(item.id)}
+                className={cx(
+                  "inline-flex h-8 shrink-0 items-center gap-1.5 rounded-[9px] px-2.5 text-[12px] font-semibold transition",
+                  active ? "bg-ink-900 text-white" : "bg-canvas text-ink-500 hover:text-ink-900"
+                )}
+              >
+                <Icon size={13} />
+                {item.label}
+              </button>
+            );
+          })}
+        </div>
+
+        {error && <p className="mt-3 rounded-[10px] bg-rose-50 px-3 py-2 text-[12px] text-rose-700">{error}</p>}
+        {feed?.warnings[0] && (
+          <p className="mt-3 rounded-[10px] bg-amber-50 px-3 py-2 text-[12px] text-amber-700">
+            {feed.warnings[0]}
+          </p>
+        )}
+
+        {loading && !feed ? (
+          <div className="mt-4 flex h-24 items-center justify-center rounded-[12px] bg-canvas">
+            <Loader2 size={18} className="animate-spin text-brand-500" />
+          </div>
+        ) : feed?.lead ? (
+          <a href={feed.lead.url} target="_blank" rel="noreferrer" className="mt-4 block rounded-[12px] bg-canvas p-3 transition hover:bg-brand-50">
+            <p className="text-[11.5px] font-semibold text-ink-400">
+              {feed.lead.source || hostLabel(feed.lead.url)} - {compactDate(feed.lead.published_at)}
+            </p>
+            <p className="mt-1 line-clamp-3 text-[13.5px] font-semibold leading-5 text-ink-900">{feed.lead.title}</p>
+            <p className="mt-2 line-clamp-2 text-[12px] leading-5 text-ink-500">{feed.lead.summary}</p>
+          </a>
+        ) : (
+          <p className="mt-4 rounded-[12px] bg-canvas px-3 py-3 text-[12.5px] text-ink-500">
+            No live articles loaded yet.
+          </p>
+        )}
+
+        <div className="mt-3 divide-y divide-line">
+          {compactItems.slice(0, 4).map((item) => (
+            <a key={item.id} href={item.url} target="_blank" rel="noreferrer" className="block py-2.5">
+              <p className="line-clamp-2 text-[12.5px] font-semibold leading-5 text-ink-700 hover:text-brand-500">
+                {item.title}
+              </p>
+              <p className="mt-0.5 text-[11px] text-ink-400">{item.section} - {item.source || hostLabel(item.url)}</p>
+            </a>
+          ))}
+        </div>
+      </Card>
+    );
+  }
 
   return (
     <div className="mx-auto max-w-[1320px] space-y-6">

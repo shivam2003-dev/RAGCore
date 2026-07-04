@@ -30,7 +30,12 @@ async def metrics_overview(user: CurrentUser, db: DbDep) -> MetricsOverviewOut:
             select(
                 func.count(Document.id),
                 func.sum(case((Document.status == DocumentStatus.READY, 1), else_=0)),
-                func.sum(case((Document.status == DocumentStatus.PROCESSING, 1), else_=0)),
+                func.sum(
+                    case(
+                        (Document.status.in_([DocumentStatus.PROCESSING, DocumentStatus.UPLOADED]), 1),
+                        else_=0,
+                    )
+                ),
                 func.sum(case((Document.status == DocumentStatus.FAILED, 1), else_=0)),
             )
             .join(KnowledgeBase, KnowledgeBase.id == Document.knowledge_base_id)
