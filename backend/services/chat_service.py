@@ -409,9 +409,12 @@ class ChatService:
                 total_usage.input_tokens += usage.input_tokens
                 total_usage.output_tokens += usage.output_tokens
 
-        if not candidates:
+        if len(candidates) != len(status.models):
             detail = "; ".join(failures[:3]) or "no candidate answers were returned"
-            raise ProviderError(f"LLM Council failed: {detail}")
+            raise ProviderError(
+                f"LLM Council requires {len(status.models)} response models; "
+                f"received {len(candidates)} candidate answers. {detail}"
+            )
 
         chair_model = status.chair_model or candidates[0][0]
         chair = OpenAICompatLLM(
