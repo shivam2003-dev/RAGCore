@@ -226,6 +226,56 @@ class MetricsOverviewOut(BaseModel):
     top_questions: list[QuestionMetricOut]
 
 
+# --- evals ---
+class EvalScoreOut(BaseModel):
+    id: str
+    label: str
+    value: float | None
+    display: str
+    status: str
+    detail: str
+
+
+class EvalLatencyOut(BaseModel):
+    avg_ms: int | None
+    p50_ms: int | None
+    p95_ms: int | None
+    sample_size: int
+
+
+class EvalModelOut(BaseModel):
+    model: str
+    answers: int
+    avg_latency_ms: int | None
+    citation_coverage: float | None
+    groundedness_score: float | None
+
+
+class EvalRecentAnswerOut(BaseModel):
+    message_id: uuid.UUID
+    conversation_id: uuid.UUID
+    question: str
+    answer_preview: str
+    model: str | None
+    created_at: datetime
+    latency_ms: int | None
+    citations: int
+    groundedness_score: float | None
+    relevance_score: float | None
+
+
+class EvalOverviewOut(BaseModel):
+    generated_at: datetime
+    answers_total: int
+    sample_size: int
+    feedback: FeedbackMetricOut
+    scores: list[EvalScoreOut]
+    latency: EvalLatencyOut
+    models: list[EvalModelOut]
+    recent_answers: list[EvalRecentAnswerOut]
+    methodology: list[str]
+
+
 # --- web search ---
 class WebSearchStatusOut(BaseModel):
     configured: bool

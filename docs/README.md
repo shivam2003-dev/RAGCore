@@ -9,6 +9,7 @@ This folder is the source-safe operator and developer reference for the Kimbal K
 - [Atlassian Read-Only Sync](./ATLASSIAN_READ_ONLY_SYNC.md) - Confluence and Jira connector behavior.
 - [Web Search and Council Mode](./WEB_SEARCH_AND_COUNCIL.md) - optional internet retrieval and multi-model answer synthesis.
 - [Discover](./DISCOVER.md) - live department feeds, alerts, research, and board pulse configuration.
+- [Evals](./EVALS.md) - live RAG answer quality, citation, latency, model, and feedback metrics.
 - [Frontend Behavior](./FRONTEND_BEHAVIOR.md) - navigation, Ask, saved answers, settings, and live metrics.
 - [Security and Secrets](./SECURITY_AND_SECRETS.md) - auth, RBAC, logging, uploads, and env handling.
 - [Operations](./OPERATIONS.md) - local run, production env, Docker, Kubernetes, and observability.
@@ -22,6 +23,6 @@ Kimbal Knowledge Hub is an enterprise knowledge application backed by FastAPI, P
 2. Upload local documents into a separate local uploads knowledge base.
 3. Ask grounded questions across synced knowledge, with streamed answers and citations.
 4. Optionally blend answers with configured web search or use LLM Council mode when configured.
-5. Inspect live metrics, documents, content health, feedback, and access control without fake dashboard numbers.
+5. Inspect live metrics, evals, documents, content health, feedback, and access control without fake dashboard numbers.
 
 The Atlassian connectors only read from production systems. They write synced copies into the local Kimbal database for retrieval.

@@ -465,7 +465,8 @@ export function AskClient() {
   const [councilChairModel, setCouncilChairModel] = useState("");
   const [viewMode, setViewMode] = useState<"workbench" | "focus">("focus");
   const [focusRailExpanded, setFocusRailExpanded] = useState(false);
-  const [focusDrawer, setFocusDrawer] = useState<"sources" | "history" | "discover" | null>(null);
+  const [focusWorkspace, setFocusWorkspace] = useState<"chat" | "discover">("chat");
+  const [focusDrawer, setFocusDrawer] = useState<"sources" | "history" | null>(null);
   const [highlightedMarker, setHighlightedMarker] = useState<number | null>(null);
   const [modePanel, setModePanel] = useState<"web" | "council" | null>(null);
   const [selectedSpaceId, setSelectedSpaceId] = useState<OrgSpaceId>("devops");
@@ -602,6 +603,7 @@ export function AskClient() {
         ? customRole
         : { name: requestSpace.label, prompt: requestSpace.prompt };
     setState("preparing");
+    setFocusWorkspace("chat");
     setError("");
     setFeedback("");
     setActionStatus("");
@@ -687,6 +689,7 @@ export function AskClient() {
   function startNewChat() {
     if (busy) return;
     setConversationId(null);
+    setFocusWorkspace("chat");
     setTurn({ question: "", answer: "", sources: [], timings: {} });
     setInput("");
     setError("");
@@ -698,6 +701,7 @@ export function AskClient() {
 
   async function openConversation(conversation: Conversation) {
     if (busy) return;
+    setFocusWorkspace("chat");
     setOpeningConversationId(conversation.id);
     setConversationId(conversation.id);
     setState("preparing");
@@ -1445,12 +1449,15 @@ export function AskClient() {
             </button>
             <button
               type="button"
-              onClick={() => setFocusDrawer(focusDrawer === "discover" ? null : "discover")}
+              onClick={() => {
+                setFocusDrawer(null);
+                setFocusWorkspace(focusWorkspace === "discover" ? "chat" : "discover");
+              }}
               title="Discover"
               className={cx(
                 "flex h-10 items-center gap-3 rounded-full transition hover:bg-white hover:shadow-[var(--shadow-card)]",
                 focusRailExpanded ? "w-full px-3 text-[13px] font-semibold" : "w-10 justify-center",
-                focusDrawer === "discover" ? "bg-white text-ink-900 shadow-[var(--shadow-card)]" : "text-ink-500"
+                focusWorkspace === "discover" ? "bg-white text-ink-900 shadow-[var(--shadow-card)]" : "text-ink-500"
               )}
             >
               <Newspaper size={18} />
@@ -1503,8 +1510,13 @@ export function AskClient() {
                 <ArrowLeft size={18} />
               </Link>
               <p className="text-[14px] font-semibold text-ink-700">{selectedSpace.label}</p>
+              {focusWorkspace === "discover" && (
+                <span className="rounded-full bg-white px-2.5 py-1 text-[11.5px] font-semibold text-ink-500 shadow-[var(--shadow-card)]">
+                  Discover
+                </span>
+              )}
             </div>
-            {!turn.question && (
+            {!turn.question && focusWorkspace === "chat" && (
               <div className="hidden md:block">{renderSpaceTabs(true)}</div>
             )}
             <div className="flex items-center gap-2">
@@ -1530,6 +1542,11 @@ export function AskClient() {
             </div>
           </div>
 
+          {focusWorkspace === "discover" ? (
+            <section className="mx-auto max-w-[1180px] px-8 pb-12 pt-3">
+              <DiscoverClient />
+            </section>
+          ) : (
           <section className="mx-auto flex min-h-[calc(100vh-86px)] max-w-[920px] flex-col items-center justify-center px-6 pb-12">
             {!turn.question && (
               <div className="mb-8 flex flex-col items-center">
@@ -1602,6 +1619,7 @@ export function AskClient() {
               Kimbal can make mistakes. Please verify.
             </p>
           </section>
+          )}
         </main>
 
         {focusDrawer && (
@@ -1609,14 +1627,12 @@ export function AskClient() {
             <div className="flex items-start justify-between gap-3">
               <div>
                 <p className="text-[17px] font-bold text-ink-900">
-                  {focusDrawer === "sources" ? "Sources" : focusDrawer === "discover" ? "Discover" : "Past Chats"}
+                  {focusDrawer === "sources" ? "Sources" : "Past Chats"}
                 </p>
                 <p className="mt-1 text-[12.5px] text-ink-500">
                   {focusDrawer === "sources"
                     ? "Current answer evidence and web links."
-                    : focusDrawer === "discover"
-                      ? "Live department updates and alerts."
-                      : "Backend conversation history."}
+                    : "Backend conversation history."}
                 </p>
               </div>
               <button
@@ -1628,7 +1644,7 @@ export function AskClient() {
                 <Minimize2 size={17} />
               </button>
             </div>
-            {focusDrawer === "sources" ? renderSourcesList(12) : focusDrawer === "discover" ? <div className="mt-5"><DiscoverClient surface="ask" /></div> : renderHistoryList()}
+            {focusDrawer === "sources" ? renderSourcesList(12) : renderHistoryList()}
           </aside>
         )}
       </div>
@@ -1653,6 +1669,17 @@ export function AskClient() {
             <GhostButton className="px-3 py-2 text-[12.5px]" onClick={() => setViewMode("focus")}>
               <Maximize2 size={14} />
               Focus
+            </GhostButton>
+            <GhostButton
+              className="px-3 py-2 text-[12.5px]"
+              onClick={() => {
+                setFocusWorkspace("discover");
+                setFocusDrawer(null);
+                setViewMode("focus");
+              }}
+            >
+              <Newspaper size={14} />
+              Discover
             </GhostButton>
             <span
               className={cx(
@@ -1752,8 +1779,6 @@ export function AskClient() {
       </div>
 
       <div className="col-span-4 space-y-5 animate-rise-1">
-        <DiscoverClient surface="ask" />
-
         <Card className="p-5">
           <div className="flex items-center justify-between">
             <p className="flex items-center gap-2 text-[15px] font-bold text-ink-900">

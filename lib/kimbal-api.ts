@@ -204,6 +204,60 @@ export type MetricsOverview = {
   top_questions: QuestionMetric[];
 };
 
+export type EvalScore = {
+  id: string;
+  label: string;
+  value: number | null;
+  display: string;
+  status: "good" | "watch" | "needs_attention" | "no_data" | string;
+  detail: string;
+};
+
+export type EvalLatency = {
+  avg_ms: number | null;
+  p50_ms: number | null;
+  p95_ms: number | null;
+  sample_size: number;
+};
+
+export type EvalModel = {
+  model: string;
+  answers: number;
+  avg_latency_ms: number | null;
+  citation_coverage: number | null;
+  groundedness_score: number | null;
+};
+
+export type EvalRecentAnswer = {
+  message_id: string;
+  conversation_id: string;
+  question: string;
+  answer_preview: string;
+  model: string | null;
+  created_at: string;
+  latency_ms: number | null;
+  citations: number;
+  groundedness_score: number | null;
+  relevance_score: number | null;
+};
+
+export type EvalOverview = {
+  generated_at: string;
+  answers_total: number;
+  sample_size: number;
+  feedback: {
+    helpful: number;
+    not_helpful: number;
+    total: number;
+    helpful_rate: number | null;
+  };
+  scores: EvalScore[];
+  latency: EvalLatency;
+  models: EvalModel[];
+  recent_answers: EvalRecentAnswer[];
+  methodology: string[];
+};
+
 export type SourceMode = "knowledge" | "web" | "blended";
 export type AnswerMode = "fast" | "council";
 
@@ -713,6 +767,10 @@ export class KimbalApi {
 
   async metricsOverview() {
     return this.cached("metricsOverview", LIVE_CACHE_MS, () => this.request<MetricsOverview>("/metrics/overview"));
+  }
+
+  async evalsOverview() {
+    return this.cached("evalsOverview", LIVE_CACHE_MS, () => this.request<EvalOverview>("/evals/overview"));
   }
 
   async webSearchStatus() {

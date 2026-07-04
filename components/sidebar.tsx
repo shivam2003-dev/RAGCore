@@ -10,6 +10,7 @@ import {
   FileText,
   BookmarkCheck,
   BarChart3,
+  Gauge,
   PieChart,
   HeartPulse,
   MessagesSquare,
@@ -44,6 +45,7 @@ const groups: Array<{ label?: string; items: Item[] }> = [
     label: "Dashboard",
     items: [
       { label: "Analytics", href: "/analytics", icon: BarChart3 },
+      { label: "Evals", href: "/evals", icon: Gauge },
       { label: "Usage & Insights", href: "/usage-insights", icon: PieChart },
       { label: "Content Health", href: "/content-health", icon: HeartPulse },
       { label: "Feedback", href: "/feedback", icon: MessagesSquare },
