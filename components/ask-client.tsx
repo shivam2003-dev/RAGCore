@@ -263,15 +263,17 @@ function sourcesFromMessage(message: MessageOut | undefined): RagSource[] {
   return message.citations.map((citation) => ({
     chunk_id: citation.chunk_id,
     document_id: citation.document_id,
-    title: `Citation [${citation.marker}]`,
-    document_title: `Citation [${citation.marker}]`,
+    title: citation.title ?? citation.document_title ?? `Citation [${citation.marker}]`,
+    document_title: citation.document_title ?? citation.title ?? `Citation [${citation.marker}]`,
     marker: citation.marker,
     score: citation.score,
     snippet: citation.snippet,
+    source_type: citation.source_type ?? undefined,
+    url: citation.url ?? undefined,
   }));
 }
 
-function InlineMarkdown({ text }: { text: string }) {
+function InlineMarkdown({ text, onCitationClick }: { text: string; onCitationClick?: (marker: number) => void }) {
   const parts = text.split(/(\*\*[^*]+\*\*|`[^`]+`|\[\d+\])/g).filter(Boolean);
   return (
     <>
@@ -291,13 +293,17 @@ function InlineMarkdown({ text }: { text: string }) {
           );
         }
         if (/^\[\d+\]$/.test(part)) {
+          const marker = Number(part.slice(1, -1));
           return (
-            <span
+            <button
               key={`${part}-${index}`}
-              className="ml-0.5 align-super text-[10.5px] font-bold leading-none text-brand-600"
+              type="button"
+              onClick={() => onCitationClick?.(marker)}
+              className="ml-0.5 cursor-pointer align-super text-[10.5px] font-bold leading-none text-brand-600 underline-offset-2 transition hover:text-brand-700 hover:underline"
+              title={`Open source ${part}`}
             >
               {part}
-            </span>
+            </button>
           );
         }
         return <span key={`${part}-${index}`}>{part}</span>;
@@ -306,7 +312,15 @@ function InlineMarkdown({ text }: { text: string }) {
   );
 }
 
-function MarkdownAnswer({ content, busy }: { content: string; busy: boolean }) {
+function MarkdownAnswer({
+  content,
+  busy,
+  onCitationClick,
+}: {
+  content: string;
+  busy: boolean;
+  onCitationClick?: (marker: number) => void;
+}) {
   const blocks: React.ReactNode[] = [];
   let paragraph: string[] = [];
   let list: Array<{ kind: "ol" | "ul"; text: string }> = [];
@@ -315,7 +329,7 @@ function MarkdownAnswer({ content, busy }: { content: string; busy: boolean }) {
     if (!paragraph.length) return;
     blocks.push(
       <p key={`p-${blocks.length}`} className="text-[13.5px] leading-6 text-ink-700">
-        <InlineMarkdown text={paragraph.join(" ")} />
+        <InlineMarkdown text={paragraph.join(" ")} onCitationClick={onCitationClick} />
       </p>
     );
     paragraph = [];
@@ -335,7 +349,7 @@ function MarkdownAnswer({ content, busy }: { content: string; busy: boolean }) {
       >
         {list.map((item, index) => (
           <li key={`${item.text}-${index}`} className="pl-1">
-            <InlineMarkdown text={item.text} />
+            <InlineMarkdown text={item.text} onCitationClick={onCitationClick} />
           </li>
         ))}
       </Tag>
@@ -364,7 +378,7 @@ function MarkdownAnswer({ content, busy }: { content: string; busy: boolean }) {
             : "pt-1 text-[14px] font-bold leading-6 text-ink-900";
       blocks.push(
         <h3 key={`h-${blocks.length}`} className={className}>
-          <InlineMarkdown text={text} />
+          <InlineMarkdown text={text} onCitationClick={onCitationClick} />
         </h3>
       );
       continue;
@@ -376,7 +390,7 @@ function MarkdownAnswer({ content, busy }: { content: string; busy: boolean }) {
       flushList();
       blocks.push(
         <h3 key={`h-${blocks.length}`} className="pt-1 text-[14px] font-bold leading-6 text-ink-900">
-          <InlineMarkdown text={boldHeading[1]} />
+          <InlineMarkdown text={boldHeading[1]} onCitationClick={onCitationClick} />
         </h3>
       );
       continue;
@@ -450,6 +464,7 @@ export function AskClient() {
   const [viewMode, setViewMode] = useState<"workbench" | "focus">("focus");
   const [focusRailExpanded, setFocusRailExpanded] = useState(false);
   const [focusDrawer, setFocusDrawer] = useState<"sources" | "history" | null>(null);
+  const [highlightedMarker, setHighlightedMarker] = useState<number | null>(null);
   const [modePanel, setModePanel] = useState<"web" | "council" | null>(null);
   const [selectedSpaceId, setSelectedSpaceId] = useState<OrgSpaceId>("devops");
   const [customRole, setCustomRole] = useState<AssistantRoleConfig | null>(() => readStoredCustomRole());
@@ -588,6 +603,7 @@ export function AskClient() {
     setError("");
     setFeedback("");
     setActionStatus("");
+    setHighlightedMarker(null);
     setTurn({
       question: trimmed,
       answer: "",
@@ -673,6 +689,7 @@ export function AskClient() {
     setInput("");
     setError("");
     setFeedback("");
+    setHighlightedMarker(null);
     setActionStatus("New chat started");
     setState("idle");
   }
@@ -863,6 +880,15 @@ export function AskClient() {
     setSourceMode(next);
     setModePanel(null);
     setActionStatus("");
+  }
+
+  function openCitationReference(marker: number) {
+    setHighlightedMarker(marker);
+    if (viewMode === "focus") {
+      setFocusDrawer("sources");
+    }
+    const source = turn.sources.find((item) => item.marker === marker);
+    setActionStatus(source ? `Reference [${marker}] selected` : `Reference [${marker}] was not returned in the source list`);
   }
 
   function chooseAnswerMode(next: AnswerMode) {
@@ -1105,8 +1131,17 @@ export function AskClient() {
         {turn.sources.slice(0, limit).map((source, index) => {
           const isWeb = source.source_type === "web";
           const SourceIcon = isWeb ? Globe : FileText;
+          const marker = source.marker ?? index + 1;
+          const highlighted = highlightedMarker === marker;
           return (
-            <li key={`${source.chunk_id}-${index}`} className="flex items-start gap-2.5">
+            <li
+              key={`${source.chunk_id}-${index}`}
+              className={cx(
+                "rounded-[12px] border p-3 transition",
+                highlighted ? "border-brand-300 bg-brand-50 shadow-[var(--shadow-card)]" : "border-line bg-white"
+              )}
+            >
+              <div className="flex items-start gap-2.5">
               <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-[8px] border border-line bg-white text-brand-500">
                 <SourceIcon size={14} />
               </span>
@@ -1118,11 +1153,11 @@ export function AskClient() {
                     rel="noreferrer"
                     className="block truncate text-[12.5px] font-semibold text-ink-900 hover:text-brand-600"
                   >
-                    [{source.marker ?? index + 1}] {sourceTitle(source)}
+                    [{marker}] {sourceTitle(source)}
                   </a>
                 ) : (
                   <p className="truncate text-[12.5px] font-semibold text-ink-900">
-                    [{source.marker ?? index + 1}] {sourceTitle(source)}
+                    [{marker}] {sourceTitle(source)}
                   </p>
                 )}
                 <p className="line-clamp-2 text-[11px] leading-4 text-ink-500">{sourceSnippet(source)}</p>
@@ -1132,6 +1167,26 @@ export function AskClient() {
                   {sourceScorePercent(source.score)}%
                 </span>
               )}
+              </div>
+              <div className="mt-2 flex flex-wrap items-center gap-2 pl-9">
+                <button
+                  type="button"
+                  onClick={() => openCitationReference(marker)}
+                  className="text-[11px] font-bold text-brand-600 transition hover:text-brand-700"
+                >
+                  Highlight citation [{marker}]
+                </button>
+                {source.url && (
+                  <a
+                    href={source.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-[11px] font-bold text-ink-500 transition hover:text-ink-900"
+                  >
+                    Open source
+                  </a>
+                )}
+              </div>
             </li>
           );
         })}
@@ -1326,6 +1381,7 @@ export function AskClient() {
 
   if (viewMode === "focus") {
     const focusRailWidth = focusRailExpanded ? 248 : 72;
+    const focusRightRailWidth = focusDrawer ? 400 : 0;
     return (
       <div className="min-h-screen bg-[#f8f8f6] text-ink-900">
         <aside
@@ -1422,7 +1478,10 @@ export function AskClient() {
           </span>
         </aside>
 
-        <main className="min-h-screen transition-[padding]" style={{ paddingLeft: focusRailWidth }}>
+        <main
+          className="min-h-screen transition-[padding]"
+          style={{ paddingLeft: focusRailWidth, paddingRight: focusRightRailWidth }}
+        >
           <div className="flex items-center justify-between px-8 py-5">
             <div className="flex items-center gap-3">
               <Link href="/" className="text-ink-400 transition hover:text-ink-900" aria-label="Back to home">
@@ -1485,7 +1544,11 @@ export function AskClient() {
                     </div>
                   ) : (
                     <div className="mt-4">
-                      <MarkdownAnswer content={hasAnswer ? turn.answer : ""} busy={busy} />
+                      <MarkdownAnswer
+                        content={hasAnswer ? turn.answer : ""}
+                        busy={busy}
+                        onCitationClick={openCitationReference}
+                      />
                     </div>
                   )}
                   <div className="mt-4">{renderActionButtons(true)}</div>
@@ -1527,7 +1590,7 @@ export function AskClient() {
         </main>
 
         {focusDrawer && (
-          <aside className="fixed inset-y-0 right-0 z-50 w-[420px] border-l border-line bg-white p-6 shadow-[0_20px_70px_-42px_rgba(23,26,44,0.45)]">
+          <aside className="fixed inset-y-0 right-0 z-40 w-[400px] overflow-y-auto border-l border-line bg-white p-6 shadow-[0_20px_70px_-42px_rgba(23,26,44,0.45)]">
             <div className="flex items-start justify-between gap-3">
               <div>
                 <p className="text-[17px] font-bold text-ink-900">
@@ -1630,7 +1693,11 @@ export function AskClient() {
               </div>
             ) : (
               <div className="mt-4">
-                <MarkdownAnswer content={hasAnswer ? turn.answer : ""} busy={busy} />
+                <MarkdownAnswer
+                  content={hasAnswer ? turn.answer : ""}
+                  busy={busy}
+                  onCitationClick={openCitationReference}
+                />
               </div>
             )}
 

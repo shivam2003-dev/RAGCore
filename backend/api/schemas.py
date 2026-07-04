@@ -311,6 +311,10 @@ class CitationOut(ORMModel):
     marker: int
     score: float
     snippet: str
+    document_title: str | None = None
+    title: str | None = None
+    source_type: str | None = None
+    url: str | None = None
 
 
 class MessageOut(ORMModel):

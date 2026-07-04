@@ -67,6 +67,10 @@ export type CitationOut = {
   marker: number;
   score: number;
   snippet: string;
+  document_title?: string | null;
+  title?: string | null;
+  source_type?: string | null;
+  url?: string | null;
 };
 
 export type MessageOut = {
@@ -379,6 +383,10 @@ export class KimbalApi {
 
   private clearLiveCache() {
     this.liveCache.clear();
+  }
+
+  refreshLiveData() {
+    this.clearLiveCache();
   }
 
   private async cached<T>(key: string, ttlMs: number, loader: () => Promise<T>): Promise<T> {

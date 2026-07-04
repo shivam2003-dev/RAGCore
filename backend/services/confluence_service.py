@@ -109,10 +109,16 @@ class ConfluenceClient:
             await self._client.aclose()
 
     async def get_space_by_key(self, space_key: str) -> ConfluenceSpace:
+        try:
+            return await self._get_space_by_key_v2(space_key)
+        except NotFoundError:
+            return await self._get_space_by_key_v1(space_key)
+
+    async def _get_space_by_key_v2(self, space_key: str) -> ConfluenceSpace:
         payload = await self._get("api/v2/spaces", params={"keys": space_key, "limit": 1})
         rows = _list_of_dicts(payload.get("results"))
         if not rows:
-            raise NotFoundError(f"Confluence space {space_key} was not found or is not visible")
+            raise NotFoundError(f"Confluence space {space_key} was not found by Cloud v2 API")
         row = rows[0]
         links = _dict(row.get("_links"))
         return ConfluenceSpace(
@@ -122,7 +128,27 @@ class ConfluenceClient:
             url=self._absolute_url(_str(links.get("webui")) or f"/spaces/{space_key}/overview"),
         )
 
+    async def _get_space_by_key_v1(self, space_key: str) -> ConfluenceSpace:
+        payload = await self._get(f"rest/api/space/{space_key}")
+        links = _dict(payload.get("_links"))
+        return ConfluenceSpace(
+            id=str(_required_str_or_int(payload, "id")),
+            key=_required_str(payload, "key"),
+            name=_str(payload.get("name")) or space_key,
+            url=self._absolute_url(_str(links.get("webui")) or f"/spaces/{space_key}/overview"),
+        )
+
     async def iter_pages(self, space: ConfluenceSpace, max_pages: int | None = None) -> AsyncIterator[ConfluencePage]:
+        try:
+            async for page in self._iter_pages_v2(space, max_pages=max_pages):
+                yield page
+        except NotFoundError:
+            async for page in self._iter_pages_v1(space, max_pages=max_pages):
+                yield page
+
+    async def _iter_pages_v2(
+        self, space: ConfluenceSpace, max_pages: int | None = None
+    ) -> AsyncIterator[ConfluencePage]:
         page_limit = max(1, min(self._settings.confluence_page_limit, 100))
         if max_pages is not None:
             page_limit = min(page_limit, max(1, max_pages))
@@ -164,9 +190,44 @@ class ConfluenceClient:
                 continue
             return
 
+    async def _iter_pages_v1(
+        self, space: ConfluenceSpace, max_pages: int | None = None
+    ) -> AsyncIterator[ConfluencePage]:
+        page_limit = max(1, min(self._settings.confluence_page_limit, 100))
+        if max_pages is not None:
+            page_limit = min(page_limit, max(1, max_pages))
+        path_or_url = "rest/api/content"
+        params: dict[str, str | int] | None = {
+            "spaceKey": space.key,
+            "type": "page",
+            "status": "current",
+            "limit": page_limit,
+            "expand": "body.storage,version",
+        }
+        fetched = 0
+
+        while max_pages is None or fetched < max_pages:
+            payload = await self._get(path_or_url, params=params)
+            rows = _list_of_dicts(payload.get("results"))
+            for row in rows:
+                yield self._parse_v1_page(row)
+                fetched += 1
+                if max_pages is not None and fetched >= max_pages:
+                    return
+
+            next_url = _next_link(payload)
+            if not next_url:
+                return
+            path_or_url = next_url
+            params = None
+
     async def get_page_by_id(self, page_id: str) -> ConfluencePage:
-        payload = await self._get(f"api/v2/pages/{page_id}", params={"body-format": "storage"})
-        return self._parse_page(payload)
+        try:
+            payload = await self._get(f"api/v2/pages/{page_id}", params={"body-format": "storage"})
+            return self._parse_page(payload)
+        except NotFoundError:
+            payload = await self._get(f"rest/api/content/{page_id}", params={"expand": "body.storage,version"})
+            return self._parse_v1_page(payload)
 
     async def _get(self, path_or_url: str, params: dict[str, str | int] | None = None) -> JsonDict:
         if self._client is None:
@@ -205,6 +266,20 @@ class ConfluenceClient:
             storage_html=_str(storage.get("value")) or "",
             version_number=_int(version.get("number")),
             version_created_at=_str(version.get("createdAt")),
+        )
+
+    def _parse_v1_page(self, row: JsonDict) -> ConfluencePage:
+        links = _dict(row.get("_links"))
+        body = _dict(row.get("body"))
+        storage = _dict(body.get("storage"))
+        version = _dict(row.get("version"))
+        return ConfluencePage(
+            id=_required_str(row, "id"),
+            title=_str(row.get("title")) or "Untitled Confluence page",
+            url=self._absolute_url(_str(links.get("webui")) or f"/pages/{_required_str(row, 'id')}"),
+            storage_html=_str(storage.get("value")) or "",
+            version_number=_int(version.get("number")),
+            version_created_at=_str(version.get("createdAt")) or _str(version.get("when")),
         )
 
     def _absolute_url(self, link: str) -> str:
@@ -460,6 +535,15 @@ def _required_str(row: JsonDict, key: str) -> str:
     if not value:
         raise ProviderError(f"Confluence response is missing {key}")
     return value
+
+
+def _required_str_or_int(row: JsonDict, key: str) -> str | int:
+    value = row.get(key)
+    if isinstance(value, str) and value:
+        return value
+    if isinstance(value, int):
+        return value
+    raise ProviderError(f"Confluence response is missing {key}")
 
 
 def _str(value: object) -> str | None:

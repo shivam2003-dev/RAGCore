@@ -9,7 +9,7 @@ export type LiveMetricsState = {
   jira: JiraStatus | null;
   loading: boolean;
   error: string;
-  refresh: () => Promise<void>;
+  refresh: (options?: { force?: boolean }) => Promise<void>;
 };
 
 export function useLiveMetrics(): LiveMetricsState {
@@ -19,10 +19,13 @@ export function useLiveMetrics(): LiveMetricsState {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
-  async function refresh() {
+  async function refresh(options: { force?: boolean } = {}) {
     setLoading(true);
     setError("");
     try {
+      if (options.force) {
+        kimbalApi.refreshLiveData();
+      }
       await kimbalApi.ensureSession();
       const [overview, confluenceStatus, jiraStatus] = await Promise.all([
         kimbalApi.metricsOverview(),

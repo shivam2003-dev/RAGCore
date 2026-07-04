@@ -3,6 +3,7 @@ import uuid
 from collections.abc import AsyncIterator
 
 from fastapi import APIRouter
+from sqlalchemy import select
 from sse_starlette.sse import EventSourceResponse
 
 from api.deps import ChatServiceDep, CurrentUser, DbDep, LLMDep, SettingsDep
@@ -19,7 +20,7 @@ from api.schemas import (
 from core.exceptions import AppError, NotFoundError, ProviderError
 from database.base import utcnow
 from llm.base import ChatMessage, LLMProvider, LLMRequest
-from models import Feedback
+from models import Document, Feedback, KnowledgeBase, Message
 from repositories.conversations import (
     ConversationRepository,
     FeedbackRepository,
@@ -100,7 +101,23 @@ async def list_messages(
     if conv is None:
         raise NotFoundError("Conversation not found")
     messages = await MessageRepository(db).list_for_conversation(conversation_id)
-    return [MessageOut.model_validate(m) for m in messages]
+    document_ids = {
+        citation.document_id
+        for message in messages
+        for citation in message.citations
+    }
+    docs_by_id: dict[uuid.UUID, Document] = {}
+    if document_ids:
+        rows = await db.scalars(
+            select(Document)
+            .join(KnowledgeBase, KnowledgeBase.id == Document.knowledge_base_id)
+            .where(
+                Document.id.in_(document_ids),
+                KnowledgeBase.organization_id == user.organization_id,
+            )
+        )
+        docs_by_id = {doc.id: doc for doc in rows}
+    return [_message_out(message, docs_by_id) for message in messages]
 
 
 @router.delete("/conversations/{conversation_id}", status_code=204)
@@ -162,6 +179,25 @@ async def submit_feedback(body: FeedbackCreate, user: CurrentUser, db: DbDep) ->
     return {"status": "recorded"}
 
 
+def _message_out(message: Message, docs_by_id: dict[uuid.UUID, Document]) -> MessageOut:
+    output = MessageOut.model_validate(message)
+    citations = []
+    for citation in message.citations:
+        doc = docs_by_id.get(citation.document_id)
+        citation_out = output.citations[len(citations)]
+        if doc is not None:
+            citation_out = citation_out.model_copy(
+                update={
+                    "document_title": doc.title,
+                    "title": doc.title,
+                    "source_type": _citation_source_type(doc),
+                    "url": _document_source_url(doc),
+                }
+            )
+        citations.append(citation_out)
+    return output.model_copy(update={"citations": citations})
+
+
 async def _collect_llm_text(llm: LLMProvider, request: LLMRequest) -> str:
     parts: list[str] = []
     async for delta in llm.stream(request):
@@ -191,3 +227,25 @@ def _parse_role_generation(*, raw: str, fallback_name: str) -> tuple[str, str]:
     if not name or not prompt:
         raise ProviderError("Role generator returned an empty role prompt")
     return name, prompt
+
+
+def _citation_source_type(doc: Document) -> str:
+    source = doc.doc_metadata.get("source") if isinstance(doc.doc_metadata, dict) else None
+    return str(source or doc.source_type)
+
+
+def _document_source_url(doc: Document) -> str | None:
+    metadata = doc.doc_metadata if isinstance(doc.doc_metadata, dict) else {}
+    for key in (
+        "source_url",
+        "source-url",
+        "web_url",
+        "jira_issue_url",
+        "jira_url",
+        "confluence_page_url",
+        "confluence_url",
+    ):
+        value = metadata.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None

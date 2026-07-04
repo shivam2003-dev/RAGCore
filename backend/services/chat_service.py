@@ -532,12 +532,17 @@ class ChatService:
                 continue
             seen.add(chunk.document_id)
             document = await self._db.get(Document, chunk.document_id)
+            document_metadata = (
+                document.doc_metadata
+                if document is not None and isinstance(document.doc_metadata, dict)
+                else {}
+            )
             by_document[chunk.document_id] = RetrievedChunk(
                 chunk_id=chunk.id,
                 document_id=chunk.document_id,
                 document_title=document.title if document is not None else "Jira issue",
                 content=chunk.content,
-                metadata=chunk.chunk_metadata,
+                metadata=document_metadata | (chunk.chunk_metadata or {}),
                 score=1.0,
             )
         return [by_document[document_id] for document_id in document_ids if document_id in by_document]
@@ -650,12 +655,7 @@ def _source_payload(marker: int, chunk: RetrievedChunk) -> dict[str, object]:
     snippet = chunk.content[:240]
     if source_type == "web" and isinstance(metadata.get("web_snippet"), str):
         snippet = str(metadata["web_snippet"])[:240]
-    url = (
-        metadata.get("source_url")
-        or metadata.get("web_url")
-        or metadata.get("jira_url")
-        or metadata.get("confluence_url")
-    )
+    url = _source_url(metadata)
     payload: dict[str, object] = {
         "marker": marker,
         "chunk_id": str(chunk.chunk_id),
@@ -669,6 +669,22 @@ def _source_payload(marker: int, chunk: RetrievedChunk) -> dict[str, object]:
     if isinstance(url, str) and url:
         payload["url"] = url
     return payload
+
+
+def _source_url(metadata: dict[str, object]) -> str | None:
+    for key in (
+        "source_url",
+        "source-url",
+        "web_url",
+        "jira_issue_url",
+        "jira_url",
+        "confluence_page_url",
+        "confluence_url",
+    ):
+        value = metadata.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
 
 
 def _dedupe_chunks(chunks: list[RetrievedChunk]) -> list[RetrievedChunk]:

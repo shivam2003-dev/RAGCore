@@ -20,19 +20,33 @@ function pendingDocuments(source: { documents: number; ready_documents: number; 
   return Math.max(0, source.documents - source.ready_documents - source.failed_documents);
 }
 
+function sleep(ms: number) {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
 export function DataSourcesClient() {
   const { metrics, confluence, jira, loading, error, refresh } = useLiveMetrics();
   const [syncing, setSyncing] = useState(false);
   const [syncingJira, setSyncingJira] = useState(false);
   const [status, setStatus] = useState("");
 
+  async function refreshAfterSync(label: string, queued: number, changed: number) {
+    await refresh({ force: true });
+    if (changed <= 0) return;
+    for (let attempt = 0; attempt < 6; attempt += 1) {
+      await sleep(1500);
+      setStatus(`${number(queued)} ${label} queued · refreshing live counts`);
+      await refresh({ force: true });
+    }
+  }
+
   async function syncConfluence() {
     setSyncing(true);
     setStatus("Syncing Confluence");
     try {
       const result = await kimbalApi.syncConfluence();
-      setStatus(`${result.total_pages} Confluence pages queued`);
-      await refresh();
+      setStatus(`${number(result.total_pages)} Confluence pages queued`);
+      await refreshAfterSync("Confluence pages", result.total_pages, result.created + result.updated);
     } catch (cause) {
       setStatus(cause instanceof Error ? cause.message : "Confluence sync failed");
     } finally {
@@ -45,8 +59,8 @@ export function DataSourcesClient() {
     setStatus("Syncing Jira");
     try {
       const result = await kimbalApi.syncJira();
-      setStatus(`${result.total_issues} Jira issues queued`);
-      await refresh();
+      setStatus(`${number(result.total_issues)} Jira issues queued`);
+      await refreshAfterSync("Jira issues", result.total_issues, result.created + result.updated);
     } catch (cause) {
       setStatus(cause instanceof Error ? cause.message : "Jira sync failed");
     } finally {

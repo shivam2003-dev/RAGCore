@@ -82,9 +82,14 @@ class HtmlExtractor:
         for tag in soup(["script", "style", "nav", "footer"]):
             tag.decompose()
         title = soup.title.string.strip() if soup.title and soup.title.string else None
-        return ExtractedDocument(
-            text=soup.get_text(separator="\n", strip=True), metadata={"html_title": title}
-        )
+        metadata: dict[str, str | None] = {"html_title": title}
+        for meta_name in ("source-url", "confluence-page-id", "confluence-space-key"):
+            tag = soup.find("meta", attrs={"name": meta_name})
+            if tag is not None:
+                content = tag.get("content")
+                if isinstance(content, str) and content.strip():
+                    metadata[meta_name] = content.strip()
+        return ExtractedDocument(text=soup.get_text(separator="\n", strip=True), metadata=metadata)
 
 
 _EXTRACTORS = [

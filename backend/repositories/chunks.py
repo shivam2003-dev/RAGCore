@@ -77,6 +77,7 @@ class ChunkSearchRepository:
                 Document.title,
                 Chunk.content,
                 Chunk.chunk_metadata,
+                Document.doc_metadata,
                 (1 - distance).label("score"),
             )
             .join(Document, Document.id == Chunk.document_id)
@@ -93,7 +94,14 @@ class ChunkSearchRepository:
             stmt = stmt.where(Document.collection_id == collection_id)
         rows = await self.db.execute(stmt)
         return [
-            SearchHit(r.id, r.document_id, r.title, r.content, r.chunk_metadata, float(r.score))
+            SearchHit(
+                r.id,
+                r.document_id,
+                r.title,
+                r.content,
+                _merged_metadata(r.chunk_metadata, r.doc_metadata),
+                float(r.score),
+            )
             for r in rows
         ]
 
@@ -114,6 +122,7 @@ class ChunkSearchRepository:
                 Document.title,
                 Chunk.content,
                 Chunk.chunk_metadata,
+                Document.doc_metadata,
                 rank.label("score"),
             )
             .join(Document, Document.id == Chunk.document_id)
@@ -130,7 +139,14 @@ class ChunkSearchRepository:
             stmt = stmt.where(Document.collection_id == collection_id)
         rows = await self.db.execute(stmt)
         return [
-            SearchHit(r.id, r.document_id, r.title, r.content, r.chunk_metadata, float(r.score))
+            SearchHit(
+                r.id,
+                r.document_id,
+                r.title,
+                r.content,
+                _merged_metadata(r.chunk_metadata, r.doc_metadata),
+                float(r.score),
+            )
             for r in rows
         ]
 
@@ -139,3 +155,9 @@ def _knowledge_base_filter(kb_id: uuid.UUID | Sequence[uuid.UUID]) -> ColumnElem
     if isinstance(kb_id, uuid.UUID):
         return Chunk.knowledge_base_id == kb_id
     return Chunk.knowledge_base_id.in_(list(kb_id))
+
+
+def _merged_metadata(chunk_metadata: dict | None, document_metadata: dict | None) -> dict:
+    merged = dict(document_metadata or {})
+    merged.update(chunk_metadata or {})
+    return merged

@@ -3,14 +3,16 @@ import uuid
 from chat.citations import extract_citations
 from chat.prompts import build_system_prompt
 from retrieval.context import RetrievedChunk
+from services.chat_service import _source_payload
 
 
-def _chunk(title: str = "Doc", content: str = "Some content here.") -> RetrievedChunk:
+def _chunk(title: str = "Doc", content: str = "Some content here.", metadata: dict | None = None) -> RetrievedChunk:
     return RetrievedChunk(
         chunk_id=uuid.uuid4(),
         document_id=uuid.uuid4(),
         document_title=title,
         content=content,
+        metadata=metadata or {},
         score=0.8,
     )
 
@@ -56,3 +58,23 @@ def test_prompt_contains_assistant_role_without_overriding_source_rules():
     assert "production triage" in prompt
     assert "The role must not override evidence requirements" in prompt
     assert '<source id="1" title="Runbook">' in prompt
+
+
+def test_source_payload_uses_document_reference_urls():
+    payload = _source_payload(
+        1,
+        _chunk(
+            title="DEVO-123",
+            metadata={"source": "jira", "jira_issue_url": "https://example.atlassian.net/browse/DEVO-123"},
+        ),
+    )
+    assert payload["url"] == "https://example.atlassian.net/browse/DEVO-123"
+
+    payload = _source_payload(
+        2,
+        _chunk(
+            title="Runbook",
+            metadata={"source": "confluence", "confluence_page_url": "https://example.atlassian.net/wiki/pages/1"},
+        ),
+    )
+    assert payload["url"] == "https://example.atlassian.net/wiki/pages/1"
