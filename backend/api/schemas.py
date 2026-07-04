@@ -235,6 +235,56 @@ class WebSearchStatusOut(BaseModel):
     reason: str
 
 
+# --- discover ---
+class DiscoverDepartmentOut(BaseModel):
+    id: str
+    label: str
+    description: str
+    query: str
+
+
+class DiscoverArticleOut(BaseModel):
+    id: str
+    title: str
+    url: str
+    source: str
+    summary: str
+    section: str
+    department: str
+    published_at: str | None = None
+    score: float
+
+
+class DiscoverBoardItemOut(BaseModel):
+    title: str
+    url: str | None = None
+    source_type: str
+    status: str
+    updated_at: datetime
+
+
+class DiscoverBoardPulseOut(BaseModel):
+    jira_documents: int
+    confluence_documents: int
+    upload_documents: int
+    web_documents: int
+    latest_items: list[DiscoverBoardItemOut]
+
+
+class DiscoverFeedOut(BaseModel):
+    generated_at: datetime
+    provider: str
+    configured: bool
+    department: str
+    departments: list[DiscoverDepartmentOut]
+    lead: DiscoverArticleOut | None
+    articles: list[DiscoverArticleOut]
+    alerts: list[DiscoverArticleOut]
+    research: list[DiscoverArticleOut]
+    board_pulse: DiscoverBoardPulseOut
+    warnings: list[str] = []
+
+
 class ChatCapabilitiesOut(BaseModel):
     answer_modes: list[str]
     council_configured: bool

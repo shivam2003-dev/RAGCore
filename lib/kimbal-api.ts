@@ -215,6 +215,53 @@ export type WebSearchStatus = {
   reason: string;
 };
 
+export type DiscoverDepartment = {
+  id: string;
+  label: string;
+  description: string;
+  query: string;
+};
+
+export type DiscoverArticle = {
+  id: string;
+  title: string;
+  url: string;
+  source: string;
+  summary: string;
+  section: "articles" | "alerts" | "research" | string;
+  department: string;
+  published_at: string | null;
+  score: number;
+};
+
+export type DiscoverBoardItem = {
+  title: string;
+  url: string | null;
+  source_type: string;
+  status: string;
+  updated_at: string;
+};
+
+export type DiscoverFeed = {
+  generated_at: string;
+  provider: string;
+  configured: boolean;
+  department: string;
+  departments: DiscoverDepartment[];
+  lead: DiscoverArticle | null;
+  articles: DiscoverArticle[];
+  alerts: DiscoverArticle[];
+  research: DiscoverArticle[];
+  board_pulse: {
+    jira_documents: number;
+    confluence_documents: number;
+    upload_documents: number;
+    web_documents: number;
+    latest_items: DiscoverBoardItem[];
+  };
+  warnings: string[];
+};
+
 export type ChatCapabilities = {
   answer_modes: AnswerMode[];
   council_configured: boolean;
@@ -670,6 +717,12 @@ export class KimbalApi {
 
   async webSearchStatus() {
     return this.cached("webSearchStatus", LIVE_CACHE_MS, () => this.request<WebSearchStatus>("/web-search/status"));
+  }
+
+  async discoverFeed(department = "for-you") {
+    return this.cached(`discoverFeed:${department}`, LIVE_CACHE_MS, () =>
+      this.request<DiscoverFeed>(`/discover/feed?department=${encodeURIComponent(department)}`)
+    );
   }
 
   async chatCapabilities() {

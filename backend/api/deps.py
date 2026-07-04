@@ -25,6 +25,7 @@ from retrieval.pipeline import RetrievalPipeline
 from services.auth_service import AuthService
 from services.chat_service import ChatService
 from services.confluence_service import ConfluenceSyncService
+from services.discover_service import DiscoverService
 from services.document_service import DocumentService
 from services.jira_service import JiraSyncService
 from services.web_search_service import WebSearchService
@@ -129,6 +130,10 @@ def get_web_search_service(db: DbDep, settings: SettingsDep, embedder: EmbedderD
     return WebSearchService(db=db, settings=settings, embedder=embedder)
 
 
+def get_discover_service(db: DbDep, settings: SettingsDep) -> DiscoverService:
+    return DiscoverService(db=db, settings=settings)
+
+
 def get_retrieval_pipeline(
     db: DbDep, settings: SettingsDep, embedder: EmbedderDep
 ) -> RetrievalPipeline:
@@ -152,5 +157,6 @@ DocumentServiceDep = Annotated[DocumentService, Depends(get_document_service)]
 ConfluenceSyncDep = Annotated[ConfluenceSyncService, Depends(get_confluence_sync_service)]
 JiraSyncDep = Annotated[JiraSyncService, Depends(get_jira_sync_service)]
 WebSearchDep = Annotated[WebSearchService, Depends(get_web_search_service)]
+DiscoverDep = Annotated[DiscoverService, Depends(get_discover_service)]
 RetrievalDep = Annotated[RetrievalPipeline, Depends(get_retrieval_pipeline)]
 ChatServiceDep = Annotated[ChatService, Depends(get_chat_service)]

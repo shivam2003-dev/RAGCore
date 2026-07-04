@@ -113,6 +113,19 @@ class Settings(BaseSettings):
     web_search_top_k: int = 5
     web_search_request_timeout_seconds: float = 10.0
 
+    # Discover keeps departments updated with live external news/research plus
+    # local Jira/Confluence board pulse. Google News RSS needs no key; Brave,
+    # Tavily, and SearXNG use the same shapes as web search.
+    discover_enabled: bool = True
+    discover_provider: str = "google_news_rss"  # google_news_rss | duckduckgo | brave | tavily | searxng | fake
+    discover_api_key: str = ""
+    discover_base_url: str = ""
+    discover_locale: str = "en-IN"
+    discover_region: str = "IN"
+    discover_cache_ttl_seconds: int = 900
+    discover_items_per_department: int = 8
+    discover_department_queries: str = ""
+
 
 @lru_cache
 def get_settings() -> Settings:

@@ -21,6 +21,9 @@ os.environ.update(
     WEB_SEARCH_PROVIDER="fake",
     WEB_SEARCH_API_KEY="",
     WEB_SEARCH_BASE_URL="",
+    DISCOVER_PROVIDER="fake",
+    DISCOVER_API_KEY="",
+    DISCOVER_BASE_URL="",
     LLM_COUNCIL_ENABLED="false",
     LLM_COUNCIL_MODELS="",
 )

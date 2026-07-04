@@ -8,6 +8,7 @@ This folder is the source-safe operator and developer reference for the Kimbal K
 - [RAG Pipeline](./RAG_PIPELINE.md) - ingestion, chunking, retrieval, citations, and chat streaming.
 - [Atlassian Read-Only Sync](./ATLASSIAN_READ_ONLY_SYNC.md) - Confluence and Jira connector behavior.
 - [Web Search and Council Mode](./WEB_SEARCH_AND_COUNCIL.md) - optional internet retrieval and multi-model answer synthesis.
+- [Discover](./DISCOVER.md) - live department feeds, alerts, research, and board pulse configuration.
 - [Frontend Behavior](./FRONTEND_BEHAVIOR.md) - navigation, Ask, saved answers, settings, and live metrics.
 - [Security and Secrets](./SECURITY_AND_SECRETS.md) - auth, RBAC, logging, uploads, and env handling.
 - [Operations](./OPERATIONS.md) - local run, production env, Docker, Kubernetes, and observability.

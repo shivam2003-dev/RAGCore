@@ -5,6 +5,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
   Home,
+  Compass,
   MessageSquare,
   Database,
   FileText,
@@ -34,6 +35,7 @@ const groups: Array<{ label?: string; items: Item[] }> = [
   {
     label: "Knowledge",
     items: [
+      { label: "Discover", href: "/discover", icon: Compass },
       { label: "Ask Kimbal (RAG)", href: "/ask", icon: MessageSquare },
       { label: "Knowledge Sources", href: "/knowledge-sources", icon: Database },
       { label: "Documents", href: "/documents", icon: FileText },

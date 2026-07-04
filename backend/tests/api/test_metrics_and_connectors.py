@@ -48,6 +48,19 @@ async def test_web_search_and_chat_capabilities_are_explicit(client, auth_header
     assert "key" not in str(chat_body).lower()
 
 
+async def test_discover_feed_returns_live_shape_without_secret_material(client, auth_headers):
+    resp = await client.get("/api/v1/discover/feed?department=security", headers=auth_headers)
+
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["provider"] == "fake"
+    assert body["department"] == "security"
+    assert body["departments"]
+    assert body["lead"]["url"].startswith("https://")
+    assert body["board_pulse"]["jira_documents"] == 0
+    assert "api_key" not in str(body).lower()
+
+
 async def test_role_prompt_generation_uses_configured_llm(client, auth_headers):
     resp = await client.post(
         "/api/v1/chat/roles/generate",
