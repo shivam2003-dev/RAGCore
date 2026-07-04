@@ -626,6 +626,9 @@ async def _collect_llm_text(provider: LLMProvider, request: LLMRequest) -> tuple
 def _source_payload(marker: int, chunk: RetrievedChunk) -> dict[str, object]:
     metadata = chunk.metadata or {}
     source_type = str(metadata.get("source") or metadata.get("source_type") or "knowledge")
+    snippet = chunk.content[:240]
+    if source_type == "web" and isinstance(metadata.get("web_snippet"), str):
+        snippet = str(metadata["web_snippet"])[:240]
     url = (
         metadata.get("source_url")
         or metadata.get("web_url")
@@ -639,7 +642,7 @@ def _source_payload(marker: int, chunk: RetrievedChunk) -> dict[str, object]:
         "title": chunk.document_title,
         "document_title": chunk.document_title,
         "score": round(chunk.score, 4),
-        "snippet": chunk.content[:240],
+        "snippet": snippet,
         "source_type": source_type,
     }
     if isinstance(url, str) and url:

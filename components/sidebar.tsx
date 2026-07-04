@@ -62,12 +62,10 @@ const groups: Array<{ label?: string; items: Item[] }> = [
 
 export function Sidebar() {
   const pathname = usePathname();
-  const [collapsed, setCollapsed] = useState(false);
-
-  useEffect(() => {
-    const saved = window.localStorage.getItem("kimbal.sidebar.collapsed.v1") === "true";
-    setCollapsed(saved);
-  }, []);
+  const [collapsed, setCollapsed] = useState(() => {
+    if (typeof window === "undefined") return false;
+    return window.localStorage.getItem("kimbal.sidebar.collapsed.v1") === "true";
+  });
 
   useEffect(() => {
     document.body.classList.toggle("sidebar-collapsed", collapsed);

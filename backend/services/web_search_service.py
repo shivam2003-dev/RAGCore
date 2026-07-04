@@ -1,6 +1,7 @@
 import hashlib
+import re
 import uuid
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, cast
 from urllib.parse import parse_qs, urljoin, urlparse
@@ -142,6 +143,7 @@ class WebSearchService:
         )
         soup = BeautifulSoup(html, "html.parser")
         rows: list[dict[str, object]] = []
+        collect_limit = max(12, max_results * 3)
         for rank, result in enumerate(soup.select(".result"), start=1):
             link = result.select_one(".result__a")
             if link is None:
@@ -158,11 +160,12 @@ class WebSearchService:
                     "title": title,
                     "url": url,
                     "description": snippet,
-                    "score": max(0.05, 1.0 - (rank - 1) * 0.08),
+                    "score": _score_duckduckgo_result(query=query, title=title, snippet=snippet, rank=rank),
                 }
             )
-            if len(rows) >= max_results:
+            if len(rows) >= collect_limit:
                 break
+        rows.sort(key=_row_score, reverse=True)
         return _normalize_result_rows(rows, max_results=max_results)
 
     async def _search_brave(self, *, query: str, max_results: int) -> list[WebSearchResult]:
@@ -262,6 +265,7 @@ class WebSearchService:
             "web_provider": self._settings.web_search_provider.lower(),
             "web_url": result.url,
             "source_url": result.url,
+            "web_snippet": result.snippet,
             "web_rank": rank,
             "web_source_sha256": content_hash,
         }
@@ -334,7 +338,7 @@ class WebSearchService:
         )
 
 
-def _normalize_result_rows(rows: list[object], *, max_results: int) -> list[WebSearchResult]:
+def _normalize_result_rows(rows: Sequence[object], *, max_results: int) -> list[WebSearchResult]:
     results: list[WebSearchResult] = []
     for rank, row in enumerate(rows, start=1):
         if not isinstance(row, dict):
@@ -364,6 +368,11 @@ def _normalize_result_rows(rows: list[object], *, max_results: int) -> list[WebS
     return results
 
 
+def _row_score(row: dict[str, object]) -> float:
+    score = row.get("score")
+    return float(score) if isinstance(score, (int, float)) else 0.0
+
+
 def _normalize_duckduckgo_url(href: str) -> str:
     if href.startswith("//"):
         href = f"https:{href}"
@@ -373,6 +382,28 @@ def _normalize_duckduckgo_url(href: str) -> str:
     if uddg and uddg[0]:
         return uddg[0]
     return href
+
+
+def _score_duckduckgo_result(*, query: str, title: str, snippet: str, rank: int) -> float:
+    normalized_query = query.lower()
+    text = f"{title} {snippet}".lower()
+    query_tokens = {
+        token
+        for token in re.split(r"[^a-z0-9]+", normalized_query)
+        if len(token) > 2 and token not in {"the", "and", "for", "with"}
+    }
+    covered = sum(1 for token in query_tokens if token in text)
+    coverage = covered / max(len(query_tokens), 1)
+    score = max(0.05, 1.0 - (rank - 1) * 0.06) + coverage * 0.18
+
+    asks_for_result = any(phrase in normalized_query for phrase in ("who won", "winner", "result", "score"))
+    if asks_for_result and any(
+        cue in text for cue in (" won ", " win ", "winner", "defeat", "defeated", "beat ", "champion", "title")
+    ):
+        score += 0.42
+    if asks_for_result and any(cue in text for cue in ("who won", "result", "winner")):
+        score += 0.1
+    return min(score, 1.5)
 
 
 def _render_web_result(result: WebSearchResult) -> str:
