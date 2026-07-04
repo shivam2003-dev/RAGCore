@@ -237,9 +237,13 @@ function readStoredCouncilConfig(available: string[]): CouncilConfig | null {
   if (!raw) return null;
   try {
     const parsed = JSON.parse(raw) as Partial<CouncilConfig>;
-    const models = Array.from(new Set((parsed.models ?? []).filter((model) => available.includes(model)))).slice(0, 3);
-    const chairModel = parsed.chairModel && models.includes(parsed.chairModel) ? parsed.chairModel : models[0];
-    return models.length >= 2 && chairModel ? { models, chairModel } : null;
+    const rawModels = Array.from(new Set((parsed.models ?? []).filter((model) => available.includes(model))));
+    const parsedChair = parsed.chairModel && available.includes(parsed.chairModel) ? parsed.chairModel : "";
+    const models = rawModels.filter((model) => model !== parsedChair).slice(0, 2);
+    const chairModel = parsedChair && !models.includes(parsedChair)
+      ? parsedChair
+      : (available.find((model) => !models.includes(model)) ?? "");
+    return models.length === 2 && chairModel ? { models, chairModel } : null;
   } catch {
     window.localStorage.removeItem(COUNCIL_SETTINGS_KEY);
     return null;
@@ -461,7 +465,6 @@ export function AskClient() {
   const [webStatus, setWebStatus] = useState<WebSearchStatus | null>(null);
   const [chatCapabilities, setChatCapabilities] = useState<ChatCapabilities | null>(null);
   const [councilModels, setCouncilModels] = useState<string[]>([]);
-  const [councilSize, setCouncilSize] = useState<2 | 3>(3);
   const [councilChairModel, setCouncilChairModel] = useState("");
   const [viewMode, setViewMode] = useState<"workbench" | "focus">("focus");
   const [focusRailExpanded, setFocusRailExpanded] = useState(false);
@@ -499,25 +502,24 @@ export function AskClient() {
 
   function applyCouncilDefaults(chat: ChatCapabilities) {
     const available = councilChoicesFromCapabilities(chat);
-    if (available.length < 2) {
+    if (available.length < 3) {
       setCouncilModels(available);
-      setCouncilSize(2);
-      setCouncilChairModel(available[0] ?? "");
+      setCouncilChairModel("");
       return;
     }
 
     const stored = readStoredCouncilConfig(available);
     const configured = chat.council_models.filter((model) => available.includes(model));
-    const preferred = stored?.models.length ? stored.models : configured.length >= 2 ? configured : available;
-    const size = Math.min(Math.max(preferred.length, 2), 3) as 2 | 3;
-    const models = [...preferred, ...available.filter((model) => !preferred.includes(model))].slice(0, size);
     const chair =
-      (stored?.chairModel && models.includes(stored.chairModel) && stored.chairModel) ||
-      (chat.council_chair_model && models.includes(chat.council_chair_model) && chat.council_chair_model) ||
-      preferredLeaderModel(models);
+      (stored?.chairModel && available.includes(stored.chairModel) && stored.chairModel) ||
+      (chat.council_chair_model && available.includes(chat.council_chair_model) && chat.council_chair_model) ||
+      preferredLeaderModel(available);
+    const preferred = stored?.models.length ? stored.models : configured.length >= 2 ? configured : available;
+    const models = [...preferred, ...available.filter((model) => !preferred.includes(model))]
+      .filter((model) => model !== chair)
+      .slice(0, 2);
     setCouncilModels(models);
-    setCouncilSize(size);
-    setCouncilChairModel(chair ?? models[0]);
+    setCouncilChairModel(chair ?? available.find((model) => !models.includes(model)) ?? "");
   }
 
   useEffect(() => {
@@ -553,19 +555,20 @@ export function AskClient() {
 
   useEffect(() => {
     if (!councilModels.length) return;
-    const activeModels = councilModels.slice(0, councilSize).filter(Boolean);
+    const availableForStorage = councilChoicesFromCapabilities(chatCapabilities);
+    const activeModels = councilModels.slice(0, 2).filter(Boolean);
     const uniqueModels = Array.from(new Set(activeModels));
     const nextChairModel =
-      councilChairModel && uniqueModels.includes(councilChairModel)
+      councilChairModel && !uniqueModels.includes(councilChairModel)
         ? councilChairModel
-        : preferredLeaderModel(uniqueModels);
+        : preferredLeaderModel(availableForStorage.filter((model) => !uniqueModels.includes(model)));
     if (typeof window !== "undefined") {
       window.localStorage.setItem(
         COUNCIL_SETTINGS_KEY,
         JSON.stringify({ models: uniqueModels, chairModel: nextChairModel })
       );
     }
-  }, [councilChairModel, councilModels, councilSize]);
+  }, [chatCapabilities, councilChairModel, councilModels]);
 
   async function ask(question: string) {
     const trimmed = question.trim();
@@ -580,20 +583,20 @@ export function AskClient() {
       setError(chatCapabilities?.council_reason ?? "LLM Council is not configured.");
       return;
     }
-    const requestedCouncilModels = Array.from(new Set(councilModels.slice(0, councilSize).filter(Boolean)));
+    const requestedCouncilModels = Array.from(new Set(councilModels.slice(0, 2).filter(Boolean)));
     const availableCouncilModels = councilChoicesFromCapabilities(chatCapabilities);
     const councilConfig: CouncilConfig | undefined =
       answerMode === "council" &&
-      requestedCouncilModels.length >= 2 &&
-      requestedCouncilModels.length <= 3 &&
+      requestedCouncilModels.length === 2 &&
       requestedCouncilModels.every((model) => availableCouncilModels.includes(model)) &&
       Boolean(councilChairModel) &&
-      requestedCouncilModels.includes(councilChairModel)
+      availableCouncilModels.includes(councilChairModel) &&
+      !requestedCouncilModels.includes(councilChairModel)
         ? { models: requestedCouncilModels, chairModel: councilChairModel }
         : undefined;
     if (answerMode === "council" && !councilConfig) {
       setState("error");
-      setError("Select two or three Council models and choose one selected model as chair.");
+      setError("Select exactly two response models and one different evaluator model.");
       setModePanel("council");
       return;
     }
@@ -809,9 +812,9 @@ export function AskClient() {
   const hasAnswer = Boolean(turn.answer);
   const webReady = webStatus?.configured === true;
   const councilAvailableModels = councilChoicesFromCapabilities(chatCapabilities);
-  const activeCouncilModels = councilModels.slice(0, councilSize).filter(Boolean);
+  const activeCouncilModels = councilModels.slice(0, 2).filter(Boolean);
   const uniqueCouncilModels = Array.from(new Set(activeCouncilModels));
-  const councilReady = chatCapabilities?.council_configured === true && councilAvailableModels.length >= 2;
+  const councilReady = chatCapabilities?.council_configured === true && councilAvailableModels.length >= 3;
   const sourceModeText = sourceModeDescription(sourceMode);
   const answerSourceModeText = sourceModeDescription(turn.sourceMode ?? sourceMode);
   const selectedSpace = ORG_SPACES.find((space) => space.id === selectedSpaceId) ?? ORG_SPACES[0];
@@ -911,21 +914,10 @@ export function AskClient() {
   function setCouncilModel(index: number, value: string) {
     const next = [...councilModels];
     next[index] = value;
-    const selected = Array.from(new Set(next.slice(0, councilSize).filter(Boolean)));
+    const selected = Array.from(new Set(next.slice(0, 2).filter(Boolean)));
     setCouncilModels(next);
-    if (selected.length && (!councilChairModel || !selected.includes(councilChairModel))) {
-      setCouncilChairModel(preferredLeaderModel(selected));
-    }
-  }
-
-  function setCouncilModelCount(size: 2 | 3) {
-    const fallback = councilAvailableModels.filter((model) => !councilModels.includes(model));
-    const next = [...councilModels, ...fallback].slice(0, size);
-    const selected = Array.from(new Set(next.filter(Boolean)));
-    setCouncilSize(size);
-    setCouncilModels(next);
-    if (selected.length && (!councilChairModel || !selected.includes(councilChairModel))) {
-      setCouncilChairModel(preferredLeaderModel(selected));
+    if (!councilChairModel || selected.includes(councilChairModel)) {
+      setCouncilChairModel(preferredLeaderModel(councilAvailableModels.filter((model) => !selected.includes(model))));
     }
   }
 
@@ -965,7 +957,7 @@ export function AskClient() {
               unavailable
                 ? (chatCapabilities?.council_reason ?? "LLM Council is not configured.")
                 : mode.value === "council"
-                  ? `Council mode: choose ${councilReady ? "2-3" : "available"} models and one chair`
+                  ? "Council mode: two response models plus one evaluator"
                   : mode.label;
             return (
               <button
@@ -996,9 +988,9 @@ export function AskClient() {
     const isWeb = modePanel === "web";
     const councilText =
       councilReady && uniqueCouncilModels.length > 1
-        ? `Ready with ${uniqueCouncilModels.join(", ")}. Chair: ${councilChairModel || uniqueCouncilModels[0]}.`
+        ? `Ready: ${uniqueCouncilModels.join(", ")} generate answers. ${councilChairModel || "Evaluator"} evaluates.`
         : councilReady
-          ? "Select two or three models below."
+          ? "Select exactly two response models and one different evaluator model."
           : (chatCapabilities?.council_reason ?? "LLM Council is not configured.");
     return (
       <div className="mt-3 rounded-[14px] border border-line bg-white px-4 py-3 text-[12.5px] shadow-[var(--shadow-card)]">
@@ -1014,30 +1006,11 @@ export function AskClient() {
             </p>
             {!isWeb && councilReady && (
               <div className="mt-3 space-y-3">
-                <div className="inline-flex rounded-[10px] border border-line bg-canvas p-1">
-                  {[2, 3].map((size) => {
-                    const unavailable = councilAvailableModels.length < size;
-                    return (
-                      <button
-                        key={size}
-                        type="button"
-                        disabled={unavailable}
-	                        onClick={() => setCouncilModelCount(size as 2 | 3)}
-                        className={cx(
-                          "rounded-[8px] px-2.5 py-1 text-[12px] font-semibold transition disabled:cursor-not-allowed disabled:opacity-45",
-                          councilSize === size ? "bg-white text-ink-900 shadow-[var(--shadow-card)]" : "text-ink-500"
-                        )}
-                      >
-                        {size} models
-                      </button>
-                    );
-                  })}
-                </div>
-                <div className="grid grid-cols-1 gap-2 md:grid-cols-3">
-                  {Array.from({ length: councilSize }).map((_, index) => (
+                <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
+                  {Array.from({ length: 2 }).map((_, index) => (
                     <label key={index} className="block">
                       <span className="mb-1 block text-[11px] font-bold uppercase tracking-[0.08em] text-ink-400">
-                        Member {index + 1}
+                        Response model {index + 1}
                       </span>
                       <select
                         value={councilModels[index] ?? ""}
@@ -1059,14 +1032,14 @@ export function AskClient() {
                 </div>
                 <label className="block max-w-sm">
                   <span className="mb-1 block text-[11px] font-bold uppercase tracking-[0.08em] text-ink-400">
-                    Chair model
+                    Evaluator model
                   </span>
                   <select
                     value={councilChairModel}
                     onChange={(event) => setCouncilChairModel(event.target.value)}
                     className="h-9 w-full rounded-[10px] border border-line bg-white px-2 text-[12px] font-semibold text-ink-700 outline-none transition focus:border-brand-300 focus:ring-4 focus:ring-brand-50"
                   >
-                    {uniqueCouncilModels.map((model) => (
+                    {councilAvailableModels.filter((model) => !uniqueCouncilModels.includes(model)).map((model) => (
                       <option key={model} value={model}>
                         {model}
                       </option>

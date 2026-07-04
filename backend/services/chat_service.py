@@ -426,14 +426,16 @@ class ChatService:
         )
         chair_system = (
             f"{build_system_prompt(chunks, role_name=assistant_role, role_prompt=assistant_role_prompt)}\n\n"
-            "You are the council chair. Candidate answers are advisory analysis, not evidence. "
-            "Only the <source> blocks are evidence. Return one final answer with source citation "
-            "markers and do not mention the council process."
+            "You are the council evaluator and final answer writer. Two candidate answers are "
+            "advisory analysis, not evidence. Evaluate them for source grounding, correctness, "
+            "completeness, and citation discipline. Only the <source> blocks are evidence. Return "
+            "one final answer with source citation markers and do not mention the council process."
         )
         chair_question = (
             f"Question:\n{question}\n\n"
             f"Candidate answers:\n{candidate_block}\n\n"
-            "Synthesize the best final answer. Preserve correct citation markers such as [1]."
+            "Evaluate both candidate answers, discard unsupported claims, and write the best final "
+            "answer. Preserve correct citation markers such as [1]."
         )
         answer, chair_usage = await _collect_llm_text(
             chair,
@@ -745,16 +747,17 @@ def llm_council_status(
 ) -> CouncilStatus:
     available_models = _council_available_models(settings)
     models = _split_csv(settings.llm_council_models)
-    if not models and settings.llm_provider in {"openrouter", "openai"} and settings.llm_model:
-        models = [settings.llm_model]
     if requested_models is not None:
         models = _normalize_requested_council_models(requested_models)
-    max_models = max(1, min(settings.llm_council_max_models, 8))
-    models = models[:max_models]
+    elif not models and available_models:
+        default_chair_model = settings.llm_council_chair_model.strip() or _best_chair_model([], available_models)
+        models = [model for model in available_models if model != default_chair_model][:2]
+    if requested_models is None:
+        models = models[:2]
     chair_model = (
         (requested_chair_model or "").strip()
         or settings.llm_council_chair_model.strip()
-        or _best_chair_model(models)
+        or _best_chair_model(models, available_models)
     )
     api_key, _base_url = _council_api_key_and_base_url(settings)
     if not settings.llm_council_enabled:
@@ -765,21 +768,21 @@ def llm_council_status(
             chair_model=chair_model,
             reason="Set LLM_COUNCIL_ENABLED=true.",
         )
-    if not models:
+    if len(models) < 2:
         return CouncilStatus(
             configured=False,
-            models=[],
+            models=models,
             available_models=available_models,
             chair_model=None,
-            reason="Set LLM_COUNCIL_MODELS to comma-separated OpenAI-compatible model ids.",
+            reason="Select exactly two Council response models.",
         )
-    if requested_models is not None and len(models) < 2:
+    if requested_models is not None and len(models) != 2:
         return CouncilStatus(
             configured=False,
             models=models,
             available_models=available_models,
             chair_model=chair_model,
-            reason="Select at least two Council models.",
+            reason="Select exactly two Council response models.",
         )
     if requested_models is not None and any(model not in available_models for model in models):
         return CouncilStatus(
@@ -789,13 +792,21 @@ def llm_council_status(
             chair_model=chair_model,
             reason="One or more selected Council models are not allowed by LLM_COUNCIL_AVAILABLE_MODELS.",
         )
-    if chair_model and chair_model not in models:
+    if not chair_model or chair_model not in available_models:
         return CouncilStatus(
             configured=False,
             models=models,
             available_models=available_models,
             chair_model=chair_model,
-            reason="The Council chair model must be one of the selected models.",
+            reason="Select one allowed Council evaluator model.",
+        )
+    if chair_model in models:
+        return CouncilStatus(
+            configured=False,
+            models=models,
+            available_models=available_models,
+            chair_model=chair_model,
+            reason="The Council evaluator model must be different from the two response models.",
         )
     if not api_key:
         return CouncilStatus(
@@ -824,7 +835,7 @@ def _council_available_models(settings: Settings) -> list[str]:
 
 
 def _normalize_requested_council_models(models: list[str]) -> list[str]:
-    return _dedupe_model_ids(model.strip() for model in models if model.strip())[:3]
+    return _dedupe_model_ids(model.strip() for model in models if model.strip())
 
 
 def _dedupe_model_ids(models: Iterable[object]) -> list[str]:
@@ -840,10 +851,11 @@ def _dedupe_model_ids(models: Iterable[object]) -> list[str]:
     return deduped
 
 
-def _best_chair_model(models: list[str]) -> str | None:
-    if not models:
+def _best_chair_model(models: list[str], available_models: list[str]) -> str | None:
+    candidates = [model for model in available_models if model not in models]
+    if not candidates:
         return None
     for preferred in ("anthropic/claude-haiku-4.5", "anthropic/claude-sonnet-4.5"):
-        if preferred in models:
+        if preferred in candidates:
             return preferred
-    return models[0]
+    return candidates[0]

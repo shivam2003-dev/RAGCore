@@ -18,7 +18,7 @@ def _settings(**overrides: object) -> Settings:
     return Settings(**values)
 
 
-def test_llm_council_status_accepts_ui_selected_models_and_chair() -> None:
+def test_llm_council_status_accepts_two_response_models_and_separate_evaluator() -> None:
     status = llm_council_status(
         _settings(),
         requested_models=[
@@ -26,12 +26,12 @@ def test_llm_council_status_accepts_ui_selected_models_and_chair() -> None:
             "openai/gpt-4.1-mini",
             "anthropic/claude-haiku-4.5",
         ],
-        requested_chair_model="openai/gpt-4.1-mini",
+        requested_chair_model="google/gemini-2.5-flash",
     )
 
     assert status.configured is True
     assert status.models == ["anthropic/claude-haiku-4.5", "openai/gpt-4.1-mini"]
-    assert status.chair_model == "openai/gpt-4.1-mini"
+    assert status.chair_model == "google/gemini-2.5-flash"
 
 
 def test_llm_council_status_rejects_unallowed_ui_model() -> None:
@@ -45,12 +45,47 @@ def test_llm_council_status_rejects_unallowed_ui_model() -> None:
     assert "not allowed" in status.reason
 
 
-def test_llm_council_status_requires_chair_from_selected_models() -> None:
+def test_llm_council_status_rejects_three_response_models() -> None:
     status = llm_council_status(
         _settings(),
-        requested_models=["openai/gpt-4.1-mini", "google/gemini-2.5-flash"],
+        requested_models=[
+            "anthropic/claude-haiku-4.5",
+            "openai/gpt-4.1-mini",
+            "google/gemini-2.5-flash",
+        ],
         requested_chair_model="anthropic/claude-haiku-4.5",
     )
 
     assert status.configured is False
-    assert "chair model" in status.reason
+    assert "exactly two" in status.reason
+
+
+def test_llm_council_status_rejects_evaluator_from_response_models() -> None:
+    status = llm_council_status(
+        _settings(),
+        requested_models=["openai/gpt-4.1-mini", "google/gemini-2.5-flash"],
+        requested_chair_model="openai/gpt-4.1-mini",
+    )
+
+    assert status.configured is False
+    assert "different" in status.reason
+
+
+def test_llm_council_status_rejects_unallowed_evaluator_model() -> None:
+    status = llm_council_status(
+        _settings(),
+        requested_models=["openai/gpt-4.1-mini", "google/gemini-2.5-flash"],
+        requested_chair_model="unknown/model",
+    )
+
+    assert status.configured is False
+    assert "evaluator" in status.reason
+
+
+def test_llm_council_status_defaults_to_two_responders_and_one_evaluator() -> None:
+    status = llm_council_status(_settings(llm_council_models=""))
+
+    assert status.configured is True
+    assert len(status.models) == 2
+    assert status.chair_model is not None
+    assert status.chair_model not in status.models
