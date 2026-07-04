@@ -1,0 +1,95 @@
+import uuid
+
+from sqlalchemy import func, select, update
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from models import Chunk, Collection, Document, DocumentStatus, DocumentVersion, KnowledgeBase
+
+
+class KnowledgeBaseRepository:
+    def __init__(self, db: AsyncSession) -> None:
+        self.db = db
+
+    def add(self, kb: KnowledgeBase) -> None:
+        self.db.add(kb)
+
+    async def get(self, kb_id: uuid.UUID, org_id: uuid.UUID) -> KnowledgeBase | None:
+        return await self.db.scalar(
+            select(KnowledgeBase).where(
+                KnowledgeBase.id == kb_id, KnowledgeBase.organization_id == org_id
+            )
+        )
+
+    async def list_by_org(self, org_id: uuid.UUID) -> list[KnowledgeBase]:
+        rows = await self.db.scalars(
+            select(KnowledgeBase)
+            .where(KnowledgeBase.organization_id == org_id)
+            .order_by(KnowledgeBase.created_at)
+        )
+        return list(rows)
+
+
+class CollectionRepository:
+    def __init__(self, db: AsyncSession) -> None:
+        self.db = db
+
+    def add(self, collection: Collection) -> None:
+        self.db.add(collection)
+
+    async def get(self, collection_id: uuid.UUID) -> Collection | None:
+        return await self.db.get(Collection, collection_id)
+
+    async def list_by_kb(self, kb_id: uuid.UUID) -> list[Collection]:
+        rows = await self.db.scalars(
+            select(Collection).where(Collection.knowledge_base_id == kb_id)
+        )
+        return list(rows)
+
+
+class DocumentRepository:
+    def __init__(self, db: AsyncSession) -> None:
+        self.db = db
+
+    def add(self, doc: Document) -> None:
+        self.db.add(doc)
+
+    def add_version(self, version: DocumentVersion) -> None:
+        self.db.add(version)
+
+    async def get(self, doc_id: uuid.UUID) -> Document | None:
+        return await self.db.get(Document, doc_id)
+
+    async def list_by_kb(
+        self, kb_id: uuid.UUID, limit: int = 50, offset: int = 0
+    ) -> tuple[list[Document], int]:
+        base = select(Document).where(
+            Document.knowledge_base_id == kb_id, Document.is_deleted.is_(False)
+        )
+        total = await self.db.scalar(select(func.count()).select_from(base.subquery())) or 0
+        rows = await self.db.scalars(
+            base.order_by(Document.created_at.desc()).limit(limit).offset(offset)
+        )
+        return list(rows), total
+
+    async def set_status(
+        self, doc_id: uuid.UUID, status: DocumentStatus, error: str | None = None
+    ) -> None:
+        await self.db.execute(
+            update(Document).where(Document.id == doc_id).values(status=status, error=error)
+        )
+
+    async def soft_delete(self, doc_id: uuid.UUID) -> None:
+        await self.db.execute(
+            update(Document).where(Document.id == doc_id).values(is_deleted=True)
+        )
+        await self.db.execute(
+            update(Chunk).where(Chunk.document_id == doc_id).values(is_active=False)
+        )
+
+    async def latest_version(self, doc_id: uuid.UUID) -> DocumentVersion | None:
+        return await self.db.scalar(
+            select(DocumentVersion)
+            .where(DocumentVersion.document_id == doc_id)
+            .order_by(DocumentVersion.version.desc())
+            .limit(1)
+        )

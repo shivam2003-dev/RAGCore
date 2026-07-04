@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kimbal-api-config
+  namespace: kimbal
+data:
+  APP_ENV: "production"
+  APP_DEBUG: "false"
+  EMBEDDING_PROVIDER: "openai"
+  EMBEDDING_MODEL: "text-embedding-3-small"
+  EMBEDDING_DIMENSIONS: "1536"
+  LLM_PROVIDER: "openrouter"
+  LLM_MODEL: "anthropic/claude-haiku-4.5"
+  RETRIEVAL_TOP_K: "8"
+  RETRIEVAL_DENSE_WEIGHT: "0.7"
+  RETRIEVAL_SPARSE_WEIGHT: "0.3"
+  RATE_LIMIT_PER_MINUTE: "60"

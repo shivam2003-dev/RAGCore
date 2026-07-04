@@ -1,0 +1,62 @@
+name: kimbal
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg17
+    container_name: kimbal-postgres
+    environment:
+      POSTGRES_USER: kimbal
+      POSTGRES_PASSWORD: kimbal_dev_password
+      POSTGRES_DB: kimbal
+    ports:
+      - "5433:5432"
+    volumes:
+      - kimbal_pgdata:/var/lib/postgresql/data
+      - ./backend/database/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U kimbal -d kimbal"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: kimbal-redis
+    command: ["redis-server", "--maxmemory", "256mb", "--maxmemory-policy", "allkeys-lru"]
+    ports:
+      - "6379:6379"
+    volumes:
+      - kimbal_redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  api:
+    build: ./backend
+    container_name: kimbal-api
+    profiles: ["full"]  # opt-in: `docker compose --profile full up` (local dev runs uvicorn directly)
+    environment:
+      DATABASE_URL: postgresql+asyncpg://kimbal:kimbal_dev_password@postgres:5432/kimbal
+      REDIS_URL: redis://redis:6379/0
+      APP_ENV: production
+      APP_SECRET_KEY: ${APP_SECRET_KEY:-compose-dev-secret}
+      LLM_PROVIDER: ${LLM_PROVIDER:-fake}
+      LLM_MODEL: ${LLM_MODEL:-anthropic/claude-haiku-4.5}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-fake}
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  kimbal_pgdata:
+  kimbal_redis:

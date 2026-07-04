@@ -1,0 +1,26 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: kimbal-api
+  namespace: kimbal
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-body-size: "60m"        # uploads
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "300"     # SSE streams
+    nginx.ingress.kubernetes.io/proxy-buffering: "off"        # stream tokens immediately
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts: [api.kimbal.io]
+      secretName: kimbal-api-tls
+  rules:
+    - host: api.kimbal.io
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: kimbal-api
+                port:
+                  number: 80

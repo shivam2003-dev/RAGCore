@@ -1,26 +1,66 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
+@theme {
+  --color-brand-50: #f0f0fe;
+  --color-brand-100: #e3e4fd;
+  --color-brand-200: #cccdfb;
+  --color-brand-300: #a9aaf7;
+  --color-brand-400: #8583f1;
+  --color-brand-500: #5b5ceb;
+  --color-brand-600: #4a44dd;
+  --color-brand-700: #3f36c3;
+  --color-brand-800: #342e9e;
+  --color-brand-900: #2e2c7d;
+
+  --color-ink-900: #171a2c;
+  --color-ink-700: #3d415c;
+  --color-ink-500: #6b7191;
+  --color-ink-400: #9298b4;
+  --color-ink-300: #b8bdd3;
+
+  --color-line: #e9ebf4;
+  --color-canvas: #f7f8fc;
+  --color-panel: #fcfcfe;
+
+  --radius-card: 18px;
+  --radius-tile: 12px;
+
+  --shadow-card: 0 1px 2px rgba(23, 26, 44, 0.04), 0 8px 24px -12px rgba(23, 26, 44, 0.08);
+  --shadow-pop: 0 2px 4px rgba(23, 26, 44, 0.05), 0 16px 40px -16px rgba(91, 92, 235, 0.18);
+
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+html {
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background: var(--color-canvas);
+  color: var(--color-ink-900);
+  font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+}
+
+::selection {
+  background: var(--color-brand-100);
+}
+
+*::-webkit-scrollbar { width: 8px; height: 8px; }
+*::-webkit-scrollbar-thumb { background: #d9dcea; border-radius: 8px; }
+*::-webkit-scrollbar-track { background: transparent; }
+
+@keyframes rise {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.animate-rise { animation: rise 0.45s cubic-bezier(0.22, 1, 0.36, 1) both; }
+.animate-rise-1 { animation: rise 0.45s 0.05s cubic-bezier(0.22, 1, 0.36, 1) both; }
+.animate-rise-2 { animation: rise 0.45s 0.1s cubic-bezier(0.22, 1, 0.36, 1) both; }
+.animate-rise-3 { animation: rise 0.45s 0.15s cubic-bezier(0.22, 1, 0.36, 1) both; }
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-rise, .animate-rise-1, .animate-rise-2, .animate-rise-3 { animation: none; }
+  * { transition-duration: 0.01ms !important; }
 }
