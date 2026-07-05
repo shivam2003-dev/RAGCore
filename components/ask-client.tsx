@@ -474,8 +474,8 @@ export function AskClient() {
   const [chatCapabilities, setChatCapabilities] = useState<ChatCapabilities | null>(null);
   const [councilModels, setCouncilModels] = useState<string[]>([]);
   const [councilChairModel, setCouncilChairModel] = useState("");
-  const [viewMode, setViewMode] = useState<"workbench" | "focus">("focus");
-  const [focusRailExpanded, setFocusRailExpanded] = useState(false);
+  const [viewMode, setViewMode] = useState<"workbench" | "focus">("workbench");
+  const [focusRailExpanded, setFocusRailExpanded] = useState(true);
   const [focusWorkspace, setFocusWorkspace] = useState<"chat" | "discover">("chat");
   const [focusDrawer, setFocusDrawer] = useState<"sources" | "history" | null>(null);
   const [highlightedMarker, setHighlightedMarker] = useState<number | null>(null);

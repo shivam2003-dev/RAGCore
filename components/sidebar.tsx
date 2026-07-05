@@ -29,6 +29,8 @@ import type { UserOut } from "@/lib/kimbal-api";
 
 type Item = { label: string; href: string; icon: LucideIcon };
 
+const SIDEBAR_COLLAPSED_KEY = "kimbal.sidebar.collapsed.v1";
+
 const groups: Array<{ label?: string; items: Item[] }> = [
   {
     items: [{ label: "Home", href: "/", icon: Home }],
@@ -75,9 +77,11 @@ function titleForRole(role: string) {
 
 export function Sidebar({ user, onLogout }: { user: UserOut; onLogout: () => void }) {
   const pathname = usePathname();
+  const isAskPath = pathname === "/ask";
   const [collapsed, setCollapsed] = useState(() => {
     if (typeof window === "undefined") return false;
-    return window.localStorage.getItem("kimbal.sidebar.collapsed.v1") === "true";
+    if (window.location.pathname === "/ask") return false;
+    return window.localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === "true";
   });
   const visibleGroups =
     user.role === "admin"
@@ -85,12 +89,22 @@ export function Sidebar({ user, onLogout }: { user: UserOut; onLogout: () => voi
       : [{ items: [{ label: "Ask Kimbal", href: "/ask", icon: MessageSquare }] }];
 
   useEffect(() => {
+    if (isAskPath) {
+      setCollapsed(false);
+      return;
+    }
+    setCollapsed(window.localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === "true");
+  }, [isAskPath]);
+
+  useEffect(() => {
     document.body.classList.toggle("sidebar-collapsed", collapsed);
-    window.localStorage.setItem("kimbal.sidebar.collapsed.v1", String(collapsed));
+    if (!isAskPath) {
+      window.localStorage.setItem(SIDEBAR_COLLAPSED_KEY, String(collapsed));
+    }
     return () => {
       document.body.classList.remove("sidebar-collapsed");
     };
-  }, [collapsed]);
+  }, [collapsed, isAskPath]);
 
   return (
     <aside

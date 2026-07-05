@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, type ReactNode } from "react";
+import { usePathname } from "next/navigation";
 import { AppPreferences } from "@/components/app-preferences";
 import { Sidebar } from "@/components/sidebar";
 import { TopBar } from "@/components/topbar";
@@ -17,10 +18,8 @@ function loginHref(pathname: string) {
 export function AuthShell({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<UserOut | null>(null);
   const [checking, setChecking] = useState(true);
-  const [pathname] = useState(() => {
-    if (typeof window === "undefined") return null;
-    return window.location.pathname || ASK_PATH;
-  });
+  const currentPathname = usePathname();
+  const pathname = currentPathname || ASK_PATH;
 
   const isLogin = pathname === LOGIN_PATH;
   const isAdmin = user?.role === "admin";
@@ -66,11 +65,11 @@ export function AuthShell({ children }: { children: ReactNode }) {
     window.location.replace(LOGIN_PATH);
   }
 
-  if (isLogin && pathname) {
+  if (isLogin) {
     return <>{children}</>;
   }
 
-  if (!pathname || checking || !user || !userCanViewPath) {
+  if (checking || !user || !userCanViewPath) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-canvas px-6">
         <div className="rounded-[14px] border border-line bg-white px-5 py-4 text-[13.5px] font-semibold text-ink-600 shadow-[var(--shadow-card)]">
