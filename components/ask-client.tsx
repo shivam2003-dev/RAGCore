@@ -26,13 +26,14 @@ import {
   Sparkles,
   ThumbsDown,
   ThumbsUp,
+  Trash2,
   User,
   Users,
   Wrench,
   Zap,
   type LucideIcon,
 } from "lucide-react";
-import { Card, CardLink, GhostButton, cx } from "@/components/ui";
+import { Badge, Card, CardLink, GhostButton, cx } from "@/components/ui";
 import { DiscoverClient } from "@/components/discover-client";
 import {
   kimbalApi,
@@ -201,6 +202,13 @@ function cleanSourceSnippet(value: string) {
 
 function sourceScorePercent(score: number) {
   return Math.round(Math.min(Math.max(score, 0), 1) * 100);
+}
+
+function freshnessTone(label: string | undefined): "green" | "amber" | "red" | "gray" {
+  if (label === "fresh") return "green";
+  if (label === "aging") return "amber";
+  if (label === "stale") return "red";
+  return "gray";
 }
 
 function answerModeFromModel(model?: string | null): AnswerMode | undefined {
@@ -702,6 +710,26 @@ export function AskClient() {
     setState("idle");
   }
 
+  async function clearCurrentChat() {
+    if (busy || !conversationId) {
+      setActionStatus("Open a conversation before clearing history.");
+      return;
+    }
+    try {
+      await kimbalApi.clearConversationHistory(conversationId);
+      setTurn({ question: "", answer: "", sources: [], timings: {} });
+      setInput("");
+      setError("");
+      setFeedback("");
+      setHighlightedMarker(null);
+      setActionStatus("Chat history cleared");
+      setState("idle");
+      void loadConversations();
+    } catch (cause) {
+      setActionStatus(cause instanceof Error ? cause.message : "Clear history failed");
+    }
+  }
+
   async function openConversation(conversation: Conversation) {
     if (busy) return;
     setFocusWorkspace("chat");
@@ -1148,6 +1176,9 @@ export function AskClient() {
               )}
               </div>
               <div className="mt-2 flex flex-wrap items-center gap-2 pl-9">
+                {source.freshness_label && (
+                  <Badge tone={freshnessTone(source.freshness_label)}>{source.freshness_label}</Badge>
+                )}
                 <button
                   type="button"
                   onClick={() => openCitationReference(marker)}
@@ -1422,6 +1453,19 @@ export function AskClient() {
             </button>
             <button
               type="button"
+              onClick={() => void clearCurrentChat()}
+              disabled={busy || !conversationId}
+              title="Clear chat history"
+              className={cx(
+                "flex h-10 items-center gap-3 rounded-full text-ink-500 transition hover:bg-white hover:text-ink-900 hover:shadow-[var(--shadow-card)] disabled:opacity-50",
+                focusRailExpanded ? "w-full px-3 text-[13px] font-semibold" : "w-10 justify-center"
+              )}
+            >
+              <Trash2 size={18} />
+              {focusRailExpanded && "Clear"}
+            </button>
+            <button
+              type="button"
               onClick={() => {
                 setFocusDrawer(null);
                 setFocusWorkspace(focusWorkspace === "discover" ? "chat" : "discover");
@@ -1638,6 +1682,10 @@ export function AskClient() {
             <GhostButton className="px-3 py-2 text-[12.5px]" disabled={busy} onClick={startNewChat}>
               <MessageSquarePlus size={14} />
               New Chat
+            </GhostButton>
+            <GhostButton className="px-3 py-2 text-[12.5px]" disabled={busy || !conversationId} onClick={() => void clearCurrentChat()}>
+              <Trash2 size={14} />
+              Clear
             </GhostButton>
             <GhostButton className="px-3 py-2 text-[12.5px]" onClick={() => setViewMode("focus")}>
               <Maximize2 size={14} />

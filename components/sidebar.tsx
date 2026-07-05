@@ -18,13 +18,14 @@ import {
   Users,
   Settings,
   Workflow,
-  ChevronDown,
+  LogOut,
   PanelLeftClose,
   PanelLeftOpen,
   type LucideIcon,
 } from "lucide-react";
 import { KimbalMark } from "./brand-icons";
 import { cx } from "./ui";
+import type { UserOut } from "@/lib/kimbal-api";
 
 type Item = { label: string; href: string; icon: LucideIcon };
 
@@ -62,12 +63,26 @@ const groups: Array<{ label?: string; items: Item[] }> = [
   },
 ];
 
-export function Sidebar() {
+function initials(name: string) {
+  return name.split(" ").filter(Boolean).map((part) => part[0]).join("").slice(0, 2).toUpperCase() || "U";
+}
+
+function titleForRole(role: string) {
+  if (role === "admin") return "Super admin";
+  if (role === "editor") return "Editor";
+  return "Ask access";
+}
+
+export function Sidebar({ user, onLogout }: { user: UserOut; onLogout: () => void }) {
   const pathname = usePathname();
   const [collapsed, setCollapsed] = useState(() => {
     if (typeof window === "undefined") return false;
     return window.localStorage.getItem("kimbal.sidebar.collapsed.v1") === "true";
   });
+  const visibleGroups =
+    user.role === "admin"
+      ? groups
+      : [{ items: [{ label: "Ask Kimbal", href: "/ask", icon: MessageSquare }] }];
 
   useEffect(() => {
     document.body.classList.toggle("sidebar-collapsed", collapsed);
@@ -85,7 +100,7 @@ export function Sidebar() {
       )}
     >
       <div className={cx("flex items-center gap-2.5 pb-5 pt-6", collapsed ? "justify-center px-3" : "px-6")}>
-        <Link href="/" className="flex items-center gap-2.5" aria-label="Home">
+        <Link href={user.role === "admin" ? "/" : "/ask"} className="flex items-center gap-2.5" aria-label="Home">
           <KimbalMark size={30} />
           {!collapsed && <span className="text-[21px] font-bold tracking-[-0.02em] text-ink-900">kimbal</span>}
         </Link>
@@ -104,7 +119,7 @@ export function Sidebar() {
       </div>
 
       <nav className={cx("flex-1 overflow-y-auto pb-4", collapsed ? "px-2" : "px-3.5")}>
-        {groups.map((g, gi) => (
+        {visibleGroups.map((g, gi) => (
           <div key={gi} className={gi > 0 ? "mt-5" : ""}>
             {g.label && !collapsed && (
               <p className="px-2.5 pb-2 text-[10.5px] font-bold uppercase tracking-[0.12em] text-ink-400">
@@ -142,27 +157,45 @@ export function Sidebar() {
         ))}
       </nav>
 
-      <Link
-        href="/settings"
-        title={collapsed ? "Shivam Kumar" : undefined}
+      <div
+        title={collapsed ? user.full_name : undefined}
         className={cx(
           "mx-3.5 mb-4 flex items-center gap-3 rounded-[14px] border border-line bg-white p-2.5 text-left shadow-[var(--shadow-card)] transition hover:border-brand-200",
           collapsed && "justify-center px-2"
         )}
       >
         <span className="flex h-9 w-9 items-center justify-center rounded-full bg-gradient-to-br from-brand-400 to-brand-600 text-[13px] font-bold text-white">
-          SK
+          {initials(user.full_name)}
         </span>
         {!collapsed && (
           <>
             <span className="flex-1">
-              <span className="block text-[13px] font-semibold text-ink-900">Shivam Kumar</span>
-              <span className="block text-[11.5px] text-ink-500">DevSecOps Engineer</span>
+              <span className="block text-[13px] font-semibold text-ink-900">{user.full_name}</span>
+              <span className="block text-[11.5px] text-ink-500">{titleForRole(user.role)}</span>
             </span>
-            <ChevronDown size={15} className="text-ink-400" />
+            <button
+              type="button"
+              onClick={onLogout}
+              aria-label="Sign out"
+              title="Sign out"
+              className="flex h-7 w-7 items-center justify-center rounded-[8px] text-ink-400 transition hover:bg-canvas hover:text-ink-900"
+            >
+              <LogOut size={15} />
+            </button>
           </>
         )}
-      </Link>
+        {collapsed && (
+          <button
+            type="button"
+            onClick={onLogout}
+            aria-label="Sign out"
+            title="Sign out"
+            className="absolute bottom-16 left-5 flex h-8 w-8 items-center justify-center rounded-[8px] text-ink-400 transition hover:bg-canvas hover:text-ink-900"
+          >
+            <LogOut size={15} />
+          </button>
+        )}
+      </div>
     </aside>
   );
 }

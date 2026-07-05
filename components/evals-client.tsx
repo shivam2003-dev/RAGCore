@@ -5,6 +5,7 @@ import {
   AlertTriangle,
   Brain,
   CheckCircle2,
+  ClipboardCheck,
   Gauge,
   Loader2,
   MessageSquareQuote,
@@ -14,7 +15,7 @@ import {
   Timer,
 } from "lucide-react";
 import { Badge, Card, CardTitle, GhostButton, PageHeader, ProgressBar, cx } from "@/components/ui";
-import { EvalOverview, EvalScore, kimbalApi } from "@/lib/kimbal-api";
+import { EvalGateRun, EvalOverview, EvalScore, kimbalApi } from "@/lib/kimbal-api";
 
 function number(value: number) {
   return new Intl.NumberFormat().format(value);
@@ -51,8 +52,16 @@ function formatDate(value: string) {
   }).format(new Date(value));
 }
 
+function formatBreakdown(values: Record<string, number> | undefined) {
+  if (!values) return "N/A";
+  const entries = Object.entries(values);
+  if (!entries.length) return "N/A";
+  return entries.map(([key, value]) => `${key}: ${number(value)}`).join(" · ");
+}
+
 export function EvalsClient() {
   const [overview, setOverview] = useState<EvalOverview | null>(null);
+  const [offlineGate, setOfflineGate] = useState<EvalGateRun | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
@@ -62,7 +71,12 @@ export function EvalsClient() {
     try {
       if (force) kimbalApi.refreshLiveData();
       await kimbalApi.ensureSession();
-      setOverview(await kimbalApi.evalsOverview());
+      const [liveOverview, gate] = await Promise.all([
+        kimbalApi.evalsOverview(),
+        kimbalApi.evalsOfflineGate(),
+      ]);
+      setOverview(liveOverview);
+      setOfflineGate(gate);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Failed to load evals");
     } finally {
@@ -102,6 +116,41 @@ export function EvalsClient() {
       )}
 
       <div className="grid grid-cols-12 gap-5 animate-rise-1">
+        <Card className="col-span-12 p-5">
+          <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
+            <div>
+              <CardTitle icon={Gauge} title={overview?.benchmark.label ?? "Kimbal Benchmark"} tint="bg-brand-50 text-brand-500" />
+              <p className="mt-3 max-w-3xl text-[13px] leading-6 text-ink-500">
+                {overview?.benchmark.detail ?? "Loading benchmark from stored answer evaluations."}
+              </p>
+            </div>
+            <div className="shrink-0 rounded-[16px] border border-line bg-canvas px-6 py-5 text-center">
+              <p className="text-[11.5px] font-bold uppercase tracking-[0.08em] text-ink-400">Benchmark score</p>
+              <p className="mt-1 text-[42px] font-black tracking-[-0.03em] text-ink-950">
+                {overview?.benchmark.display ?? "N/A"}
+              </p>
+              <Badge tone={statusTone(overview?.benchmark.status ?? "no_data")}>{overview?.benchmark.status ?? "Loading"}</Badge>
+            </div>
+          </div>
+          <div className="mt-5 grid grid-cols-1 gap-3 md:grid-cols-3">
+            {(overview?.benchmark.components ?? []).map((component) => (
+              <div key={component.id} className="rounded-[12px] border border-line bg-white px-3 py-3">
+                <div className="flex items-center justify-between gap-3 text-[12px]">
+                  <span className="font-bold text-ink-700">{component.label}</span>
+                  <span className="font-bold text-ink-900">{component.display}</span>
+                </div>
+                <ProgressBar value={(component.value ?? 0) * 100} color={progressColor(overview?.benchmark.status ?? "no_data")} />
+                <p className="mt-1 text-[11px] font-semibold text-ink-400">Weight {Math.round(component.weight * 100)}%</p>
+              </div>
+            ))}
+            {!overview?.benchmark.components.length && (
+              <div className="rounded-[12px] border border-line bg-white px-3 py-3 text-[13px] text-ink-500 md:col-span-3">
+                No benchmark components available yet.
+              </div>
+            )}
+          </div>
+        </Card>
+
         <Card className="col-span-12 p-5 lg:col-span-4">
           <CardTitle icon={Gauge} title="Eval Window" tint="bg-sky-50 text-sky-600" />
           <div className="mt-5 grid grid-cols-2 gap-3">
@@ -111,7 +160,7 @@ export function EvalsClient() {
             <MetricTile label="Helpful rate" value={percent(overview?.feedback.helpful_rate ?? null)} />
           </div>
           <p className="mt-4 rounded-[12px] border border-line bg-canvas px-3 py-2.5 text-[12.5px] leading-5 text-ink-500">
-            These are live heuristic evals over stored conversations. Add a golden dataset before using them as release gates.
+            Live production health is separate from offline release gates, which run the golden dataset against indexed sources.
           </p>
         </Card>
 
@@ -125,6 +174,67 @@ export function EvalsClient() {
           </div>
         </Card>
       </div>
+
+      <Card className="mt-5 p-5 animate-rise-2">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+          <div>
+            <CardTitle
+              icon={ClipboardCheck}
+              title="Offline Release Gate"
+              tint={offlineGate?.passed ? "bg-emerald-50 text-emerald-600" : "bg-rose-50 text-rose-600"}
+              right={<Badge tone={offlineGate?.passed ? "green" : "red"}>{offlineGate?.passed ? "Passing" : "Failing"}</Badge>}
+            />
+            <p className="mt-3 max-w-3xl text-[13px] leading-6 text-ink-500">
+              {offlineGate
+                ? `${offlineGate.cases} golden cases from ${offlineGate.dataset_path}. Failing examples include expected sources, returned sources, answer text, and judge rationale.`
+                : "Loading offline golden-set release gate."}
+            </p>
+          </div>
+          <div className="shrink-0 rounded-[14px] border border-line bg-canvas px-5 py-4 text-center">
+            <p className="text-[11.5px] font-bold uppercase tracking-[0.08em] text-ink-400">Gate score</p>
+            <p className="mt-1 text-[34px] font-black tracking-[-0.03em] text-ink-950">{offlineGate?.display ?? "N/A"}</p>
+          </div>
+        </div>
+
+        <div className="mt-5 grid grid-cols-1 gap-3 md:grid-cols-3 xl:grid-cols-4">
+          {(offlineGate?.metrics ?? []).slice(0, 8).map((metric) => (
+            <div key={metric.id} className="rounded-[12px] border border-line bg-white px-3 py-3">
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-[12.5px] font-bold text-ink-800">{metric.label}</p>
+                <Badge tone={metric.passed ? "green" : "red"}>{metric.display}</Badge>
+              </div>
+              <p className="mt-2 text-[11.5px] leading-5 text-ink-400">{metric.detail}</p>
+            </div>
+          ))}
+          {!offlineGate?.metrics.length && (
+            <p className="rounded-[12px] border border-line bg-white px-3 py-3 text-[13px] text-ink-500">
+              No offline gate metrics available.
+            </p>
+          )}
+        </div>
+
+        <div className="mt-5 grid grid-cols-1 gap-3 lg:grid-cols-2">
+          {(offlineGate?.failing_cases ?? []).slice(0, 4).map((item) => (
+            <div key={item.id} className="rounded-[14px] border border-rose-100 bg-rose-50/40 p-4">
+              <div className="flex flex-wrap items-center gap-2">
+                <Badge tone="red">{item.category}</Badge>
+                <span className="text-[11.5px] font-bold uppercase tracking-[0.08em] text-rose-500">{item.id}</span>
+              </div>
+              <p className="mt-2 text-[13px] font-bold text-ink-900">{item.question}</p>
+              <p className="mt-2 text-[12.5px] leading-5 text-rose-700">{item.judge_rationale}</p>
+              <div className="mt-3 grid grid-cols-2 gap-2 text-[11.5px] font-semibold text-ink-500">
+                <span className="rounded-[10px] bg-white px-2.5 py-2">Expected: {item.expected_sources.join(", ")}</span>
+                <span className="rounded-[10px] bg-white px-2.5 py-2">Returned: {item.returned_sources.join(", ") || "none"}</span>
+              </div>
+            </div>
+          ))}
+          {offlineGate?.passed && (
+            <p className="rounded-[14px] border border-emerald-100 bg-emerald-50 px-4 py-4 text-[13px] font-semibold text-emerald-700">
+              All golden cases are currently above the configured release thresholds.
+            </p>
+          )}
+        </div>
+      </Card>
 
       <div className="mt-5 grid grid-cols-12 gap-5 animate-rise-2">
         <Card className="col-span-12 p-5 lg:col-span-5">
@@ -209,18 +319,40 @@ export function EvalsClient() {
           </div>
         </Card>
 
-        <Card className="col-span-12 p-5 lg:col-span-4">
-          <CardTitle icon={Sparkles} title="Methodology" tint="bg-sky-50 text-sky-600" />
-          <div className="mt-4 space-y-3">
-            {(overview?.methodology ?? [
-              "Loading current methodology from the backend.",
-            ]).map((item) => (
-              <div key={item} className="rounded-[12px] border border-line bg-canvas px-3 py-3">
-                <p className="text-[12.5px] leading-5 text-ink-600">{item}</p>
-              </div>
-            ))}
-          </div>
-        </Card>
+        <div className="col-span-12 space-y-5 lg:col-span-4">
+          <Card className="p-5">
+            <CardTitle icon={Sparkles} title="Methodology" tint="bg-sky-50 text-sky-600" />
+            <div className="mt-4 space-y-3">
+              {(overview?.methodology ?? [
+                "Loading current methodology from the backend.",
+              ]).map((item) => (
+                <div key={item} className="rounded-[12px] border border-line bg-canvas px-3 py-3">
+                  <p className="text-[12.5px] leading-5 text-ink-600">{item}</p>
+                </div>
+              ))}
+            </div>
+          </Card>
+
+          <Card className="p-5">
+            <CardTitle
+              icon={ClipboardCheck}
+              title="Golden Dataset"
+              tint="bg-emerald-50 text-emerald-600"
+              right={<Badge tone={overview?.golden_dataset.benchmark_ready ? "green" : "gray"}>{overview?.golden_dataset.cases ?? 0} cases</Badge>}
+            />
+            <div className="mt-4 space-y-3 text-[12.5px] leading-5 text-ink-600">
+              <p className="rounded-[12px] border border-line bg-canvas px-3 py-3">
+                {overview?.golden_dataset.dataset_path ?? "evals/golden/rag.jsonl"}
+              </p>
+              <p className="rounded-[12px] border border-line bg-canvas px-3 py-3">
+                Categories: {formatBreakdown(overview?.golden_dataset.categories)}
+              </p>
+              <p className="rounded-[12px] border border-line bg-canvas px-3 py-3">
+                Source targets: {formatBreakdown(overview?.golden_dataset.source_types)}
+              </p>
+            </div>
+          </Card>
+        </div>
       </div>
     </div>
   );

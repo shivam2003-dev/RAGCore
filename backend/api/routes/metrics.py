@@ -1,20 +1,23 @@
 import uuid
+import re
 
 from fastapi import APIRouter
-from sqlalchemy import case, desc, func, select
+from sqlalchemy import and_, case, desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from api.deps import CurrentUser, DbDep
+from api.deps import CurrentUser, DbDep, require_role
 from api.schemas import (
     ActivityMetricOut,
+    ConnectorRunOut,
     FeedbackMetricOut,
     MetricsOverviewOut,
     QuestionMetricOut,
     SourceMetricOut,
 )
-from models import AuditLog, Chunk, Conversation, Document, DocumentStatus, Feedback, KnowledgeBase, Message, User
+from models import AuditLog, Chunk, Conversation, Document, DocumentStatus, Feedback, KnowledgeBase, Message, Role, User
 
-router = APIRouter(prefix="/metrics", tags=["metrics"])
+router = APIRouter(prefix="/metrics", tags=["metrics"], dependencies=[require_role(Role.ADMIN)])
+RUN_DETAIL_RE = re.compile(r"(?P<value>\d+)\s+(?P<name>created|updated|skipped|failed)")
 
 
 @router.get("/overview", response_model=MetricsOverviewOut)
@@ -88,6 +91,21 @@ async def metrics_overview(user: CurrentUser, db: DbDep) -> MetricsOverviewOut:
     feedback_total = helpful + not_helpful
 
     sources = await _source_metrics(db, org_id)
+    connector_runs = await _connector_runs(db, org_id)
+    runs_by_kb = {str(run.knowledge_base_id): run for run in connector_runs if run.knowledge_base_id}
+    sources = [
+        source.model_copy(
+            update={
+                "last_run_at": runs_by_kb.get(str(source.knowledge_base_id)).created_at
+                if source.knowledge_base_id and runs_by_kb.get(str(source.knowledge_base_id))
+                else None,
+                "last_run_detail": runs_by_kb.get(str(source.knowledge_base_id)).detail
+                if source.knowledge_base_id and runs_by_kb.get(str(source.knowledge_base_id))
+                else None,
+            }
+        )
+        for source in sources
+    ]
     recent_activity = await _recent_activity(db, org_id)
     top_questions = await _top_questions(db, org_id)
 
@@ -110,6 +128,7 @@ async def metrics_overview(user: CurrentUser, db: DbDep) -> MetricsOverviewOut:
             helpful_rate=(helpful / feedback_total) if feedback_total else None,
         ),
         sources=sources,
+        connector_runs=connector_runs,
         recent_activity=recent_activity,
         top_questions=top_questions,
     )
@@ -119,29 +138,91 @@ async def _source_metrics(db: AsyncSession, org_id: uuid.UUID) -> list[SourceMet
     source_expr = func.coalesce(Document.doc_metadata["source"].as_string(), Document.source_type)
     rows = await db.execute(
         select(
+            KnowledgeBase.id,
+            KnowledgeBase.name,
             source_expr.label("source"),
-            Document.source_type,
-            func.count(Document.id),
-            func.sum(case((Document.status == DocumentStatus.READY, 1), else_=0)),
-            func.sum(case((Document.status == DocumentStatus.FAILED, 1), else_=0)),
+            func.count(func.distinct(Document.id)),
+            func.count(func.distinct(case((Document.status == DocumentStatus.READY, Document.id)))),
+            func.count(func.distinct(case((Document.status == DocumentStatus.UPLOADED, Document.id)))),
+            func.count(func.distinct(case((Document.status == DocumentStatus.PROCESSING, Document.id)))),
+            func.count(func.distinct(case((Document.status == DocumentStatus.FAILED, Document.id)))),
+            func.count(Chunk.id),
             func.max(Document.updated_at),
+            func.max(Chunk.created_at),
         )
         .join(KnowledgeBase, KnowledgeBase.id == Document.knowledge_base_id)
-        .where(KnowledgeBase.organization_id == org_id, Document.is_deleted.is_(False))
-        .group_by(source_expr, Document.source_type)
-        .order_by(desc(func.count(Document.id)))
-    )
-    return [
-        SourceMetricOut(
-            name=_source_label(str(row[0] or row[1] or "unknown")),
-            source_type=str(row[1] or "unknown"),
-            documents=int(row[2] or 0),
-            ready_documents=int(row[3] or 0),
-            failed_documents=int(row[4] or 0),
-            last_updated_at=row[5],
+        .outerjoin(
+            Chunk,
+            and_(Chunk.document_id == Document.id, Chunk.is_active.is_(True)),
         )
-        for row in rows
-    ]
+        .where(KnowledgeBase.organization_id == org_id, Document.is_deleted.is_(False))
+        .group_by(KnowledgeBase.id, KnowledgeBase.name, source_expr)
+        .order_by(desc(func.count(func.distinct(Document.id))))
+    )
+    sources: list[SourceMetricOut] = []
+    for row in rows:
+        documents = int(row[3] or 0)
+        ready = int(row[4] or 0)
+        uploaded = int(row[5] or 0)
+        processing = int(row[6] or 0)
+        failed = int(row[7] or 0)
+        sources.append(
+            SourceMetricOut(
+                knowledge_base_id=row[0],
+                name=str(row[1] or _source_label(str(row[2] or "unknown"))),
+                source_type=str(row[2] or "unknown"),
+                documents=documents,
+                ready_documents=ready,
+                pending_documents=max(0, uploaded + processing),
+                uploaded_documents=uploaded,
+                processing_documents=processing,
+                failed_documents=failed,
+                chunks_active=int(row[8] or 0),
+                last_updated_at=row[9],
+                last_ingested_at=row[10],
+            )
+        )
+    return sources
+
+
+async def _connector_runs(db: AsyncSession, org_id: uuid.UUID) -> list[ConnectorRunOut]:
+    rows = await db.scalars(
+        select(AuditLog)
+        .where(
+            AuditLog.organization_id == org_id,
+            AuditLog.action.in_(["confluence.sync", "jira.sync"]),
+        )
+        .order_by(AuditLog.created_at.desc())
+        .limit(12)
+    )
+    return [_connector_run_from_audit(row) for row in rows]
+
+
+def _connector_run_from_audit(row: AuditLog) -> ConnectorRunOut:
+    counts = {match.group("name"): int(match.group("value")) for match in RUN_DETAIL_RE.finditer(row.detail or "")}
+    failed = counts.get("failed", 0)
+    created = counts.get("created", 0)
+    updated = counts.get("updated", 0)
+    skipped = counts.get("skipped", 0)
+    total = created + updated + skipped + failed
+    knowledge_base_id: uuid.UUID | None = None
+    if row.resource_id:
+        try:
+            knowledge_base_id = uuid.UUID(row.resource_id)
+        except ValueError:
+            knowledge_base_id = None
+    return ConnectorRunOut(
+        connector=row.action.removesuffix(".sync"),
+        knowledge_base_id=knowledge_base_id,
+        status="failed" if failed else "completed",
+        total=total,
+        created=created,
+        updated=updated,
+        skipped=skipped,
+        failed=failed,
+        detail=row.detail,
+        created_at=row.created_at,
+    )
 
 
 async def _recent_activity(db: AsyncSession, org_id: uuid.UUID) -> list[ActivityMetricOut]:

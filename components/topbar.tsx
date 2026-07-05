@@ -2,11 +2,15 @@
 
 import { FormEvent, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Bell, CheckCircle2, Search, Settings2, X } from "lucide-react";
+import { Bell, CheckCircle2, LogOut, Search, Settings2, X } from "lucide-react";
 import Link from "next/link";
-import { kimbalApi, type ActivityMetric } from "@/lib/kimbal-api";
+import { kimbalApi, type ActivityMetric, type UserOut } from "@/lib/kimbal-api";
 
-export function TopBar() {
+function firstName(name: string) {
+  return name.trim().split(/\s+/)[0] || "there";
+}
+
+export function TopBar({ user, onLogout }: { user: UserOut; onLogout: () => void }) {
   const router = useRouter();
   const [query, setQuery] = useState("");
   const [showNotifications, setShowNotifications] = useState(false);
@@ -14,6 +18,7 @@ export function TopBar() {
 
   useEffect(() => {
     async function load() {
+      if (user.role !== "admin") return;
       try {
         await kimbalApi.ensureSession();
         const metrics = await kimbalApi.metricsOverview();
@@ -23,7 +28,7 @@ export function TopBar() {
       }
     }
     void load();
-  }, []);
+  }, [user.role]);
 
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -34,24 +39,26 @@ export function TopBar() {
   return (
     <header className="kimbal-topbar sticky top-0 z-20 flex h-[64px] items-center justify-between border-b border-line bg-canvas/80 px-8 backdrop-blur-xl">
       <p className="text-[14px] text-ink-500">
-        Welcome back, <span className="font-semibold text-ink-900">Shivam</span>
+        Welcome back, <span className="font-semibold text-ink-900">{firstName(user.full_name)}</span>
       </p>
 
       <div className="relative flex items-center gap-3">
-        <button
-          type="button"
-          onClick={() => setShowNotifications((open) => !open)}
-          className="relative flex h-10 w-10 items-center justify-center rounded-[12px] text-ink-500 transition hover:bg-white hover:text-ink-900 hover:shadow-[var(--shadow-card)]"
-          aria-label="Notifications"
-          aria-expanded={showNotifications}
-        >
-          <Bell size={18} strokeWidth={2} />
-          {notifications.length > 0 && (
-            <span className="absolute right-1.5 top-1.5 flex h-[15px] w-[15px] items-center justify-center rounded-full bg-rose-500 text-[9px] font-bold text-white ring-2 ring-canvas">
-              {notifications.length}
-            </span>
-          )}
-        </button>
+        {user.role === "admin" && (
+          <button
+            type="button"
+            onClick={() => setShowNotifications((open) => !open)}
+            className="relative flex h-10 w-10 items-center justify-center rounded-[12px] text-ink-500 transition hover:bg-white hover:text-ink-900 hover:shadow-[var(--shadow-card)]"
+            aria-label="Notifications"
+            aria-expanded={showNotifications}
+          >
+            <Bell size={18} strokeWidth={2} />
+            {notifications.length > 0 && (
+              <span className="absolute right-1.5 top-1.5 flex h-[15px] w-[15px] items-center justify-center rounded-full bg-rose-500 text-[9px] font-bold text-white ring-2 ring-canvas">
+                {notifications.length}
+              </span>
+            )}
+          </button>
+        )}
 
         <form
           onSubmit={submit}
@@ -69,15 +76,27 @@ export function TopBar() {
           </kbd>
         </form>
 
-        <Link
-          href="/settings"
-          className="flex h-10 w-10 items-center justify-center rounded-[12px] text-ink-500 transition hover:bg-white hover:text-ink-900 hover:shadow-[var(--shadow-card)]"
-          aria-label="Settings"
-        >
-          <Settings2 size={18} strokeWidth={2} />
-        </Link>
+        {user.role === "admin" && (
+          <Link
+            href="/settings"
+            className="flex h-10 w-10 items-center justify-center rounded-[12px] text-ink-500 transition hover:bg-white hover:text-ink-900 hover:shadow-[var(--shadow-card)]"
+            aria-label="Settings"
+          >
+            <Settings2 size={18} strokeWidth={2} />
+          </Link>
+        )}
 
-        {showNotifications && (
+        <button
+          type="button"
+          onClick={onLogout}
+          className="flex h-10 w-10 items-center justify-center rounded-[12px] text-ink-500 transition hover:bg-white hover:text-ink-900 hover:shadow-[var(--shadow-card)]"
+          aria-label="Sign out"
+          title="Sign out"
+        >
+          <LogOut size={18} strokeWidth={2} />
+        </button>
+
+        {user.role === "admin" && showNotifications && (
           <div className="absolute right-0 top-12 w-80 rounded-[14px] border border-line bg-white p-3 shadow-[var(--shadow-pop)]">
             <div className="flex items-center justify-between px-1 pb-2">
               <p className="text-[13px] font-bold text-ink-900">Notifications</p>

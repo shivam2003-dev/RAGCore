@@ -3,7 +3,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Request
 from fastapi.security import OAuth2PasswordRequestForm
 
-from api.deps import AuthServiceDep, CurrentUser
+from api.deps import AuthServiceDep, CurrentUser, require_role
 from api.schemas import (
     ApiKeyCreatedResponse,
     ApiKeyCreateRequest,
@@ -12,6 +12,7 @@ from api.schemas import (
     TokenResponse,
     UserOut,
 )
+from models import Role
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -58,7 +59,12 @@ async def me(user: CurrentUser) -> UserOut:
     return UserOut.model_validate(user)
 
 
-@router.post("/api-keys", response_model=ApiKeyCreatedResponse, status_code=201)
+@router.post(
+    "/api-keys",
+    response_model=ApiKeyCreatedResponse,
+    status_code=201,
+    dependencies=[require_role(Role.ADMIN)],
+)
 async def create_api_key(
     body: ApiKeyCreateRequest, user: CurrentUser, auth: AuthServiceDep
 ) -> ApiKeyCreatedResponse:

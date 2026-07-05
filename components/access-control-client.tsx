@@ -2,14 +2,14 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { Check, KeyRound, Minus, Search, Shield, UserPlus, Users } from "lucide-react";
-import { Badge, Card, CardTitle, GhostButton, PageHeader } from "@/components/ui";
+import { Badge, Card, CardTitle, GhostButton, PageHeader, PrimaryButton } from "@/components/ui";
 import { kimbalApi, type UserOut } from "@/lib/kimbal-api";
 
 const matrix = [
   { perm: "Ask Kimbal & search", admin: true, editor: true, viewer: true },
-  { perm: "Save & share answers", admin: true, editor: true, viewer: true },
-  { perm: "Upload and reindex documents", admin: true, editor: true, viewer: false },
-  { perm: "Sync Confluence", admin: true, editor: true, viewer: false },
+  { perm: "Admin navigation", admin: true, editor: false, viewer: false },
+  { perm: "Upload and reindex documents", admin: true, editor: false, viewer: false },
+  { perm: "Sync Confluence", admin: true, editor: false, viewer: false },
   { perm: "Manage members & roles", admin: true, editor: false, viewer: false },
   { perm: "Change RAG & model settings", admin: true, editor: false, viewer: false },
 ];
@@ -41,6 +41,11 @@ export function AccessControlClient() {
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState("Loading users");
   const [loading, setLoading] = useState(true);
+  const [newEmail, setNewEmail] = useState("");
+  const [newName, setNewName] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [newRole, setNewRole] = useState<"admin" | "editor" | "viewer">("viewer");
+  const [creating, setCreating] = useState(false);
 
   async function refresh() {
     setLoading(true);
@@ -86,6 +91,38 @@ export function AccessControlClient() {
     }
   }
 
+  async function createMember() {
+    const email = newEmail.trim().toLowerCase();
+    if (!email.endsWith("@kimbal.io")) {
+      setStatus("Use a kimbal.io email address");
+      return;
+    }
+    if (!newName.trim() || newPassword.length < 10) {
+      setStatus("Name and a 10+ character password are required");
+      return;
+    }
+    setCreating(true);
+    setStatus(`Creating ${email}`);
+    try {
+      const created = await kimbalApi.createUser({
+        email,
+        password: newPassword,
+        full_name: newName.trim(),
+        role: newRole,
+      });
+      setUsers((current) => [...current, created]);
+      setNewEmail("");
+      setNewName("");
+      setNewPassword("");
+      setNewRole("viewer");
+      setStatus(`${created.full_name} created as ${created.role}`);
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "User creation failed");
+    } finally {
+      setCreating(false);
+    }
+  }
+
   return (
     <div>
       <PageHeader
@@ -94,7 +131,9 @@ export function AccessControlClient() {
         actions={
           <div className="flex gap-2.5">
             <GhostButton disabled><KeyRound size={15} /> SSO not configured</GhostButton>
-            <GhostButton disabled><UserPlus size={15} /> Invite unavailable</GhostButton>
+            <GhostButton onClick={() => document.getElementById("create-member-email")?.focus()}>
+              <UserPlus size={15} /> Create member
+            </GhostButton>
           </div>
         }
       />
@@ -163,6 +202,57 @@ export function AccessControlClient() {
         </Card>
 
         <Card className="col-span-5 p-5">
+          <CardTitle icon={UserPlus} title="Create Member" tint="bg-emerald-50 text-emerald-500" />
+          <div className="mt-4 grid gap-3">
+            <label className="block">
+              <span className="mb-1 block text-[11px] font-bold uppercase tracking-[0.08em] text-ink-400">Email</span>
+              <input
+                id="create-member-email"
+                value={newEmail}
+                onChange={(event) => setNewEmail(event.target.value)}
+                placeholder="name@kimbal.io"
+                className="h-9 w-full rounded-[9px] border border-line bg-canvas px-3 text-[12.5px] outline-none transition focus:border-brand-300 focus:bg-white"
+              />
+            </label>
+            <label className="block">
+              <span className="mb-1 block text-[11px] font-bold uppercase tracking-[0.08em] text-ink-400">Full name</span>
+              <input
+                value={newName}
+                onChange={(event) => setNewName(event.target.value)}
+                placeholder="Member name"
+                className="h-9 w-full rounded-[9px] border border-line bg-canvas px-3 text-[12.5px] outline-none transition focus:border-brand-300 focus:bg-white"
+              />
+            </label>
+            <label className="block">
+              <span className="mb-1 block text-[11px] font-bold uppercase tracking-[0.08em] text-ink-400">Password</span>
+              <input
+                value={newPassword}
+                onChange={(event) => setNewPassword(event.target.value)}
+                type="password"
+                placeholder="At least 10 characters"
+                className="h-9 w-full rounded-[9px] border border-line bg-canvas px-3 text-[12.5px] outline-none transition focus:border-brand-300 focus:bg-white"
+              />
+            </label>
+            <div className="flex items-end gap-2">
+              <label className="block flex-1">
+                <span className="mb-1 block text-[11px] font-bold uppercase tracking-[0.08em] text-ink-400">Role</span>
+                <select
+                  value={newRole}
+                  onChange={(event) => setNewRole(event.target.value as "admin" | "editor" | "viewer")}
+                  className="h-9 w-full rounded-[9px] border border-line bg-white px-3 text-[12.5px] font-semibold text-ink-700 outline-none transition focus:border-brand-300"
+                >
+                  <option value="viewer">viewer</option>
+                  <option value="editor">editor</option>
+                  <option value="admin">admin</option>
+                </select>
+              </label>
+              <PrimaryButton disabled={creating} onClick={() => void createMember()} className="h-9 px-3 py-0 text-[12.5px]">
+                Create
+              </PrimaryButton>
+            </div>
+          </div>
+
+          <div className="my-5 h-px bg-line" />
           <CardTitle icon={KeyRound} title="Permission Matrix" tint="bg-sky-50 text-sky-500" />
           <table className="mt-4 w-full">
             <thead>

@@ -8,7 +8,7 @@ from services.jira_service import jira_config_status
 router = APIRouter(prefix="/jira", tags=["jira"])
 
 
-@router.get("/status", response_model=JiraStatusOut)
+@router.get("/status", response_model=JiraStatusOut, dependencies=[require_role(Role.ADMIN)])
 async def jira_status(_user: CurrentUser, settings: SettingsDep) -> JiraStatusOut:
     return JiraStatusOut.model_validate(jira_config_status(settings))
 
@@ -17,7 +17,7 @@ async def jira_status(_user: CurrentUser, settings: SettingsDep) -> JiraStatusOu
     "/sync",
     response_model=JiraSyncResponse,
     status_code=202,
-    dependencies=[require_role(Role.EDITOR)],
+    dependencies=[require_role(Role.ADMIN)],
 )
 async def sync_jira(
     body: JiraSyncRequest,

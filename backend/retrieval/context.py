@@ -42,6 +42,8 @@ class RetrievalContext:
     chunks: list[RetrievedChunk] = field(default_factory=list)
     confidence: float | None = None
     attempts: list[RetrievalAttempt] = field(default_factory=list)
+    fallback_requested: bool = False
+    quality_notes: list[str] = field(default_factory=list)
     timings_ms: dict[str, int] = field(default_factory=dict)
 
     @property

@@ -4,7 +4,7 @@ from datetime import timedelta
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.config import Settings
-from core.exceptions import AuthenticationError, ConflictError
+from core.exceptions import AuthenticationError, ConflictError, ValidationError
 from core.security import (
     create_access_token,
     hash_password,
@@ -49,24 +49,19 @@ class AuthService:
         organization_name: str,
         ip_address: str | None = None,
     ) -> tuple[User, TokenPair]:
-        email = email.lower()
+        email = self._normalize_email(email)
+        self._validate_allowed_email(email)
         if await self._users.get_by_email(email):
             raise ConflictError("Email already registered")
 
-        slug = organization_name.lower().replace(" ", "-")[:80]
-        org = await self._orgs.get_by_slug(slug)
-        first_in_org = org is None
-        if org is None:
-            org = Organization(name=organization_name, slug=slug)
-            self._orgs.add(org)
-            await self._db.flush()
+        org = await self._get_or_create_default_org()
 
         user = User(
             organization_id=org.id,
             email=email,
             password_hash=hash_password(password),
             full_name=full_name,
-            role=Role.ADMIN if first_in_org else Role.VIEWER,
+            role=self._initial_role(email),
         )
         self._users.add(user)
         await self._db.flush()
@@ -83,6 +78,8 @@ class AuthService:
         return user, pair
 
     async def login(self, *, email: str, password: str, ip_address: str | None = None) -> tuple[User, TokenPair]:
+        email = self._normalize_email(email)
+        self._validate_allowed_email(email)
         user = await self._users.get_by_email(email)
         if user is None or not user.is_active or not verify_password(password, user.password_hash):
             # uniform error: no user-existence oracle
@@ -98,6 +95,44 @@ class AuthService:
         pair = await self._issue_tokens(user)
         await self._db.commit()
         return user, pair
+
+    async def create_user(
+        self,
+        *,
+        actor: User,
+        email: str,
+        password: str,
+        full_name: str,
+        role: Role = Role.VIEWER,
+        ip_address: str | None = None,
+    ) -> User:
+        email = self._normalize_email(email)
+        self._validate_allowed_email(email)
+        if await self._users.get_by_email(email):
+            raise ConflictError("Email already registered")
+        if self._is_super_admin(email):
+            role = Role.ADMIN
+        org = await self._get_or_create_default_org()
+        user = User(
+            organization_id=org.id,
+            email=email,
+            password_hash=hash_password(password),
+            full_name=full_name,
+            role=role,
+        )
+        self._users.add(user)
+        await self._db.flush()
+        self._audit.record(
+            action="user.create",
+            resource_type="user",
+            resource_id=str(user.id),
+            org_id=org.id,
+            actor_id=actor.id,
+            ip_address=ip_address,
+            detail=role.value,
+        )
+        await self._db.commit()
+        return user
 
     async def refresh(self, refresh_token: str) -> TokenPair:
         stored = await self._refresh.get_valid(hash_token(refresh_token))
@@ -156,3 +191,29 @@ class AuthService:
             )
         )
         return TokenPair(access_token=access, refresh_token=raw_refresh)
+
+    def _normalize_email(self, email: str) -> str:
+        return email.strip().lower()
+
+    def _validate_allowed_email(self, email: str) -> None:
+        domain = self._settings.auth_allowed_email_domain.strip().lower().lstrip("@")
+        if not domain:
+            return
+        if not email.endswith(f"@{domain}"):
+            raise ValidationError(f"Only @{domain} email addresses can access Kimbal Knowledge Hub")
+
+    def _is_super_admin(self, email: str) -> bool:
+        return email == self._settings.auth_super_admin_email.strip().lower()
+
+    def _initial_role(self, email: str) -> Role:
+        return Role.ADMIN if self._is_super_admin(email) else Role.VIEWER
+
+    async def _get_or_create_default_org(self) -> Organization:
+        name = self._settings.auth_default_org_name.strip() or "Kimbal"
+        slug = name.lower().replace(" ", "-")[:80]
+        org = await self._orgs.get_by_slug(slug)
+        if org is None:
+            org = Organization(name=name, slug=slug)
+            self._orgs.add(org)
+            await self._db.flush()
+        return org

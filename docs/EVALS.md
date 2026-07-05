@@ -1,6 +1,10 @@
 # Evals
 
 Kimbal exposes a live eval dashboard at `/evals` backed by `GET /api/v1/evals/overview`.
+Scripts can fetch only the headline score from `GET /api/v1/evals/benchmark`, which returns
+the same `Kimbal Benchmark` object shown in the UI, for example `50/100`.
+The release-gate dataset inventory is exposed by `GET /api/v1/evals/golden` and loaded from
+`evals/golden/rag.jsonl`. Offline release gates run through `GET /api/v1/evals/offline`.
 
 The current implementation is intentionally deterministic and read-only. It does not invent scores, call a judge model, or require a new provider key. It computes quality and performance signals from data already persisted by the chat pipeline:
 
@@ -17,6 +21,7 @@ The current implementation is intentionally deterministic and read-only. It does
 
 The dashboard reports:
 
+- Kimbal Benchmark: a single `NN/100` live score for quick deployment checks.
 - Citation coverage: share of assistant answers with at least one source citation.
 - Groundedness proxy: citation presence, rendered citation-marker coverage, and mean retrieved chunk confidence.
 - Answer relevance proxy: lexical overlap between the user question and answer text.
@@ -27,7 +32,16 @@ The dashboard reports:
 - Latency: average, p50, and p95 over recent persisted answers.
 - Model breakdown: answer count, average latency, citation coverage, and groundedness by model.
 
-These are production health signals, not a formal benchmark score.
+The Kimbal Benchmark is deterministic and weighted from live persisted answer signals:
+
+- groundedness: 30%
+- citation coverage: 20%
+- answer relevance: 20%
+- retrieval confidence: 15%
+- streaming success: 10%
+- latency health: 5%
+
+These are production health signals. The Kimbal Benchmark is useful for repeatable operational checks after a deployment, but formal release gates use the golden-set offline gate below.
 
 ## Why These Evals
 
@@ -40,15 +54,34 @@ Kimbal maps those ideas to the telemetry already available in this app:
 - Retriever quality becomes retrieval confidence from cited chunk scores.
 - Production performance becomes latency and feedback.
 
-## Future Golden-Set Evals
+## Golden-Set Release Gates
 
-For release gates, add a separate eval harness with:
+The first dataset slice lives at `evals/golden/rag.jsonl`. It covers SRE, DevOps,
+Developer, HR, Jira analytics, follow-up questions, and blended web fallback cases.
 
-1. A golden dataset of representative questions, expected answer traits, and expected source documents.
-2. A retriever eval that checks whether expected chunks are returned.
-3. A generator eval that uses deterministic rules plus an optional LLM judge.
-4. CI thresholds for citation coverage, faithfulness, answer relevance, and latency.
-5. Dataset versioning so score changes are explainable across model or prompt updates.
+The offline gate reports:
+
+- Retriever metrics: expected source recall, context precision, top-k hit rate, MRR, and source freshness.
+- Generator metrics: groundedness, faithfulness, citation coverage, answer relevance, refusal correctness, and unsupported-claim rate.
+- Council comparison estimates: Fast vs Council quality, latency, cost units, and citation discipline.
+- Role-space checks for SRE, DevOps, Developer, and HR categories.
+- Dashboard drilldowns with failing examples, expected sources, returned sources, answer text, judge rationale, and a regression-trend slot.
+
+Run local dataset validation:
+
+```bash
+cd backend
+python scripts/run_evals.py
+```
+
+Run a live gate against a deployed API:
+
+```bash
+cd backend
+python scripts/run_evals.py \
+  --api-base https://kb.kimbal.ai/api/v1 \
+  --token "$KIMBAL_EVALS_TOKEN"
+```
 
 Recommended future env variables if LLM-as-judge evals are added:
 

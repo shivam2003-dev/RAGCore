@@ -37,7 +37,27 @@ async def test_register_login_refresh_me(client):
     )
     assert me.status_code == 200
     assert me.json()["email"] == email
-    assert me.json()["role"] == "admin"  # first user in org
+    assert me.json()["role"] == "viewer"
+
+
+async def test_super_admin_email_gets_admin_role(client, auth_headers):
+    me = await client.get("/api/v1/auth/me", headers=auth_headers)
+    assert me.status_code == 200
+    assert me.json()["email"] == "s.kumar@kimbal.io"
+    assert me.json()["role"] == "admin"
+
+
+async def test_non_kimbal_email_rejected(client):
+    resp = await client.post(
+        "/api/v1/auth/register",
+        json={
+            "email": "outsider@example.com",
+            "password": "SuperSecret123!",
+            "full_name": "Outsider",
+            "organization_name": "Kimbal",
+        },
+    )
+    assert resp.status_code == 422
 
 
 async def test_wrong_password_rejected(client, auth_headers):
@@ -74,6 +94,39 @@ async def test_api_key_auth(client, auth_headers):
     assert raw.startswith("kmb_")
     via_key = await client.get("/api/v1/auth/me", headers={"x-api-key": raw})
     assert via_key.status_code == 200
+
+
+async def test_admin_can_create_viewer_user(client, auth_headers):
+    email = f"created-{uuid.uuid4().hex[:8]}@kimbal.io"
+    created = await client.post(
+        "/api/v1/admin/users",
+        json={
+            "email": email,
+            "password": "SuperSecret123!",
+            "full_name": "Created Viewer",
+            "role": "viewer",
+        },
+        headers=auth_headers,
+    )
+    assert created.status_code == 201, created.text
+    assert created.json()["email"] == email
+    assert created.json()["role"] == "viewer"
+
+    login = await client.post(
+        "/api/v1/auth/login", data={"username": email, "password": "SuperSecret123!"}
+    )
+    assert login.status_code == 200
+
+
+async def test_super_admin_cannot_be_demoted(client, auth_headers):
+    me = await client.get("/api/v1/auth/me", headers=auth_headers)
+    user_id = me.json()["id"]
+    demote = await client.patch(
+        f"/api/v1/admin/users/{user_id}/role",
+        json={"role": "viewer"},
+        headers=auth_headers,
+    )
+    assert demote.status_code == 422
 
 
 async def test_weak_password_rejected(client):

@@ -2,9 +2,9 @@ import uuid
 
 from fastapi import APIRouter
 
-from api.deps import CurrentUser, DbDep, require_role
-from api.schemas import AuditLogOut, RoleUpdate, UserOut
-from core.exceptions import NotFoundError
+from api.deps import AuthServiceDep, CurrentUser, DbDep, SettingsDep, require_role
+from api.schemas import AuditLogOut, RoleUpdate, UserCreateRequest, UserOut
+from core.exceptions import NotFoundError, ValidationError
 from models import Role
 from repositories.audit import AuditLogRepository
 from repositories.conversations import FeedbackRepository
@@ -19,14 +19,32 @@ async def list_users(user: CurrentUser, db: DbDep, limit: int = 100, offset: int
     return [UserOut.model_validate(u) for u in users]
 
 
+@router.post("/users", response_model=UserOut, status_code=201)
+async def create_user(
+    body: UserCreateRequest,
+    admin: CurrentUser,
+    auth: AuthServiceDep,
+) -> UserOut:
+    user = await auth.create_user(
+        actor=admin,
+        email=body.email,
+        password=body.password,
+        full_name=body.full_name,
+        role=Role(body.role),
+    )
+    return UserOut.model_validate(user)
+
+
 @router.patch("/users/{user_id}/role", response_model=UserOut)
 async def update_role(
-    user_id: uuid.UUID, body: RoleUpdate, admin: CurrentUser, db: DbDep
+    user_id: uuid.UUID, body: RoleUpdate, admin: CurrentUser, db: DbDep, settings: SettingsDep
 ) -> UserOut:
     repo = UserRepository(db)
     target = await repo.get(user_id)
     if target is None or target.organization_id != admin.organization_id:
         raise NotFoundError("User not found")
+    if target.email == settings.auth_super_admin_email.strip().lower() and body.role != Role.ADMIN.value:
+        raise ValidationError("Super admin cannot be demoted")
     target.role = Role(body.role)
     AuditLogRepository(db).record(
         action="user.role_change",

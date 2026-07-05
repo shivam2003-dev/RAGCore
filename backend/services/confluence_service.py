@@ -318,15 +318,31 @@ class ConfluenceSyncService:
         kb_id: uuid.UUID | None = None,
         max_pages: int | None = None,
     ) -> ConfluenceSyncResult:
-        self._validate_config()
-        kb = await self._resolve_kb(user=user, kb_id=kb_id)
-        limit = _sync_limit(max_pages, self._settings.confluence_sync_max_pages)
-        documents: list[SyncedConfluenceDocument] = []
+        kb: KnowledgeBase | None = None
+        try:
+            self._validate_config()
+            kb = await self._resolve_kb(user=user, kb_id=kb_id)
+            limit = _sync_limit(max_pages, self._settings.confluence_sync_max_pages)
+            documents: list[SyncedConfluenceDocument] = []
 
-        async with ConfluenceClient(self._settings) as client:
-            space = await client.get_space_by_key(self._settings.confluence_space_key)
-            async for page in client.iter_pages(space, max_pages=limit):
-                documents.append(await self._sync_page(user=user, kb=kb, space=space, page=page))
+            async with ConfluenceClient(self._settings) as client:
+                space = await client.get_space_by_key(self._settings.confluence_space_key)
+                async for page in client.iter_pages(space, max_pages=limit):
+                    if not _confluence_page_allowed(page, self._settings):
+                        continue
+                    documents.append(await self._sync_page(user=user, kb=kb, space=space, page=page))
+        except Exception as exc:
+            await self._db.rollback()
+            self._audit.record(
+                action="confluence.sync",
+                resource_type="knowledge_base",
+                resource_id=str(kb.id) if kb else None,
+                org_id=user.organization_id,
+                actor_id=user.id,
+                detail=f"0 created, 0 updated, 0 skipped, 1 failed: {type(exc).__name__}: {str(exc)[:180]}",
+            )
+            await self._db.commit()
+            raise
 
         created = sum(1 for doc in documents if doc.action == "created")
         updated = sum(1 for doc in documents if doc.action == "updated")
@@ -507,6 +523,17 @@ def _page_metadata(*, space: ConfluenceSpace, page: ConfluencePage) -> dict[str,
     }
 
 
+def _confluence_page_allowed(page: ConfluencePage, settings: Settings) -> bool:
+    title = page.title
+    include = settings.confluence_include_title_pattern.strip()
+    exclude = settings.confluence_exclude_title_pattern.strip()
+    if include and not re.search(include, title, flags=re.IGNORECASE):
+        return False
+    if exclude and re.search(exclude, title, flags=re.IGNORECASE):
+        return False
+    return True
+
+
 def _page_filename(page: ConfluencePage) -> str:
     stem = re.sub(r"[^A-Za-z0-9._ -]+", "-", page.title).strip(" .-")
     stem = re.sub(r"\s+", "-", stem)[:90] or "confluence-page"
@@ -514,7 +541,7 @@ def _page_filename(page: ConfluencePage) -> str:
 
 
 def _is_current(existing: Document | None, page: ConfluencePage) -> bool:
-    if existing is None or existing.status not in {DocumentStatus.READY, DocumentStatus.PROCESSING}:
+    if existing is None or existing.status != DocumentStatus.READY:
         return False
     metadata = existing.doc_metadata or {}
     return metadata.get("confluence_version") == page.version_number

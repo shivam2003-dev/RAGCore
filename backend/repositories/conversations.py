@@ -1,6 +1,6 @@
 import uuid
 
-from sqlalchemy import func, select, update
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -83,6 +83,9 @@ class MessageRepository:
             .limit(limit)
         )
         return list(reversed(list(rows)))
+
+    async def delete_for_conversation(self, conv_id: uuid.UUID) -> None:
+        await self.db.execute(delete(Message).where(Message.conversation_id == conv_id))
 
 
 class FeedbackRepository:

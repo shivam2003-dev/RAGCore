@@ -64,6 +64,9 @@ jobs:
         env:
           DATABASE_URL: postgresql+asyncpg://kimbal:kimbal_dev_password@localhost:5433/kimbal_test
 
+      - name: Golden eval release gate
+        run: python scripts/run_evals.py
+
   docker-build:
     runs-on: ubuntu-latest
     needs: lint-and-test

@@ -2,6 +2,43 @@
 
 Date: 2026-07-04
 
+## Live Release Status - 2026-07-06
+
+Target: `https://kb.kimbal.ai` on EC2 `16.112.123.15`.
+
+Current production release scope:
+
+- Authentication is enabled for Kimbal email users only.
+- Super admin account: `s.kumar@kimbal.io`.
+- Credential handoff is stored locally in `output/kimbal-login.txt`; secrets are not repeated in chat.
+- Public users should land on `/ask`; admin-only routes remain protected by role checks.
+- Conversational RAG is implemented with separate services for memory, chat sessions, question rewriting, retrieval, and response generation.
+- Chat history is persisted per conversation, included in follow-up rewriting, and can be cleared per conversation.
+- Ask responses return sources and the rewritten standalone question used for retrieval.
+- Data Sources now uses live source inventory rows instead of hard-coded Jira/Confluence buckets.
+- Data Sources includes connector run history from audit logs and per-source pending/chunk/run details.
+- Document lineage is available through the admin API for source URL, source id, version, metadata, chunks, and stored versions.
+- Source Mix chart aggregation is fixed so Jira, Confluence, and Web proportions render from the actual values.
+- Evals now include a `Kimbal Benchmark` headline score such as `50/100`, computed from live persisted answer signals.
+- Evals expose a script-friendly `/api/v1/evals/benchmark` endpoint and a golden dataset inventory backed by `evals/golden/rag.jsonl`.
+- Phase 2 additions now include connector failure audit records, document lineage UI, Ask freshness badges, and env-configured Jira/Confluence allowlist and denylist filters.
+- Phase 3 additions now include `/api/v1/evals/offline`, golden-set release gate metrics, failing-case drilldowns, Fast vs Council comparison estimates, role-space checks, and `backend/scripts/run_evals.py` for CI/API gating.
+- Phase 4 additions now include CRAG retrieval quality scoring, corrective query rewriting, multi-part query decomposition, post-fusion reranking, weak-retrieval refusal, final citation-marker cleanup, answer shaping, and structured Jira count answers from metadata.
+
+Active EC2 data work:
+
+- DevOps sources: Jira DEVO and Confluence DevOps1. Jira DEVO pending ingestion was repaired on EC2 and reached `ready=10191`, `uploaded=0`, `processing=0`, `failed=0`.
+- SRE-priority sources: Jira CVIR, Confluence SRE, and Confluence AS.
+- SRE ingestion is treated as release-critical; deploy/restart waits for a safe ingestion point.
+
+Remaining release checks before closing this phase:
+
+- Deploy the current code to EC2.
+- Run backend/API and frontend build checks on EC2, not locally.
+- Smoke test login, `/ask`, conversation follow-up rewriting, clear history, `/data-sources`, `/evals`, and live source counts on EC2.
+- Confirm Data Sources shows SRE/CVIR/AS separately after the grouped source inventory deploy.
+- Confirm the Source Mix donut no longer collapses to one full green ring when multiple sources have values.
+
 This plan treats the current application as Phase 1. It is based on the implemented repo docs in `docs/`, the current Ask/Web/Council/Discover/Evals work, and current external references for RAG evaluation, Atlassian APIs, observability, and LLM application security.
 
 ## Guiding Principles

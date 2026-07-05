@@ -21,6 +21,10 @@ from repositories.knowledge import DocumentRepository, KnowledgeBaseRepository
 from services.document_service import DocumentService
 
 JsonDict = dict[str, object]
+JIRA_FIELDS = (
+    "summary,status,issuetype,priority,labels,components,assignee,reporter,"
+    "updated,created,description,project"
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -42,6 +46,8 @@ class JiraIssue:
     status_category: str | None
     status_category_key: str | None
     priority: str | None
+    labels: list[str]
+    components: list[str]
     assignee: str | None
     assignee_email: str | None
     assignee_account_id: str | None
@@ -139,7 +145,7 @@ class JiraClient:
         path = f"rest/software/1.0/board/{board_id}/issue"
         params: dict[str, str | int] = {
             "maxResults": limit,
-            "fields": "summary,status,issuetype,priority,assignee,reporter,updated,created,description,project",
+            "fields": JIRA_FIELDS,
         }
         if self._settings.jira_project_key.strip():
             params["jql"] = f"project = {self._settings.jira_project_key.strip()}"
@@ -159,7 +165,7 @@ class JiraClient:
                 params = {
                     "maxResults": limit,
                     "nextPageToken": token,
-                    "fields": "summary,status,issuetype,priority,assignee,reporter,updated,created,description,project",
+                    "fields": JIRA_FIELDS,
                 }
                 if self._settings.jira_project_key.strip():
                     params["jql"] = f"project = {self._settings.jira_project_key.strip()}"
@@ -172,10 +178,61 @@ class JiraClient:
                 params = {
                     "maxResults": limit,
                     "startAt": start + max_results,
-                    "fields": "summary,status,issuetype,priority,assignee,reporter,updated,created,description,project",
+                    "fields": JIRA_FIELDS,
                 }
                 if self._settings.jira_project_key.strip():
                     params["jql"] = f"project = {self._settings.jira_project_key.strip()}"
+                continue
+            return
+
+    async def iter_project_issues(self, project_key: str, max_issues: int | None = None) -> AsyncIterator[JiraIssue]:
+        key = project_key.strip()
+        if not key:
+            raise ValidationError("JIRA_PROJECT_KEY is required for project issue sync")
+        limit = max(1, min(self._settings.jira_issue_limit, 100))
+        if max_issues is not None:
+            limit = min(limit, max(1, max_issues))
+        params: dict[str, str | int] = {
+            "jql": f"project = {key} ORDER BY updated DESC",
+            "maxResults": limit,
+            "fields": JIRA_FIELDS,
+        }
+        fetched = 0
+        start_at = 0
+        use_legacy_search = False
+
+        while max_issues is None or fetched < max_issues:
+            if use_legacy_search:
+                payload = await self._get("rest/api/3/search", params={**params, "startAt": start_at})
+            else:
+                try:
+                    payload = await self._get("rest/api/3/search/jql", params=params)
+                except NotFoundError:
+                    use_legacy_search = True
+                    payload = await self._get("rest/api/3/search", params={**params, "startAt": start_at})
+
+            issues = _list_of_dicts(payload.get("issues"))
+            for row in issues:
+                yield self._parse_issue(row)
+                fetched += 1
+                if max_issues is not None and fetched >= max_issues:
+                    return
+
+            token = _str(payload.get("nextPageToken"))
+            if token and not use_legacy_search:
+                params = {
+                    "jql": f"project = {key} ORDER BY updated DESC",
+                    "maxResults": limit,
+                    "nextPageToken": token,
+                    "fields": JIRA_FIELDS,
+                }
+                continue
+
+            start = _int(payload.get("startAt"))
+            total = _int(payload.get("total"))
+            max_results = _int(payload.get("maxResults")) or limit
+            if start is not None and total is not None and start + max_results < total:
+                start_at = start + max_results
                 continue
             return
 
@@ -208,6 +265,7 @@ class JiraClient:
         status_category = _dict(status.get("statusCategory"))
         issue_type = _dict(fields.get("issuetype"))
         priority = _dict(fields.get("priority"))
+        components = _list_of_dicts(fields.get("components"))
         assignee = _dict(fields.get("assignee"))
         reporter = _dict(fields.get("reporter"))
         key = _required_str(row, "key")
@@ -222,6 +280,8 @@ class JiraClient:
             status_category=_str(status_category.get("name")),
             status_category_key=_str(status_category.get("key")),
             priority=_str(priority.get("name")),
+            labels=[str(label) for label in _list(fields.get("labels")) if isinstance(label, str)],
+            components=[name for item in components if (name := _str(item.get("name")))],
             assignee=_str(assignee.get("displayName")),
             assignee_email=_str(assignee.get("emailAddress")),
             assignee_account_id=_str(assignee.get("accountId")),
@@ -261,15 +321,42 @@ class JiraSyncService:
         kb_id: uuid.UUID | None = None,
         max_issues: int | None = None,
     ) -> JiraSyncResult:
-        self._validate_config()
-        kb = await self._resolve_kb(user=user, kb_id=kb_id)
-        limit = _sync_limit(max_issues, self._settings.jira_sync_max_issues)
-        documents: list[SyncedJiraDocument] = []
+        kb: KnowledgeBase | None = None
+        try:
+            self._validate_config()
+            kb = await self._resolve_kb(user=user, kb_id=kb_id)
+            limit = _sync_limit(max_issues, self._settings.jira_sync_max_issues)
+            documents: list[SyncedJiraDocument] = []
 
-        async with JiraClient(self._settings) as client:
-            board = await client.get_board(self._settings.jira_board_id)
-            async for issue in client.iter_board_issues(board.id, max_issues=limit):
-                documents.append(await self._sync_issue(user=user, kb=kb, board=board, issue=issue))
+            async with JiraClient(self._settings) as client:
+                if self._settings.jira_board_id:
+                    board = await client.get_board(self._settings.jira_board_id)
+                    issues = client.iter_board_issues(board.id, max_issues=limit)
+                else:
+                    board = JiraBoard(
+                        id=0,
+                        name=f"{self._settings.jira_project_key.strip()} Project",
+                        type="project",
+                        url=f"{normalize_jira_base_url(self._settings.jira_base_url)}/jira/core/projects/{self._settings.jira_project_key.strip()}/board",
+                    )
+                    issues = client.iter_project_issues(self._settings.jira_project_key, max_issues=limit)
+
+                async for issue in issues:
+                    if not _jira_issue_allowed(issue, self._settings):
+                        continue
+                    documents.append(await self._sync_issue(user=user, kb=kb, board=board, issue=issue))
+        except Exception as exc:
+            await self._db.rollback()
+            self._audit.record(
+                action="jira.sync",
+                resource_type="knowledge_base",
+                resource_id=str(kb.id) if kb else None,
+                org_id=user.organization_id,
+                actor_id=user.id,
+                detail=f"0 created, 0 updated, 0 skipped, 1 failed: {type(exc).__name__}: {str(exc)[:180]}",
+            )
+            await self._db.commit()
+            raise
 
         created = sum(1 for doc in documents if doc.action == "created")
         updated = sum(1 for doc in documents if doc.action == "updated")
@@ -371,8 +458,8 @@ class JiraSyncService:
     def _validate_config(self) -> None:
         if not self._settings.jira_base_url.strip():
             raise ValidationError("JIRA_BASE_URL is not configured")
-        if not self._settings.jira_board_id:
-            raise ValidationError("JIRA_BOARD_ID is not configured")
+        if not self._settings.jira_board_id and not self._settings.jira_project_key.strip():
+            raise ValidationError("JIRA_BOARD_ID or JIRA_PROJECT_KEY is not configured")
         if not jira_token(self._settings):
             raise ValidationError("JIRA_API_TOKEN or CONFLUENCE_API_TOKEN is not configured")
         if self._settings.jira_auth_mode.strip().lower() == "basic" and not jira_email(self._settings):
@@ -386,7 +473,12 @@ def jira_config_status(settings: Settings) -> JsonDict:
     mode = settings.jira_auth_mode.strip().lower()
     using_fallback = bool(token and not settings.jira_api_token.strip())
     return {
-        "configured": bool(base_url and settings.jira_board_id and token and (email or mode != "basic")),
+        "configured": bool(
+            base_url
+            and (settings.jira_board_id or settings.jira_project_key.strip())
+            and token
+            and (email or mode != "basic")
+        ),
         "read_only": True,
         "base_url": normalize_jira_base_url(base_url) if base_url else None,
         "project_key": settings.jira_project_key,
@@ -451,6 +543,8 @@ def _render_issue_markdown(*, board: JiraBoard, issue: JiraIssue) -> str:
         ("Status", issue.status),
         ("Status category", issue.status_category),
         ("Priority", issue.priority),
+        ("Labels", ", ".join(issue.labels) if issue.labels else None),
+        ("Components", ", ".join(issue.components) if issue.components else None),
         ("Assignee", issue.assignee),
         ("Assignee email", issue.assignee_email),
         ("Assignee account id", issue.assignee_account_id),
@@ -480,6 +574,8 @@ def _issue_metadata(*, board: JiraBoard, issue: JiraIssue) -> dict[str, object]:
         "jira_issue_status_category": issue.status_category,
         "jira_issue_status_category_key": issue.status_category_key,
         "jira_issue_type": issue.issue_type,
+        "jira_labels": issue.labels,
+        "jira_components": issue.components,
         "jira_assignee": issue.assignee,
         "jira_assignee_email": issue.assignee_email,
         "jira_assignee_account_id": issue.assignee_account_id,
@@ -491,6 +587,28 @@ def _issue_metadata(*, board: JiraBoard, issue: JiraIssue) -> dict[str, object]:
     }
 
 
+def _jira_issue_allowed(issue: JiraIssue, settings: Settings) -> bool:
+    status = (issue.status or "").lower()
+    labels = {label.lower() for label in issue.labels}
+    include_statuses = _csv_set(settings.jira_include_statuses)
+    exclude_statuses = _csv_set(settings.jira_exclude_statuses)
+    include_labels = _csv_set(settings.jira_include_labels)
+    exclude_labels = _csv_set(settings.jira_exclude_labels)
+    if include_statuses and status not in include_statuses:
+        return False
+    if exclude_statuses and status in exclude_statuses:
+        return False
+    if include_labels and not (labels & include_labels):
+        return False
+    if exclude_labels and labels & exclude_labels:
+        return False
+    return True
+
+
+def _csv_set(value: str) -> set[str]:
+    return {item.strip().lower() for item in value.split(",") if item.strip()}
+
+
 def _issue_filename(issue: JiraIssue) -> str:
     stem = re.sub(r"[^A-Za-z0-9._ -]+", "-", f"{issue.key}-{issue.title}").strip(" .-")
     stem = re.sub(r"\s+", "-", stem)[:100] or issue.key
@@ -498,7 +616,7 @@ def _issue_filename(issue: JiraIssue) -> str:
 
 
 def _is_current(existing: Document | None, metadata: dict[str, object]) -> bool:
-    if existing is None or existing.status not in {DocumentStatus.READY, DocumentStatus.PROCESSING}:
+    if existing is None or existing.status != DocumentStatus.READY:
         return False
     existing_metadata = existing.doc_metadata or {}
     return existing_metadata.get("source_sha256") == metadata.get("source_sha256")

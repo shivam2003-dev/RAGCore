@@ -1,10 +1,11 @@
 "use client";
 
 import { useState } from "react";
-import { CheckCircle2, Cloud, Database, Loader2, Plus, RefreshCw, SquareKanban } from "lucide-react";
+import { CheckCircle2, Cloud, Database, History, Loader2, Plus, RefreshCw, SquareKanban } from "lucide-react";
 import { Badge, Card, CardTitle, GhostButton, PageHeader, PrimaryButton, cx } from "@/components/ui";
 import { useLiveMetrics } from "@/components/use-live-metrics";
 import { kimbalApi } from "@/lib/kimbal-api";
+import { sourceFamily } from "@/components/source-metrics";
 
 function number(value: number) {
   return new Intl.NumberFormat().format(value);
@@ -15,9 +16,46 @@ function formatDate(value: string | null) {
   return new Date(value).toLocaleString([], { dateStyle: "medium", timeStyle: "short" });
 }
 
-function pendingDocuments(source: { documents: number; ready_documents: number; failed_documents: number } | undefined) {
+function pendingDocuments(
+  source:
+    | {
+        documents: number;
+        ready_documents: number;
+        failed_documents: number;
+        pending_documents?: number;
+      }
+    | undefined
+) {
   if (!source) return 0;
+  if (typeof source.pending_documents === "number") return source.pending_documents;
   return Math.max(0, source.documents - source.ready_documents - source.failed_documents);
+}
+
+function connectorLabel(value: string) {
+  return value.replace(/_/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function SourceIcon({ family }: { family: string }) {
+  const iconClass = "flex h-9 w-9 items-center justify-center rounded-[10px] border border-line bg-white";
+  if (family === "jira") {
+    return (
+      <span className={`${iconClass} text-brand-600`}>
+        <SquareKanban size={18} />
+      </span>
+    );
+  }
+  if (family === "confluence") {
+    return (
+      <span className={`${iconClass} text-sky-600`}>
+        <Cloud size={18} />
+      </span>
+    );
+  }
+  return (
+    <span className={`${iconClass} text-brand-500`}>
+      <Database size={18} />
+    </span>
+  );
 }
 
 function sleep(ms: number) {
@@ -68,9 +106,7 @@ export function DataSourcesClient() {
     }
   }
 
-  const confluenceSource = metrics?.sources.find((source) => source.name.toLowerCase() === "confluence");
-  const jiraSource = metrics?.sources.find((source) => source.name.toLowerCase() === "jira");
-  const visibleSources = metrics?.sources.filter((source) => !["confluence", "jira"].includes(source.name.toLowerCase())) ?? [];
+  const visibleSources = metrics?.sources ?? [];
   const totalPending = Math.max(
     0,
     (metrics?.documents_total ?? 0) - (metrics?.documents_ready ?? 0) - (metrics?.documents_failed ?? 0)
@@ -145,66 +181,18 @@ export function DataSourcesClient() {
               <th className="font-bold">Ready</th>
               <th className="font-bold">Pending</th>
               <th className="font-bold">Failed</th>
+              <th className="font-bold">Chunks</th>
               <th className="font-bold">Last local update</th>
+              <th className="font-bold">Last sync</th>
               <th className="pr-5 font-bold">Status</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-line">
-            {confluence && (
-              <tr className="transition hover:bg-brand-50/30">
-                <td className="py-3.5 pl-5">
-                  <span className="inline-flex items-center gap-3">
-                    <span className="flex h-9 w-9 items-center justify-center rounded-[10px] border border-line bg-white text-sky-600">
-                      <Cloud size={18} />
-                    </span>
-                    <span className="text-[13.5px] font-bold text-ink-900">Confluence {confluence.space_key}</span>
-                  </span>
-                </td>
-                <td className="text-[13px] font-semibold text-ink-900">{number(confluenceSource?.documents ?? 0)}</td>
-                <td className="text-[13px] text-ink-700">{number(confluenceSource?.ready_documents ?? 0)}</td>
-                <td className="text-[13px] text-ink-700">{number(pendingDocuments(confluenceSource))}</td>
-                <td className="text-[13px] text-ink-700">{number(confluenceSource?.failed_documents ?? 0)}</td>
-                <td className="text-[13px] text-ink-500">{formatDate(confluenceSource?.last_updated_at ?? null)}</td>
-                <td className="pr-5">
-                  <Badge tone={confluence.configured ? "green" : "amber"}>
-                    {confluence.configured ? "Configured" : "Needs config"}
-                  </Badge>
-                </td>
-              </tr>
-            )}
-
-            {jira && (
-              <tr className="transition hover:bg-brand-50/30">
-                <td className="py-3.5 pl-5">
-                  <span className="inline-flex items-center gap-3">
-                    <span className="flex h-9 w-9 items-center justify-center rounded-[10px] border border-line bg-white text-brand-600">
-                      <SquareKanban size={18} />
-                    </span>
-                    <span className="text-[13.5px] font-bold text-ink-900">
-                      Jira {jira.project_key || "project"} board {jira.board_id}
-                    </span>
-                  </span>
-                </td>
-                <td className="text-[13px] font-semibold text-ink-900">{number(jiraSource?.documents ?? 0)}</td>
-                <td className="text-[13px] text-ink-700">{number(jiraSource?.ready_documents ?? 0)}</td>
-                <td className="text-[13px] text-ink-700">{number(pendingDocuments(jiraSource))}</td>
-                <td className="text-[13px] text-ink-700">{number(jiraSource?.failed_documents ?? 0)}</td>
-                <td className="text-[13px] text-ink-500">{formatDate(jiraSource?.last_updated_at ?? null)}</td>
-                <td className="pr-5">
-                  <Badge tone={jira.configured ? "green" : "amber"}>
-                    {jira.configured ? "Configured" : "Needs config"}
-                  </Badge>
-                </td>
-              </tr>
-            )}
-
             {visibleSources.map((source) => (
               <tr key={`${source.name}-${source.source_type}`} className="transition hover:bg-brand-50/30">
                 <td className="py-3.5 pl-5">
                   <span className="inline-flex items-center gap-3">
-                    <span className="flex h-9 w-9 items-center justify-center rounded-[10px] border border-line bg-white text-brand-500">
-                      <Database size={18} />
-                    </span>
+                    <SourceIcon family={sourceFamily(source)} />
                     <span className="text-[13.5px] font-bold text-ink-900">{source.name}</span>
                   </span>
                 </td>
@@ -212,20 +200,75 @@ export function DataSourcesClient() {
                 <td className="text-[13px] text-ink-700">{number(source.ready_documents)}</td>
                 <td className="text-[13px] text-ink-700">{number(pendingDocuments(source))}</td>
                 <td className="text-[13px] text-ink-700">{number(source.failed_documents)}</td>
+                <td className="text-[13px] text-ink-700">{number(source.chunks_active ?? 0)}</td>
                 <td className="text-[13px] text-ink-500">{formatDate(source.last_updated_at)}</td>
+                <td className="max-w-[220px] pr-3 text-[12.5px] leading-5 text-ink-500">
+                  {source.last_run_detail ? (
+                    <>
+                      <span className="font-semibold text-ink-700">{formatDate(source.last_run_at)}</span>
+                      <br />
+                      {source.last_run_detail}
+                    </>
+                  ) : (
+                    "No recorded sync"
+                  )}
+                </td>
                 <td className="pr-5">
-                  <Badge tone={source.failed_documents ? "amber" : "green"}>
+                  <Badge tone={source.failed_documents || pendingDocuments(source) ? "amber" : "green"}>
                     <CheckCircle2 size={11} className={cx("mr-1", source.failed_documents > 0 && "text-amber-600")} />
-                    {source.failed_documents ? "Needs review" : "Healthy"}
+                    {source.failed_documents ? "Needs review" : pendingDocuments(source) ? "Indexing" : "Healthy"}
                   </Badge>
                 </td>
               </tr>
             ))}
 
-            {!loading && !confluence && !jira && !visibleSources.length && (
+            {!loading && !visibleSources.length && (
               <tr>
-                <td className="px-5 py-6 text-[13px] text-ink-500" colSpan={7}>
+                <td className="px-5 py-6 text-[13px] text-ink-500" colSpan={9}>
                   No sources are configured or indexed yet.
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </Card>
+
+      <Card className="mt-5 animate-rise-3">
+        <div className="p-5 pb-0">
+          <CardTitle icon={History} title="Recent Connector Runs" />
+        </div>
+        <table className="mt-3 w-full text-left">
+          <thead>
+            <tr className="border-b border-line text-[11.5px] font-bold uppercase tracking-[0.08em] text-ink-400">
+              <th className="py-3 pl-5 font-bold">Connector</th>
+              <th className="font-bold">Total</th>
+              <th className="font-bold">Created</th>
+              <th className="font-bold">Updated</th>
+              <th className="font-bold">Skipped</th>
+              <th className="font-bold">Failed</th>
+              <th className="font-bold">Run time</th>
+              <th className="pr-5 font-bold">Status</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-line">
+            {(metrics?.connector_runs ?? []).map((run) => (
+              <tr key={`${run.connector}-${run.created_at}`} className="transition hover:bg-brand-50/30">
+                <td className="py-3.5 pl-5 text-[13.5px] font-bold text-ink-900">{connectorLabel(run.connector)}</td>
+                <td className="text-[13px] text-ink-700">{number(run.total)}</td>
+                <td className="text-[13px] text-ink-700">{number(run.created)}</td>
+                <td className="text-[13px] text-ink-700">{number(run.updated)}</td>
+                <td className="text-[13px] text-ink-700">{number(run.skipped)}</td>
+                <td className="text-[13px] text-ink-700">{number(run.failed)}</td>
+                <td className="text-[13px] text-ink-500">{formatDate(run.created_at)}</td>
+                <td className="pr-5">
+                  <Badge tone={run.failed ? "red" : "green"}>{run.status}</Badge>
+                </td>
+              </tr>
+            ))}
+            {!loading && !(metrics?.connector_runs ?? []).length && (
+              <tr>
+                <td className="px-5 py-6 text-[13px] text-ink-500" colSpan={8}>
+                  No connector sync runs are recorded yet.
                 </td>
               </tr>
             )}

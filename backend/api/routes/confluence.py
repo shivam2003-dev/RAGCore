@@ -15,7 +15,7 @@ from services.confluence_service import confluence_config_status
 router = APIRouter(prefix="/confluence", tags=["confluence"])
 
 
-@router.get("/status", response_model=ConfluenceStatusOut)
+@router.get("/status", response_model=ConfluenceStatusOut, dependencies=[require_role(Role.ADMIN)])
 async def confluence_status(_user: CurrentUser, settings: SettingsDep) -> ConfluenceStatusOut:
     return ConfluenceStatusOut.model_validate(confluence_config_status(settings))
 
@@ -24,7 +24,7 @@ async def confluence_status(_user: CurrentUser, settings: SettingsDep) -> Conflu
     "/sync",
     response_model=ConfluenceSyncResponse,
     status_code=202,
-    dependencies=[require_role(Role.EDITOR)],
+    dependencies=[require_role(Role.ADMIN)],
 )
 async def sync_confluence(
     body: ConfluenceSyncRequest,

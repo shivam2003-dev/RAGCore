@@ -16,7 +16,7 @@ from repositories.knowledge import CollectionRepository, KnowledgeBaseRepository
 router = APIRouter(prefix="/knowledge-bases", tags=["knowledge-bases"])
 
 
-@router.post("", response_model=KnowledgeBaseOut, status_code=201, dependencies=[require_role(Role.EDITOR)])
+@router.post("", response_model=KnowledgeBaseOut, status_code=201, dependencies=[require_role(Role.ADMIN)])
 async def create_kb(body: KnowledgeBaseCreate, user: CurrentUser, db: DbDep, settings: SettingsDep) -> KnowledgeBaseOut:
     repo = KnowledgeBaseRepository(db)
     existing = [kb for kb in await repo.list_by_org(user.organization_id) if kb.name == body.name]
@@ -52,7 +52,7 @@ async def get_kb(kb_id: uuid.UUID, user: CurrentUser, db: DbDep) -> KnowledgeBas
     "/{kb_id}/collections",
     response_model=CollectionOut,
     status_code=201,
-    dependencies=[require_role(Role.EDITOR)],
+    dependencies=[require_role(Role.ADMIN)],
 )
 async def create_collection(
     kb_id: uuid.UUID, body: CollectionCreate, user: CurrentUser, db: DbDep

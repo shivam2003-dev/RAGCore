@@ -37,6 +37,13 @@ class UserOut(ORMModel):
     created_at: datetime
 
 
+class UserCreateRequest(BaseModel):
+    email: EmailStr
+    password: str = Field(min_length=10, max_length=128)
+    full_name: str = Field(min_length=1, max_length=255)
+    role: str = Field(default="viewer", pattern="^(admin|editor|viewer)$")
+
+
 class ApiKeyCreateRequest(BaseModel):
     name: str = Field(min_length=1, max_length=255)
 
@@ -86,6 +93,36 @@ class DocumentOut(ORMModel):
     current_version: int
     created_at: datetime
     updated_at: datetime
+
+
+class DocumentVersionLineageOut(BaseModel):
+    version: int
+    file_sha256: str
+    file_size_bytes: int
+    created_at: datetime
+
+
+class DocumentLineageOut(BaseModel):
+    id: uuid.UUID
+    knowledge_base_id: uuid.UUID
+    knowledge_base_name: str | None
+    title: str
+    source_type: str
+    source_system: str
+    source_id: str | None
+    source_url: str | None
+    source_version: str | int | None
+    source_updated_at: str | None
+    source_sha256: str | None
+    status: str
+    current_version: int
+    chunk_count: int
+    active_chunk_count: int
+    embedding_model: str | None
+    created_at: datetime
+    updated_at: datetime
+    metadata: dict
+    versions: list[DocumentVersionLineageOut]
 
 
 class DocumentListOut(BaseModel):
@@ -180,12 +217,33 @@ class JiraSyncResponse(BaseModel):
 
 # --- live metrics ---
 class SourceMetricOut(BaseModel):
+    knowledge_base_id: uuid.UUID | None = None
     name: str
     source_type: str
     documents: int
     ready_documents: int
+    pending_documents: int = 0
+    uploaded_documents: int = 0
+    processing_documents: int = 0
     failed_documents: int
+    chunks_active: int = 0
     last_updated_at: datetime | None
+    last_ingested_at: datetime | None = None
+    last_run_at: datetime | None = None
+    last_run_detail: str | None = None
+
+
+class ConnectorRunOut(BaseModel):
+    connector: str
+    knowledge_base_id: uuid.UUID | None
+    status: str
+    total: int
+    created: int
+    updated: int
+    skipped: int
+    failed: int
+    detail: str | None
+    created_at: datetime
 
 
 class ActivityMetricOut(BaseModel):
@@ -222,6 +280,7 @@ class MetricsOverviewOut(BaseModel):
     avg_latency_ms: int | None
     feedback: FeedbackMetricOut
     sources: list[SourceMetricOut]
+    connector_runs: list[ConnectorRunOut]
     recent_activity: list[ActivityMetricOut]
     top_questions: list[QuestionMetricOut]
 
@@ -264,10 +323,91 @@ class EvalRecentAnswerOut(BaseModel):
     relevance_score: float | None
 
 
+class EvalBenchmarkComponentOut(BaseModel):
+    id: str
+    label: str
+    value: float | None
+    weight: float
+    display: str
+
+
+class EvalBenchmarkOut(BaseModel):
+    label: str
+    score: int | None
+    value: float | None
+    display: str
+    status: str
+    sample_size: int
+    detail: str
+    components: list[EvalBenchmarkComponentOut]
+
+
+class GoldenEvalCaseOut(BaseModel):
+    id: str
+    category: str
+    question: str
+    expected_source_types: list[str]
+    expected_answer_traits: list[str]
+    tags: list[str] = []
+
+
+class GoldenEvalDatasetOut(BaseModel):
+    dataset_path: str
+    cases: int
+    categories: dict[str, int]
+    source_types: dict[str, int]
+    benchmark_ready: bool
+    run_command: str
+    sample: list[GoldenEvalCaseOut]
+
+
+class EvalGateMetricOut(BaseModel):
+    id: str
+    label: str
+    value: float | None
+    display: str
+    threshold: float | None = None
+    passed: bool
+    detail: str
+
+
+class EvalGateCaseOut(BaseModel):
+    id: str
+    category: str
+    question: str
+    passed: bool
+    expected_sources: list[str]
+    returned_sources: list[str]
+    returned_source_titles: list[str]
+    answer_text: str
+    judge_rationale: str
+    latency_ms: int
+    scores: dict[str, float | None]
+    model_comparison: dict[str, float | int | str | None]
+    role_space_checks: dict[str, bool]
+
+
+class EvalGateRunOut(BaseModel):
+    generated_at: datetime
+    dataset_path: str
+    cases: int
+    passed: bool
+    score: int | None
+    display: str
+    thresholds: dict[str, float]
+    metrics: list[EvalGateMetricOut]
+    failing_cases: list[EvalGateCaseOut]
+    cases_detail: list[EvalGateCaseOut]
+    regression_trend: list[dict[str, float | int | str | None]]
+    methodology: list[str]
+
+
 class EvalOverviewOut(BaseModel):
     generated_at: datetime
     answers_total: int
     sample_size: int
+    benchmark: EvalBenchmarkOut
+    golden_dataset: GoldenEvalDatasetOut
     feedback: FeedbackMetricOut
     scores: list[EvalScoreOut]
     latency: EvalLatencyOut

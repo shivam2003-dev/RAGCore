@@ -37,6 +37,34 @@ export type DocumentOut = {
   updated_at: string;
 };
 
+export type DocumentLineage = {
+  id: string;
+  knowledge_base_id: string;
+  knowledge_base_name: string | null;
+  title: string;
+  source_type: string;
+  source_system: string;
+  source_id: string | null;
+  source_url: string | null;
+  source_version: string | number | null;
+  source_updated_at: string | null;
+  source_sha256: string | null;
+  status: string;
+  current_version: number;
+  chunk_count: number;
+  active_chunk_count: number;
+  embedding_model: string | null;
+  created_at: string;
+  updated_at: string;
+  metadata: Record<string, unknown>;
+  versions: Array<{
+    version: number;
+    file_sha256: string;
+    file_size_bytes: number;
+    created_at: string;
+  }>;
+};
+
 export type SearchHit = {
   chunk_id: string;
   document_id: string;
@@ -160,12 +188,33 @@ export type JiraSyncResponse = {
 };
 
 export type SourceMetric = {
+  knowledge_base_id: string | null;
   name: string;
   source_type: string;
   documents: number;
   ready_documents: number;
+  pending_documents: number;
+  uploaded_documents: number;
+  processing_documents: number;
   failed_documents: number;
+  chunks_active: number;
   last_updated_at: string | null;
+  last_ingested_at: string | null;
+  last_run_at: string | null;
+  last_run_detail: string | null;
+};
+
+export type ConnectorRun = {
+  connector: string;
+  knowledge_base_id: string | null;
+  status: string;
+  total: number;
+  created: number;
+  updated: number;
+  skipped: number;
+  failed: number;
+  detail: string | null;
+  created_at: string;
 };
 
 export type ActivityMetric = {
@@ -200,6 +249,7 @@ export type MetricsOverview = {
     helpful_rate: number | null;
   };
   sources: SourceMetric[];
+  connector_runs: ConnectorRun[];
   recent_activity: ActivityMetric[];
   top_questions: QuestionMetric[];
 };
@@ -241,10 +291,91 @@ export type EvalRecentAnswer = {
   relevance_score: number | null;
 };
 
+export type EvalBenchmarkComponent = {
+  id: string;
+  label: string;
+  value: number | null;
+  weight: number;
+  display: string;
+};
+
+export type EvalBenchmark = {
+  label: string;
+  score: number | null;
+  value: number | null;
+  display: string;
+  status: "good" | "watch" | "needs_attention" | "no_data" | string;
+  sample_size: number;
+  detail: string;
+  components: EvalBenchmarkComponent[];
+};
+
+export type GoldenEvalCase = {
+  id: string;
+  category: string;
+  question: string;
+  expected_source_types: string[];
+  expected_answer_traits: string[];
+  tags: string[];
+};
+
+export type GoldenEvalDataset = {
+  dataset_path: string;
+  cases: number;
+  categories: Record<string, number>;
+  source_types: Record<string, number>;
+  benchmark_ready: boolean;
+  run_command: string;
+  sample: GoldenEvalCase[];
+};
+
+export type EvalGateMetric = {
+  id: string;
+  label: string;
+  value: number | null;
+  display: string;
+  threshold: number | null;
+  passed: boolean;
+  detail: string;
+};
+
+export type EvalGateCase = {
+  id: string;
+  category: string;
+  question: string;
+  passed: boolean;
+  expected_sources: string[];
+  returned_sources: string[];
+  returned_source_titles: string[];
+  answer_text: string;
+  judge_rationale: string;
+  latency_ms: number;
+  scores: Record<string, number | null>;
+  model_comparison: Record<string, number | string | null>;
+  role_space_checks: Record<string, boolean>;
+};
+
+export type EvalGateRun = {
+  generated_at: string;
+  dataset_path: string;
+  cases: number;
+  passed: boolean;
+  score: number | null;
+  display: string;
+  thresholds: Record<string, number>;
+  metrics: EvalGateMetric[];
+  failing_cases: EvalGateCase[];
+  cases_detail: EvalGateCase[];
+  regression_trend: Record<string, number | string | null>[];
+  methodology: string[];
+};
+
 export type EvalOverview = {
   generated_at: string;
   answers_total: number;
   sample_size: number;
+  benchmark: EvalBenchmark;
+  golden_dataset: GoldenEvalDataset;
   feedback: {
     helpful: number;
     not_helpful: number;
@@ -338,6 +469,8 @@ export type RagSource = {
   content?: string;
   source_type?: string;
   url?: string;
+  source_updated_at?: string | null;
+  freshness_label?: string;
 };
 
 export type AskStreamEvent =
@@ -386,17 +519,16 @@ export type RoleGenerateInput = {
   outputStyle: string;
 };
 
-type DemoIdentity = {
+export type UserCreateInput = {
   email: string;
   password: string;
-  fullName: string;
-  organization: string;
+  full_name: string;
+  role: "admin" | "editor" | "viewer";
 };
 
 const API_BASE =
   process.env.NEXT_PUBLIC_KIMBAL_API_BASE?.replace(/\/$/, "") ?? "http://localhost:8000/api/v1";
 const SESSION_KEY = "kimbal.local.session.v1";
-const DEMO_IDENTITY_KEY = "kimbal.local.identity.v1";
 const PREFERRED_KB_NAMES = ["Jira DEVO", "Confluence DevOps1", "Kimbal Local Uploads"];
 const SESSION_CACHE_MS = 30_000;
 const LIVE_CACHE_MS = 15_000;
@@ -428,20 +560,6 @@ function writeJson(key: string, value: unknown) {
   if (typeof window !== "undefined") {
     window.localStorage.setItem(key, JSON.stringify(value));
   }
-}
-
-function demoIdentity(): DemoIdentity {
-  const stored = readJson<DemoIdentity>(DEMO_IDENTITY_KEY);
-  if (stored) return stored;
-  const stamp = Date.now().toString(36);
-  const identity = {
-    email: `local-ui-${stamp}@kimbal.dev`,
-    password: `Kimbal-local-${stamp}!`,
-    fullName: "Shivam Kumar",
-    organization: `Kimbal Local ${stamp}`,
-  };
-  writeJson(DEMO_IDENTITY_KEY, identity);
-  return identity;
 }
 
 async function parseError(response: Response): Promise<ApiError> {
@@ -479,7 +597,19 @@ export class KimbalApi {
 
   setSession(token: TokenPair) {
     this.token = token;
+    this.sessionUser = null;
+    this.sessionCheckedAt = 0;
     writeJson(SESSION_KEY, token);
+  }
+
+  clearSession() {
+    this.token = null;
+    this.sessionUser = null;
+    this.sessionCheckedAt = 0;
+    this.clearLiveCache();
+    if (typeof window !== "undefined") {
+      window.localStorage.removeItem(SESSION_KEY);
+    }
   }
 
   private clearLiveCache() {
@@ -539,78 +669,41 @@ export class KimbalApi {
 
   private async ensureSessionOnce(): Promise<UserOut> {
     if (!this.hasSession()) {
-      await this.registerOrLogin();
+      throw new ApiError("Login required", 401, "login_required");
     }
     if (this.sessionUser && Date.now() - this.sessionCheckedAt < SESSION_CACHE_MS) {
       return this.sessionUser;
     }
     try {
       const user = await this.request<UserOut>("/auth/me");
-      const storedIdentity = readJson<DemoIdentity>(DEMO_IDENTITY_KEY);
-      if (storedIdentity && user.email !== storedIdentity.email) {
-        await this.login(storedIdentity);
-        const refreshedUser = await this.request<UserOut>("/auth/me");
-        this.sessionUser = refreshedUser;
-        this.sessionCheckedAt = Date.now();
-        return refreshedUser;
-      }
       this.sessionUser = user;
       this.sessionCheckedAt = Date.now();
       return user;
     } catch (error) {
       if (error instanceof ApiError && error.status === 401) {
-        this.sessionUser = null;
-        this.sessionCheckedAt = 0;
-        await this.registerOrLogin();
-        const user = await this.request<UserOut>("/auth/me");
-        this.sessionUser = user;
-        this.sessionCheckedAt = Date.now();
-        return user;
+        this.clearSession();
       }
       throw error;
     }
   }
 
-  async registerOrLogin(): Promise<TokenPair> {
-    const storedIdentity = readJson<DemoIdentity>(DEMO_IDENTITY_KEY);
-    const identity = storedIdentity ?? demoIdentity();
-    if (storedIdentity) {
-      try {
-        return await this.login(identity);
-      } catch (error) {
-        if (!(error instanceof ApiError) || (error.status !== 401 && error.status !== 400)) {
-          throw error;
-        }
-      }
-    }
-    try {
-      const token = await this.request<TokenPair>("/auth/register", {
-        method: "POST",
-        auth: false,
-        body: {
-          email: identity.email,
-          password: identity.password,
-          full_name: identity.fullName,
-          organization_name: identity.organization,
-        },
-      });
-      this.setSession(token);
-      return token;
-    } catch (error) {
-      if (!(error instanceof ApiError) || error.status !== 409) {
-        throw error;
-      }
-      return this.login(identity);
-    }
-  }
-
-  private async login(identity: DemoIdentity): Promise<TokenPair> {
+  async login(email: string, password: string): Promise<UserOut> {
     const body = new URLSearchParams();
-    body.set("username", identity.email);
-    body.set("password", identity.password);
+    body.set("username", email.trim().toLowerCase());
+    body.set("password", password);
     const token = await this.form<TokenPair>("/auth/login", body);
     this.setSession(token);
-    return token;
+    return this.ensureSession();
+  }
+
+  async logout() {
+    try {
+      if (this.hasSession()) {
+        await this.request<void>("/auth/logout", { method: "POST" });
+      }
+    } finally {
+      this.clearSession();
+    }
   }
 
   async listKnowledgeBases() {
@@ -652,6 +745,10 @@ export class KimbalApi {
     });
     if (kbId) params.set("knowledge_base_id", kbId);
     return this.request<{ items: DocumentOut[]; total: number }>(`/documents?${params.toString()}`);
+  }
+
+  async documentLineage(documentId: string) {
+    return this.request<DocumentLineage>(`/documents/${encodeURIComponent(documentId)}/lineage`);
   }
 
   async uploadDocument(kbId: string, file: File) {
@@ -705,8 +802,24 @@ export class KimbalApi {
     return this.request<MessageOut[]>(`/conversations/${encodeURIComponent(conversationId)}/messages`);
   }
 
+  async clearConversationHistory(conversationId: string) {
+    await this.request<void>(`/conversations/${encodeURIComponent(conversationId)}/messages`, {
+      method: "DELETE",
+    });
+    this.clearLiveCache();
+  }
+
   async listUsers() {
     return this.request<UserOut[]>("/admin/users?limit=200");
+  }
+
+  async createUser(input: UserCreateInput) {
+    const user = await this.request<UserOut>("/admin/users", {
+      method: "POST",
+      body: input,
+    });
+    this.clearLiveCache();
+    return user;
   }
 
   async updateUserRole(userId: string, role: "admin" | "editor" | "viewer") {
@@ -771,6 +884,10 @@ export class KimbalApi {
 
   async evalsOverview() {
     return this.cached("evalsOverview", LIVE_CACHE_MS, () => this.request<EvalOverview>("/evals/overview"));
+  }
+
+  async evalsOfflineGate() {
+    return this.cached("evalsOfflineGate", LIVE_CACHE_MS, () => this.request<EvalGateRun>("/evals/offline"));
   }
 
   async webSearchStatus() {

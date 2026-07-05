@@ -250,10 +250,11 @@ export function Donut({
   size?: number;
   thickness?: number;
 }) {
-  const total = data.reduce((s, d) => s + d.value, 0);
+  const cleanData = data.filter((item) => item.value > 0);
+  const total = cleanData.reduce((s, d) => s + d.value, 0);
   const r = (size - thickness) / 2;
   const c = 2 * Math.PI * r;
-  const segments = data.reduce<{
+  const segments = cleanData.reduce<{
     offset: number;
     items: Array<{ value: number; color: string; offset: number; index: number }>;
   }>(
@@ -266,10 +267,14 @@ export function Donut({
     },
     { offset: 0, items: [] }
   ).items;
+  if (!total) {
+    return <div className="rounded-full bg-canvas" style={{ width: size, height: size }} aria-hidden />;
+  }
   return (
     <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} aria-hidden>
       {segments.map((d) => {
         const frac = d.value / total;
+        const arc = frac * c;
         return (
           <circle
             key={d.index}
@@ -279,8 +284,10 @@ export function Donut({
             fill="none"
             stroke={d.color}
             strokeWidth={thickness}
-            strokeDasharray={`${frac * c - 2} ${c - frac * c + 2}`}
-            strokeDashoffset={-d.offset * c + c / 4}
+            strokeDasharray={`${arc} ${c - arc}`}
+            strokeDashoffset={-d.offset * c}
+            strokeLinecap="butt"
+            transform={`rotate(-90 ${size / 2} ${size / 2})`}
           />
         );
       })}

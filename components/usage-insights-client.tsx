@@ -3,6 +3,7 @@
 import { CalendarDays, Compass, Lightbulb, MessageCircleQuestion, Search } from "lucide-react";
 import { Badge, Card, CardTitle, Donut, PageHeader } from "@/components/ui";
 import { useLiveMetrics } from "@/components/use-live-metrics";
+import { aggregateSourceMix } from "@/components/source-metrics";
 
 function number(value: number) {
   return new Intl.NumberFormat().format(value);
@@ -10,12 +11,14 @@ function number(value: number) {
 
 export function UsageInsightsClient() {
   const { metrics, loading, error } = useLiveMetrics();
-  const sourceTotal = metrics?.sources.reduce((sum, source) => sum + source.documents, 0) ?? 0;
-  const sourceMix = metrics?.sources.map((source, index) => ({
-    label: source.name,
-    pct: sourceTotal ? Math.round((source.documents / sourceTotal) * 100) : 0,
+  const sourceMixValues = aggregateSourceMix(metrics?.sources ?? [], "documents");
+  const sourceTotal = sourceMixValues.reduce((sum, source) => sum + source.value, 0);
+  const sourceMix = sourceMixValues.map((source, index) => ({
+    label: source.label,
+    value: source.value,
+    pct: sourceTotal ? Math.round((source.value / sourceTotal) * 100) : 0,
     color: ["#5b5ceb", "#38bdf8", "#10b981", "#f59e0b", "#8583f1", "#cbd5e1"][index % 6],
-  })) ?? [];
+  }));
 
   return (
     <div>
@@ -41,7 +44,7 @@ export function UsageInsightsClient() {
         <Card className="col-span-4 p-5">
           <CardTitle icon={Compass} title="Indexed Source Mix" tint="bg-sky-50 text-sky-500" />
           <div className="mt-5 flex items-center gap-5">
-            {sourceMix.length ? <Donut data={sourceMix.map((item) => ({ value: Math.max(1, item.pct), color: item.color }))} size={120} thickness={26} /> : <div className="h-[120px] w-[120px] rounded-full bg-canvas" />}
+            {sourceMix.length ? <Donut data={sourceMix.map((item) => ({ value: item.value, color: item.color }))} size={120} thickness={26} /> : <div className="h-[120px] w-[120px] rounded-full bg-canvas" />}
             <ul className="flex-1 space-y-2.5">
               {sourceMix.map((item) => (
                 <li key={item.label} className="flex items-center gap-2 text-[12.5px]">

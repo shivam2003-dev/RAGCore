@@ -2,12 +2,13 @@
 
 import asyncio
 import json
+import uuid
 
 
 async def _create_kb(client, headers) -> str:
     resp = await client.post(
         "/api/v1/knowledge-bases",
-        json={"name": "Docs", "description": "test"},
+        json={"name": f"Docs {uuid.uuid4().hex[:8]}", "description": "test"},
         headers=headers,
     )
     assert resp.status_code == 201, resp.text
@@ -86,6 +87,30 @@ async def test_full_rag_flow(client, auth_headers):
     assert [m["role"] for m in messages] == ["user", "assistant"]
     assert messages[1]["citations"], "fake LLM emits [n] markers"
 
+    # conversational follow-up: backend rewrites before retrieval, then persists the new turn
+    async with client.stream(
+        "POST",
+        f"/api/v1/conversations/{conv_id}/ask",
+        json={"question": "Where do I push it?"},
+        headers=auth_headers,
+    ) as resp:
+        assert resp.status_code == 200
+        followup_events: list[tuple[str, str]] = []
+        current_event = ""
+        async for line in resp.aiter_lines():
+            if line.startswith("event: "):
+                current_event = line[7:]
+            elif line.startswith("data: "):
+                followup_events.append((current_event, line[6:]))
+    followup_sources = json.loads(followup_events[0][1])
+    assert followup_sources["standalone_question"] != "Where do I push it?"
+    assert followup_events[-1][0] == "done"
+
+    messages = (
+        await client.get(f"/api/v1/conversations/{conv_id}/messages", headers=auth_headers)
+    ).json()
+    assert [m["role"] for m in messages] == ["user", "assistant", "user", "assistant"]
+
     # feedback
     fb = await client.post(
         "/api/v1/feedback",
@@ -93,6 +118,13 @@ async def test_full_rag_flow(client, auth_headers):
         headers=auth_headers,
     )
     assert fb.status_code == 201
+
+    clear = await client.delete(f"/api/v1/conversations/{conv_id}/messages", headers=auth_headers)
+    assert clear.status_code == 204
+    messages = (
+        await client.get(f"/api/v1/conversations/{conv_id}/messages", headers=auth_headers)
+    ).json()
+    assert messages == []
 
 
 async def test_web_only_ask_streams_and_persists_citations(client, auth_headers):
@@ -167,7 +199,7 @@ async def test_document_delete_removes_from_search(client, auth_headers):
 
 
 async def test_rbac_viewer_cannot_upload(client, auth_headers):
-    # register a second user in the SAME org → viewer role
+    # register a second Kimbal user → viewer role
     me = await client.get("/api/v1/auth/me", headers=auth_headers)
     org_admin_email = me.json()["email"]
     org_name_resp = await client.get("/api/v1/knowledge-bases", headers=auth_headers)
@@ -177,7 +209,6 @@ async def test_rbac_viewer_cannot_upload(client, auth_headers):
     kb_id = await _create_kb(client, auth_headers)
     import uuid as _uuid
 
-    # same organization_name → joins existing org as viewer
     reg = await client.post(
         "/api/v1/auth/register",
         json={
@@ -187,10 +218,8 @@ async def test_rbac_viewer_cannot_upload(client, auth_headers):
             "organization_name": "SharedOrgForRBAC",
         },
     )
-    # own org (fresh) → admin; so instead demote check: viewer in same org needs admin API.
-    # Simpler robust check: unauthenticated upload forbidden already covered; here assert
-    # editor requirement enforced for a viewer token via role change by admin.
     assert reg.status_code == 201
+    assert reg.json()["access_token"]
     viewer_headers = {"authorization": f"Bearer {reg.json()['access_token']}"}
     resp = await client.post(
         "/api/v1/documents/upload",
@@ -198,5 +227,4 @@ async def test_rbac_viewer_cannot_upload(client, auth_headers):
         files={"file": ("x.txt", b"hello", "text/plain")},
         data={"knowledge_base_id": kb_id},
     )
-    # viewer belongs to a different org AND (if same org) lacks editor role → 403/404
-    assert resp.status_code in (403, 404)
+    assert resp.status_code == 403

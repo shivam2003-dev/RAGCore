@@ -1,7 +1,7 @@
 import uuid
 
 from database.base import utcnow
-from models import Feedback, Message, User
+from models import Document, DocumentStatus, DocumentVersion, Feedback, Message, User
 
 
 async def test_metrics_overview_uses_live_database_counts(client, auth_headers):
@@ -20,6 +20,61 @@ async def test_metrics_overview_uses_live_database_counts(client, auth_headers):
     assert body["questions_asked"] == 0
     assert body["feedback"]["total"] == 0
     assert body["sources"] == []
+    assert body["connector_runs"] == []
+
+
+async def test_document_lineage_exposes_source_provenance(client, auth_headers, db):
+    kb = await client.post(
+        "/api/v1/knowledge-bases",
+        json={"name": "Lineage Docs", "description": "test"},
+        headers=auth_headers,
+    )
+    assert kb.status_code == 201, kb.text
+    kb_id = uuid.UUID(kb.json()["id"])
+
+    me = await client.get("/api/v1/auth/me", headers=auth_headers)
+    assert me.status_code == 200, me.text
+    user_id = uuid.UUID(me.json()["id"])
+    doc = Document(
+        knowledge_base_id=kb_id,
+        collection_id=None,
+        uploaded_by=user_id,
+        title="SRE Runbook",
+        source_type="html",
+        status=DocumentStatus.READY,
+        current_version=1,
+        is_deleted=False,
+        doc_metadata={
+            "source": "confluence",
+            "confluence_page_id": "12345",
+            "confluence_page_url": "https://example.atlassian.net/wiki/spaces/SRE/pages/12345",
+            "confluence_version": 7,
+            "source_sha256": "a" * 64,
+        },
+    )
+    db.add(doc)
+    await db.flush()
+    db.add(
+        DocumentVersion(
+            document_id=doc.id,
+            version=1,
+            file_path="/tmp/sre.html",
+            file_sha256="b" * 64,
+            file_size_bytes=128,
+            created_at=utcnow(),
+        )
+    )
+    await db.commit()
+
+    resp = await client.get(f"/api/v1/documents/{doc.id}/lineage", headers=auth_headers)
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["source_system"] == "confluence"
+    assert body["source_id"] == "12345"
+    assert body["source_url"].startswith("https://example.atlassian.net/wiki")
+    assert body["source_version"] == 7
+    assert body["versions"][0]["version"] == 1
+    assert "api_key" not in str(body).lower()
 
 
 async def test_evals_overview_uses_persisted_answer_data(client, auth_headers, db):
@@ -84,6 +139,17 @@ async def test_evals_overview_uses_persisted_answer_data(client, auth_headers, d
     body = resp.json()
     assert body["answers_total"] == 1
     assert body["sample_size"] == 1
+    assert body["benchmark"]["label"] == "Kimbal Benchmark"
+    assert body["benchmark"]["display"].endswith("/100")
+    assert body["benchmark"]["sample_size"] == 1
+    assert body["golden_dataset"]["cases"] >= 8
+    assert body["golden_dataset"]["benchmark_ready"] is True
+    assert {component["id"] for component in body["benchmark"]["components"]} >= {
+        "groundedness",
+        "citation_coverage",
+        "answer_relevance",
+        "success_rate",
+    }
     assert body["feedback"]["helpful"] == 1
     assert body["latency"]["avg_ms"] == 1240
     assert body["models"][0]["model"] == "fake-eval-model"
@@ -93,6 +159,14 @@ async def test_evals_overview_uses_persisted_answer_data(client, auth_headers, d
         "citation_coverage",
     }
     assert "api_key" not in str(body).lower()
+
+    benchmark = await client.get("/api/v1/evals/benchmark", headers=auth_headers)
+    assert benchmark.status_code == 200, benchmark.text
+    assert benchmark.json()["display"].endswith("/100")
+
+    golden = await client.get("/api/v1/evals/golden", headers=auth_headers)
+    assert golden.status_code == 200, golden.text
+    assert golden.json()["dataset_path"] == "evals/golden/rag.jsonl"
 
 
 async def test_connector_status_endpoints_are_read_only_and_secret_safe(client, auth_headers):

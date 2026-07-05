@@ -3,9 +3,9 @@
 import { ChangeEvent, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { ArrowUpDown, Eye, FileText, Loader2, MoreHorizontal, RefreshCw, Search, Trash2, Upload } from "lucide-react";
+import { ArrowUpDown, Eye, FileText, Loader2, MoreHorizontal, RefreshCw, Search, Trash2, Upload, X } from "lucide-react";
 import { Card, PageHeader, PrimaryButton, GhostButton, Badge } from "@/components/ui";
-import { kimbalApi, type DocumentOut, type KnowledgeBase } from "@/lib/kimbal-api";
+import { kimbalApi, type DocumentLineage, type DocumentOut, type KnowledgeBase } from "@/lib/kimbal-api";
 
 const freshTone = { ready: "green", processing: "amber", uploaded: "amber", failed: "red", deleted: "gray" } as const;
 const LEGACY_SEED_KB_NAME = "Kimbal Local Runbook";
@@ -24,6 +24,8 @@ export function DocumentsClient() {
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState("Loading documents");
   const [busy, setBusy] = useState(false);
+  const [lineage, setLineage] = useState<DocumentLineage | null>(null);
+  const [lineageLoading, setLineageLoading] = useState(false);
 
   async function refresh(pageOverride = page) {
     setBusy(true);
@@ -86,6 +88,19 @@ export function DocumentsClient() {
     setStatus(`Deleting ${doc.title}`);
     await kimbalApi.deleteDocument(doc.id);
     await refresh(page);
+  }
+
+  async function showLineage(doc: DocumentOut) {
+    setLineageLoading(true);
+    setStatus(`Loading lineage for ${doc.title}`);
+    try {
+      setLineage(await kimbalApi.documentLineage(doc.id));
+      setStatus(`Lineage loaded for ${doc.title}`);
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Failed to load lineage");
+    } finally {
+      setLineageLoading(false);
+    }
   }
 
   useEffect(() => {
@@ -205,11 +220,19 @@ export function DocumentsClient() {
                     <div className="flex items-center justify-end gap-1">
                       <button
                         type="button"
+                        onClick={() => void showLineage(doc)}
+                        className="flex h-8 w-8 items-center justify-center rounded-[8px] text-ink-400 transition hover:bg-white hover:text-brand-500"
+                        aria-label={`View lineage for ${doc.title}`}
+                      >
+                        {lineageLoading ? <Loader2 size={15} className="animate-spin" /> : <Eye size={15} />}
+                      </button>
+                      <button
+                        type="button"
                         onClick={() => void reindex(doc)}
                         className="flex h-8 w-8 items-center justify-center rounded-[8px] text-ink-400 transition hover:bg-white hover:text-brand-500"
                         aria-label={`Reindex ${doc.title}`}
                       >
-                        <Eye size={15} />
+                        <RefreshCw size={15} />
                       </button>
                       <button
                         type="button"
@@ -270,6 +293,76 @@ export function DocumentsClient() {
           </div>
         </div>
       </Card>
+      {lineage && <LineageDrawer lineage={lineage} onClose={() => setLineage(null)} />}
+    </div>
+  );
+}
+
+function LineageDrawer({ lineage, onClose }: { lineage: DocumentLineage; onClose: () => void }) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-end justify-end bg-ink-950/20 p-4 backdrop-blur-sm">
+      <div className="max-h-[92vh] w-full max-w-[680px] overflow-auto rounded-[18px] border border-line bg-white shadow-soft">
+        <div className="sticky top-0 z-10 flex items-start justify-between gap-4 border-b border-line bg-white p-5">
+          <div>
+            <p className="text-[11.5px] font-bold uppercase tracking-[0.08em] text-ink-400">Document lineage</p>
+            <h2 className="mt-1 text-[20px] font-black tracking-[-0.02em] text-ink-950">{lineage.title}</h2>
+            <p className="mt-1 text-[12.5px] font-semibold text-ink-500">{lineage.knowledge_base_name ?? "Unknown source"}</p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="flex h-9 w-9 items-center justify-center rounded-[10px] text-ink-400 transition hover:bg-canvas hover:text-ink-900"
+            aria-label="Close lineage"
+          >
+            <X size={17} />
+          </button>
+        </div>
+
+        <div className="grid grid-cols-2 gap-3 p-5">
+          <LineageMetric label="Source system" value={lineage.source_system} />
+          <LineageMetric label="Status" value={lineage.status} />
+          <LineageMetric label="Source id" value={lineage.source_id ?? "N/A"} />
+          <LineageMetric label="Source version" value={String(lineage.source_version ?? "N/A")} />
+          <LineageMetric label="Source updated" value={lineage.source_updated_at ?? "N/A"} />
+          <LineageMetric label="Embedding model" value={lineage.embedding_model ?? "N/A"} />
+          <LineageMetric label="Chunks" value={`${lineage.active_chunk_count} active / ${lineage.chunk_count} total`} />
+          <LineageMetric label="Stored versions" value={String(lineage.versions.length)} />
+        </div>
+
+        <div className="border-t border-line px-5 py-4">
+          <p className="text-[12px] font-bold uppercase tracking-[0.08em] text-ink-400">Original source</p>
+          {lineage.source_url ? (
+            <a className="mt-2 block break-all text-[13px] font-semibold text-brand-600 hover:underline" href={lineage.source_url} target="_blank" rel="noreferrer">
+              {lineage.source_url}
+            </a>
+          ) : (
+            <p className="mt-2 text-[13px] text-ink-500">No source URL stored for this document.</p>
+          )}
+        </div>
+
+        <div className="border-t border-line px-5 py-4">
+          <p className="text-[12px] font-bold uppercase tracking-[0.08em] text-ink-400">Versions</p>
+          <div className="mt-3 divide-y divide-line rounded-[12px] border border-line">
+            {lineage.versions.map((version) => (
+              <div key={`${version.version}-${version.file_sha256}`} className="grid grid-cols-[80px_1fr_120px] gap-3 px-3 py-2.5 text-[12.5px]">
+                <span className="font-bold text-ink-900">v{version.version}</span>
+                <span className="truncate font-mono text-ink-500">{version.file_sha256}</span>
+                <span className="text-right font-semibold text-ink-500">{new Intl.NumberFormat().format(version.file_size_bytes)} bytes</span>
+              </div>
+            ))}
+            {!lineage.versions.length && <p className="px-3 py-3 text-[13px] text-ink-500">No stored versions found.</p>}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function LineageMetric({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-[12px] border border-line bg-canvas px-3 py-3">
+      <p className="text-[11.5px] font-semibold text-ink-400">{label}</p>
+      <p className="mt-1 break-words text-[13px] font-bold text-ink-900">{value}</p>
     </div>
   );
 }

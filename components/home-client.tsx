@@ -19,6 +19,7 @@ import {
 import { Badge, Card, CardLink, CardTitle, Donut, ProgressBar } from "@/components/ui";
 import { HomeAsk } from "@/components/home-ask";
 import { useLiveMetrics } from "@/components/use-live-metrics";
+import { aggregateSourceMix } from "@/components/source-metrics";
 
 function number(value: number) {
   return new Intl.NumberFormat().format(value);
@@ -53,12 +54,11 @@ export function HomeClient() {
     ? Math.round(metrics.feedback.helpful_rate * 100)
     : null;
   const readySources = metrics?.sources.filter((source) => source.ready_documents > 0) ?? [];
-  const donutData = readySources.length
-    ? readySources.map((source, index) => ({
-        value: source.ready_documents,
-        color: sourceColors[index % sourceColors.length],
-      }))
-    : [];
+  const sourceMix = aggregateSourceMix(readySources);
+  const donutData = sourceMix.map((source, index) => ({
+    value: source.value,
+    color: sourceColors[index % sourceColors.length],
+  }));
   const healthRows: HealthRow[] = [
     { label: "Ready documents", value: metrics?.documents_ready ?? 0, icon: CircleCheck, tone: "text-emerald-500" },
     { label: "Pending ingestion", value: metrics?.documents_processing ?? 0, icon: Clock3, tone: "text-amber-500" },
@@ -202,14 +202,14 @@ export function HomeClient() {
           <div className="mt-5 flex items-center gap-6">
             {donutData.length ? <Donut data={donutData} /> : <div className="h-[128px] w-[128px] rounded-full bg-canvas" />}
             <ul className="flex-1 space-y-2.5">
-              {readySources.slice(0, 6).map((source, index) => (
-                <li key={source.name} className="flex items-center gap-2.5 text-[12.5px]">
+              {sourceMix.slice(0, 6).map((source, index) => (
+                <li key={source.family} className="flex items-center gap-2.5 text-[12.5px]">
                   <span
                     className="h-2.5 w-2.5 rounded-full"
                     style={{ backgroundColor: sourceColors[index % sourceColors.length] }}
                   />
-                  <span className="flex-1 font-medium text-ink-700">{source.name}</span>
-                  <span className="font-semibold text-ink-500">{number(source.ready_documents)}</span>
+                  <span className="flex-1 font-medium text-ink-700">{source.label}</span>
+                  <span className="font-semibold text-ink-500">{number(source.value)}</span>
                 </li>
               ))}
               {!loading && !readySources.length && (

@@ -8,6 +8,7 @@ import time
 import uuid
 from collections.abc import AsyncIterator, Iterable
 from dataclasses import dataclass
+from datetime import UTC, datetime
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -24,6 +25,11 @@ from repositories.conversations import ConversationRepository, MessageRepository
 from repositories.knowledge import KnowledgeBaseRepository
 from retrieval.context import RetrievalContext, RetrievedChunk
 from retrieval.pipeline import RetrievalPipeline
+from services.chat_memory import MemoryManager
+from services.chat_sessions import ChatSessionManager
+from services.conversational_retriever import ConversationalRetriever
+from services.question_rewriter import QuestionRewriter
+from services.response_generator import ResponseGenerator
 from services.web_search_service import WebSearchService
 
 HISTORY_TURNS = 8
@@ -79,8 +85,10 @@ class JiraIssueCountRow:
 @dataclass(slots=True)
 class JiraIssueCountResult:
     assignee_label: str
+    filter_label: str
     issues: list[JiraIssueCountRow]
     chunks: list[RetrievedChunk]
+    counted_total: int
 
 
 @dataclass(slots=True)
@@ -110,17 +118,25 @@ class ChatService:
         self._llm = llm
         self._web_search = web_search
         self._settings = settings
+        self._sessions = ChatSessionManager(db)
+        self._memory = MemoryManager(db, default_model=llm.model)
+        self._question_rewriter = QuestionRewriter(llm)
+        self._conversation_retriever = ConversationalRetriever(
+            db=db,
+            retrieval=retrieval,
+            web_search=web_search,
+            settings=settings,
+        )
+        self._response_generator = ResponseGenerator(llm=llm, settings=settings)
 
     async def start_conversation(self, user: User, kb_id: uuid.UUID, title: str | None) -> Conversation:
-        conversation = Conversation(
-            organization_id=user.organization_id,
-            user_id=user.id,
-            knowledge_base_id=kb_id,
-            title=title or "New conversation",
-        )
-        self._conversations.add(conversation)
-        await self._db.commit()
-        return conversation
+        return await self._sessions.start_conversation(user, kb_id, title)
+
+    async def clear_history(self, *, user: User, conversation_id: uuid.UUID) -> None:
+        conversation = await self._sessions.get_owned(conversation_id, user)
+        if conversation is None:
+            raise NotFoundError("Conversation not found")
+        await self._memory.clear_history(conversation_id)
 
     async def ask(
         self,
@@ -139,26 +155,37 @@ class ChatService:
         started = time.perf_counter()
         source_mode = _normalize_source_mode(source_mode)
         answer_mode = _normalize_answer_mode(answer_mode)
-        conversation = await self._conversations.get_owned(conversation_id, user.id)
+        conversation = await self._sessions.get_owned(conversation_id, user)
         if conversation is None:
             raise NotFoundError("Conversation not found")
 
-        history = await self._messages.recent_turns(conversation_id, HISTORY_TURNS)
-        if regenerate and history and history[-1].role == "assistant":
-            history = history[:-1]
+        history = await self._memory.recent_history(
+            conversation_id,
+            limit=HISTORY_TURNS,
+            regenerate=regenerate,
+        )
+        rewrite_started = time.perf_counter()
+        standalone_question = await self._question_rewriter.rewrite(
+            history=history,
+            question=question,
+        )
+        rewrite_ms = int((time.perf_counter() - rewrite_started) * 1000)
 
         if source_mode != "web":
-            jira_count = await self._jira_assignee_open_count(
+            jira_count = await self._jira_structured_count(
                 org_id=user.organization_id,
-                question=question,
+                question=standalone_question or question,
             )
             if jira_count is not None:
                 async for event in self._stream_jira_count_answer(
                     conversation=conversation,
                     question=question,
+                    standalone_question=standalone_question,
                     chunks=jira_count.chunks,
                     assignee_label=jira_count.assignee_label,
+                    filter_label=jira_count.filter_label,
                     issues=jira_count.issues,
+                    counted_total=jira_count.counted_total,
                     started=started,
                     regenerate=regenerate,
                     source_mode=source_mode,
@@ -166,45 +193,17 @@ class ChatService:
                     yield event
                 return
 
-        chunks: list[RetrievedChunk] = []
-        timings_ms: dict[str, int] = {}
-        confidence: float | None = None
-
-        if source_mode in {"knowledge", "blended"}:
-            kb_scope = await self._knowledge_scope(
-                org_id=user.organization_id,
-                fallback_kb_id=conversation.knowledge_base_id,
-                question=question,
-            )
-            top_k = self._settings.retrieval_top_k
-            if _contains_any(question, COUNT_TERMS):
-                top_k = max(top_k, 20)
-
-            ctx = RetrievalContext(
-                kb_id=conversation.knowledge_base_id,
-                kb_ids=kb_scope,
-                query=question,
-                top_k=top_k,
-                conversation_context="\n".join(m.content[:500] for m in history[-4:]),
-            )
-            ctx = await self._retrieval.run(ctx)
-            chunks.extend(ctx.chunks)
-            timings_ms.update(ctx.timings_ms)
-            confidence = ctx.confidence
-
-        if source_mode in {"web", "blended"}:
-            web_started = time.perf_counter()
-            web_chunks = await self._web_search.search(
-                user=user,
-                query=question,
-                max_results=self._settings.web_search_top_k,
-            )
-            timings_ms["web_search"] = int((time.perf_counter() - web_started) * 1000)
-            chunks.extend(web_chunks)
-            if confidence is None:
-                confidence = _confidence_from_chunks(web_chunks)
-
-        chunks = _dedupe_chunks(chunks)
+        retrieval = await self._conversation_retriever.retrieve(
+            user=user,
+            conversation=conversation,
+            current_question=question,
+            standalone_question=standalone_question,
+            history=history,
+            source_mode=source_mode,
+        )
+        chunks = retrieval.chunks
+        timings_ms = {"question_rewrite": rewrite_ms, **retrieval.timings_ms}
+        confidence = retrieval.confidence
 
         yield ChatEvent(
             type="sources",
@@ -213,50 +212,59 @@ class ChatService:
                 "confidence": confidence,
                 "source_mode": source_mode,
                 "answer_mode": answer_mode,
+                "standalone_question": standalone_question,
+                "subqueries": retrieval.subqueries,
+                "retrieval_attempts": retrieval.attempts,
+                "quality_notes": retrieval.quality_notes,
+                "weak_internal_retrieval": retrieval.weak_internal_retrieval,
             },
         )
 
-        request = LLMRequest(
-            system=build_system_prompt(
-                chunks,
-                role_name=assistant_role,
-                role_prompt=assistant_role_prompt,
-            ),
-            messages=[
-                *(ChatMessage(role=m.role, content=m.content) for m in history),
-                ChatMessage(role="user", content=question),
-            ],
-            max_tokens=self._settings.llm_max_output_tokens,
-        )
+        if _should_refuse_for_weak_retrieval(
+            source_mode=source_mode,
+            chunks=chunks,
+            weak_internal_retrieval=retrieval.weak_internal_retrieval,
+        ):
+            async for event in self._stream_weak_retrieval_answer(
+                conversation=conversation,
+                question=question,
+                standalone_question=standalone_question,
+                chunks=chunks,
+                started=started,
+                timings_ms=timings_ms,
+                regenerate=regenerate,
+                source_mode=source_mode,
+                answer_mode=answer_mode,
+            ):
+                yield event
+            return
 
         llm_started = time.perf_counter()
         answer_parts: list[str] = []
         usage = LLMUsage()
         model = self._llm.model
-        if answer_mode == "council":
-            answer, usage, model = await self._run_council(
-                chunks=chunks,
-                history=history,
-                question=question,
-                assistant_role=assistant_role,
-                assistant_role_prompt=assistant_role_prompt,
-                requested_models=council_models,
-                requested_chair_model=council_chair_model,
-            )
-            answer_parts.append(answer)
-            yield ChatEvent(type="delta", data={"text": answer})
-        else:
-            async for delta in self._llm.stream(request):
-                if delta.text:
-                    answer_parts.append(delta.text)
-                    yield ChatEvent(type="delta", data={"text": delta.text})
-                if delta.done and delta.usage:
-                    usage = delta.usage
+        async for delta in self._response_generator.stream(
+            chunks=chunks,
+            history=history,
+            current_question=question,
+            standalone_question=standalone_question,
+            answer_mode=answer_mode,
+            assistant_role=assistant_role,
+            assistant_role_prompt=assistant_role_prompt,
+            council_models=council_models,
+            council_chair_model=council_chair_model,
+        ):
+            if delta.text:
+                answer_parts.append(delta.text)
+                yield ChatEvent(type="delta", data={"text": delta.text})
+            if delta.done:
+                usage = delta.usage or usage
+                model = delta.model or model
         timings_ms["llm"] = int((time.perf_counter() - llm_started) * 1000)
 
-        answer = "".join(answer_parts)
+        answer = _verify_and_shape_answer("".join(answer_parts), chunks)
         latency_ms = int((time.perf_counter() - started) * 1000)
-        message_id = await self._persist_turn(
+        message_id = await self._memory.persist_turn(
             conversation=conversation,
             question=question,
             answer=answer,
@@ -278,6 +286,8 @@ class ChatService:
                 "model": model,
                 "source_mode": source_mode,
                 "answer_mode": answer_mode,
+                "standalone_question": standalone_question,
+                "verification": _verification_summary(answer, chunks),
             },
         )
 
@@ -286,9 +296,12 @@ class ChatService:
         *,
         conversation: Conversation,
         question: str,
+        standalone_question: str,
         chunks: list[RetrievedChunk],
         assignee_label: str,
+        filter_label: str,
         issues: list[JiraIssueCountRow],
+        counted_total: int,
         started: float,
         regenerate: bool,
         source_mode: str,
@@ -300,26 +313,31 @@ class ChatService:
                 "confidence": 1.0,
                 "source_mode": source_mode,
                 "answer_mode": "fast",
+                "standalone_question": standalone_question,
             },
         )
 
-        if issues:
-            plural = "s" if len(issues) != 1 else ""
+        if counted_total:
+            plural = "s" if counted_total != 1 else ""
             lines = [
-                f"Jira DEVO has **{len(issues)} open issue{plural}** assigned to "
-                f"{assignee_label}.",
+                f"Indexed Jira has **{counted_total} issue{plural}** matching {filter_label}.",
+                "This count is computed from Jira document metadata, not inferred from chunk text.",
                 "",
             ]
-            for index, issue in enumerate(issues, start=1):
+            marker_by_document = {chunk.document_id: index for index, chunk in enumerate(chunks, start=1)}
+            for index, issue in enumerate(issues[:10], start=1):
+                marker = marker_by_document.get(issue.document_id)
+                citation = f" [{marker}]" if marker is not None else ""
                 lines.append(
-                    f"{index}. **{issue.key}** - {issue.summary} - Status: {issue.status or 'Unknown'} [{index}]"
+                    f"{index}. **{issue.key}** - {issue.summary} - Status: {issue.status or 'Unknown'}{citation}"
                 )
+            if counted_total > len(issues[:10]):
+                lines.append(f"...and {counted_total - len(issues[:10])} more matching Jira issues.")
         else:
             lines = [
-                f"Jira DEVO has **0 open issues** assigned to {assignee_label}.",
+                f"Indexed Jira has **0 issues** matching {filter_label}.",
                 "",
-                "I counted indexed Jira issue records where the assignee matched the question "
-                "and the status category is not done.",
+                "I counted indexed Jira issue records using stored structured metadata.",
             ]
 
         answer = "\n".join(lines)
@@ -327,7 +345,7 @@ class ChatService:
 
         latency_ms = int((time.perf_counter() - started) * 1000)
         timings = {"jira_count": latency_ms}
-        message_id = await self._persist_turn(
+        message_id = await self._memory.persist_turn(
             conversation=conversation,
             question=question,
             answer=answer,
@@ -348,6 +366,54 @@ class ChatService:
                 "model": "deterministic-jira-count",
                 "source_mode": source_mode,
                 "answer_mode": "fast",
+                "standalone_question": standalone_question,
+            },
+        )
+
+    async def _stream_weak_retrieval_answer(
+        self,
+        *,
+        conversation: Conversation,
+        question: str,
+        standalone_question: str,
+        chunks: list[RetrievedChunk],
+        started: float,
+        timings_ms: dict[str, int],
+        regenerate: bool,
+        source_mode: str,
+        answer_mode: str,
+    ) -> AsyncIterator[ChatEvent]:
+        answer = (
+            "I can't answer that from the current internal sources with enough confidence.\n\n"
+            "Try narrowing the question to a Jira project, Confluence space, runbook title, "
+            "or issue key. Use Web or Both only when you want external web evidence included."
+        )
+        yield ChatEvent(type="delta", data={"text": answer})
+        latency_ms = int((time.perf_counter() - started) * 1000)
+        timings = {**timings_ms, "weak_retrieval_refusal": latency_ms}
+        message_id = await self._memory.persist_turn(
+            conversation=conversation,
+            question=question,
+            answer=answer,
+            chunks=chunks,
+            usage=LLMUsage(),
+            latency_ms=latency_ms,
+            timings=timings,
+            regenerate=regenerate,
+            model="deterministic-retrieval-gate",
+        )
+        yield ChatEvent(
+            type="done",
+            data={
+                "message_id": str(message_id),
+                "usage": {"input_tokens": 0, "output_tokens": 0},
+                "latency_ms": latency_ms,
+                "timings_ms": timings,
+                "model": "deterministic-retrieval-gate",
+                "source_mode": source_mode,
+                "answer_mode": answer_mode,
+                "standalone_question": standalone_question,
+                "verification": {"grounded": True, "unsupported_claim_rate": 0.0, "invalid_citations": []},
             },
         )
 
@@ -455,26 +521,24 @@ class ChatService:
         total_usage.output_tokens += chair_usage.output_tokens
         return answer, total_usage, f"llm-council:{chair_model}"
 
-    async def _jira_assignee_open_count(
+    async def _jira_structured_count(
         self,
         *,
         org_id: uuid.UUID,
         question: str,
     ) -> JiraIssueCountResult | None:
         normalized = question.lower()
-        if not (
-            _contains_any(normalized, JIRA_TERMS)
-            and _contains_any(normalized, COUNT_TERMS)
-            and ("assignee" in normalized or "assigned" in normalized)
-            and "open" in normalized
-        ):
+        if not (_contains_any(normalized, JIRA_TERMS) and _contains_any(normalized, COUNT_TERMS)):
             return None
 
         email_match = EMAIL_RE.search(question)
         email = email_match.group(0).lower() if email_match else ""
         name_match = re.search(r"\(([^)]+)\)", question)
         name = name_match.group(1).strip().lower() if name_match else ""
-        if not email and not name:
+        project_key = _jira_project_filter(normalized)
+        open_only = "open" in normalized or "active" in normalized or "pending" in normalized
+        status_filter = _jira_status_filter(normalized)
+        if not any([email, name, project_key, open_only, status_filter]):
             return None
 
         stmt = (
@@ -482,8 +546,8 @@ class ChatService:
             .join(KnowledgeBase, KnowledgeBase.id == Document.knowledge_base_id)
             .where(
                 KnowledgeBase.organization_id == org_id,
-                KnowledgeBase.name == self._settings.jira_default_kb_name,
                 Document.is_deleted.is_(False),
+                Document.doc_metadata["source"].as_string() == "jira",
             )
             .order_by(Document.title)
         )
@@ -493,6 +557,10 @@ class ChatService:
             metadata = document.doc_metadata or {}
             if metadata.get("source") != "jira":
                 continue
+            issue_key = str(metadata.get("jira_issue_key") or document.title.split(":", 1)[0]).upper()
+            document_project = str(metadata.get("jira_project_key") or issue_key.split("-", 1)[0]).upper()
+            if project_key and document_project != project_key:
+                continue
             assignee_email = str(metadata.get("jira_assignee_email") or "").lower()
             assignee_name = str(metadata.get("jira_assignee") or "").lower()
             if email and assignee_email != email:
@@ -501,22 +569,37 @@ class ChatService:
                 continue
             category = str(metadata.get("jira_issue_status_category_key") or "").lower()
             status = str(metadata.get("jira_issue_status") or "").lower()
-            if category in DONE_STATUS_TERMS or status in DONE_STATUS_TERMS:
+            if open_only and (category in DONE_STATUS_TERMS or status in DONE_STATUS_TERMS):
+                continue
+            if status_filter and status_filter not in status:
                 continue
             title = document.title
             issues.append(
                 JiraIssueCountRow(
                     document_id=document.id,
-                    key=str(metadata.get("jira_issue_key") or title.split(":", 1)[0]),
+                    key=issue_key,
                     summary=title.split(":", 1)[1].strip() if ":" in title else title,
                     status=str(metadata.get("jira_issue_status") or ""),
                 )
             )
 
+        filter_bits: list[str] = []
+        if project_key:
+            filter_bits.append(f"project={project_key}")
+        if open_only:
+            filter_bits.append("status category not done")
+        if status_filter:
+            filter_bits.append(f"status contains '{status_filter}'")
+        if email or name:
+            filter_bits.append(f"assignee={email or name}")
+        filter_label = ", ".join(filter_bits) if filter_bits else "the Jira filters in the question"
+
         return JiraIssueCountResult(
-            assignee_label=email or name,
+            assignee_label=email or name or "the requested Jira filter",
+            filter_label=filter_label,
             issues=issues,
-            chunks=await self._first_chunks_for_documents([issue.document_id for issue in issues]),
+            chunks=await self._first_chunks_for_documents([issue.document_id for issue in issues[:10]]),
+            counted_total=len(issues),
         )
 
     async def _first_chunks_for_documents(self, document_ids: list[uuid.UUID]) -> list[RetrievedChunk]:
@@ -661,6 +744,7 @@ def _source_payload(marker: int, chunk: RetrievedChunk) -> dict[str, object]:
     if source_type == "web" and isinstance(metadata.get("web_snippet"), str):
         snippet = str(metadata["web_snippet"])[:240]
     url = _source_url(metadata)
+    source_updated_at = _source_updated_at(metadata)
     payload: dict[str, object] = {
         "marker": marker,
         "chunk_id": str(chunk.chunk_id),
@@ -670,6 +754,8 @@ def _source_payload(marker: int, chunk: RetrievedChunk) -> dict[str, object]:
         "score": round(chunk.score, 4),
         "snippet": snippet,
         "source_type": source_type,
+        "source_updated_at": source_updated_at,
+        "freshness_label": _freshness_label(source_updated_at),
     }
     if isinstance(url, str) and url:
         payload["url"] = url
@@ -689,6 +775,149 @@ def _source_url(metadata: dict[str, object]) -> str | None:
         value = metadata.get(key)
         if isinstance(value, str) and value.strip():
             return value.strip()
+    return None
+
+
+def _source_updated_at(metadata: dict[str, object]) -> str | None:
+    for key in (
+        "source_updated_at",
+        "jira_issue_updated_at",
+        "jira_updated_at",
+        "confluence_version_created_at",
+        "updated_at",
+    ):
+        value = metadata.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
+
+
+def _freshness_label(value: str | None) -> str:
+    if not value:
+        return "undated"
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return "undated"
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=UTC)
+    age_days = max(0, (datetime.now(UTC) - parsed).days)
+    if age_days <= 30:
+        return "fresh"
+    if age_days <= 180:
+        return "aging"
+    return "stale"
+
+
+def _should_refuse_for_weak_retrieval(
+    *,
+    source_mode: str,
+    chunks: list[RetrievedChunk],
+    weak_internal_retrieval: bool,
+) -> bool:
+    if source_mode == "web":
+        return False
+    if source_mode == "blended" and any(_chunk_source_type(chunk) == "web" for chunk in chunks):
+        return False
+    return weak_internal_retrieval
+
+
+def _verify_and_shape_answer(answer: str, chunks: list[RetrievedChunk]) -> str:
+    clean = _remove_invalid_citation_markers(answer.strip(), len(chunks))
+    if not clean:
+        return "I couldn't generate an answer from the retrieved sources."
+    if _is_refusal(clean) or not chunks:
+        return clean
+    if not _valid_citation_markers(clean, len(chunks)):
+        markers = " ".join(f"[{index}]" for index in range(1, min(len(chunks), 3) + 1))
+        clean = f"{clean}\n\nSources: {markers}"
+    unsupported_rate = _unsupported_claim_rate(clean, len(chunks))
+    if unsupported_rate > 0.65:
+        markers = " ".join(f"[{index}]" for index in range(1, min(len(chunks), 3) + 1))
+        return (
+            "I found relevant sources, but the drafted answer was not grounded tightly enough to save as final.\n\n"
+            f"Review the top retrieved sources instead: {markers}"
+        )
+    return _compact_answer(clean)
+
+
+def _verification_summary(answer: str, chunks: list[RetrievedChunk]) -> dict[str, object]:
+    invalid = _invalid_citation_markers(answer, len(chunks))
+    return {
+        "grounded": not invalid and (_is_refusal(answer) or bool(_valid_citation_markers(answer, len(chunks))) or not chunks),
+        "unsupported_claim_rate": _unsupported_claim_rate(answer, len(chunks)),
+        "invalid_citations": invalid,
+    }
+
+
+def _remove_invalid_citation_markers(answer: str, source_count: int) -> str:
+    invalid = set(_invalid_citation_markers(answer, source_count))
+    if not invalid:
+        return answer
+    pattern = re.compile(r"\[(\d+)\]")
+    return pattern.sub(lambda match: "" if int(match.group(1)) in invalid else match.group(0), answer)
+
+
+def _invalid_citation_markers(answer: str, source_count: int) -> list[int]:
+    markers = [int(value) for value in re.findall(r"\[(\d+)\]", answer)]
+    return sorted({marker for marker in markers if marker < 1 or marker > source_count})
+
+
+def _valid_citation_markers(answer: str, source_count: int) -> list[int]:
+    markers = [int(value) for value in re.findall(r"\[(\d+)\]", answer)]
+    return sorted({marker for marker in markers if 1 <= marker <= source_count})
+
+
+def _unsupported_claim_rate(answer: str, source_count: int) -> float:
+    if source_count <= 0 or _is_refusal(answer):
+        return 0.0
+    sentences = [
+        sentence.strip()
+        for sentence in re.split(r"(?<=[.!?])\s+", answer)
+        if len(sentence.split()) >= 7 and not sentence.strip().startswith(("Sources:", "-"))
+    ]
+    if not sentences:
+        return 0.0
+    unsupported = sum(1 for sentence in sentences if not _valid_citation_markers(sentence, source_count))
+    return round(unsupported / len(sentences), 4)
+
+
+def _compact_answer(answer: str) -> str:
+    lines = [line.rstrip() for line in answer.splitlines()]
+    compact: list[str] = []
+    blank = False
+    for line in lines:
+        is_blank = not line.strip()
+        if is_blank and blank:
+            continue
+        compact.append(line)
+        blank = is_blank
+    return "\n".join(compact).strip()
+
+
+def _is_refusal(answer: str) -> bool:
+    normalized = answer.lower()
+    return "can't answer" in normalized or "cannot answer" in normalized or "do not contain" in normalized
+
+
+def _chunk_source_type(chunk: RetrievedChunk) -> str:
+    metadata = chunk.metadata or {}
+    return str(metadata.get("source") or metadata.get("source_type") or "knowledge").lower()
+
+
+def _jira_project_filter(normalized_question: str) -> str | None:
+    if re.search(r"\bcvir\b", normalized_question):
+        return "CVIR"
+    if re.search(r"\bdevo\b|\bdevops\b", normalized_question):
+        return "DEVO"
+    match = re.search(r"\b([A-Z][A-Z0-9]{1,9})-\d+\b", normalized_question.upper())
+    return match.group(1) if match else None
+
+
+def _jira_status_filter(normalized_question: str) -> str | None:
+    for status in ("to do", "in progress", "done", "closed", "resolved", "blocked", "reopened"):
+        if status in normalized_question:
+            return status
     return None
 
 

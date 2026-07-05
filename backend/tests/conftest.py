@@ -26,6 +26,9 @@ os.environ.update(
     DISCOVER_BASE_URL="",
     LLM_COUNCIL_ENABLED="false",
     LLM_COUNCIL_MODELS="",
+    AUTH_ALLOWED_EMAIL_DOMAIN="kimbal.io",
+    AUTH_SUPER_ADMIN_EMAIL="s.kumar@kimbal.io",
+    AUTH_DEFAULT_ORG_NAME="Kimbal",
 )
 
 import pytest
@@ -74,18 +77,22 @@ async def client():
 
 @pytest_asyncio.fixture
 async def auth_headers(client: AsyncClient) -> dict[str, str]:
-    import uuid as _uuid
-
-    email = f"user-{_uuid.uuid4().hex[:10]}@kimbal.io"
+    email = "s.kumar@kimbal.io"
+    password = "SuperSecret123!"
     resp = await client.post(
         "/api/v1/auth/register",
         json={
             "email": email,
-            "password": "SuperSecret123!",
-            "full_name": "Test User",
-            "organization_name": f"Org {_uuid.uuid4().hex[:6]}",
+            "password": password,
+            "full_name": "Shivam Kumar",
+            "organization_name": "Kimbal",
         },
     )
-    assert resp.status_code == 201, resp.text
+    if resp.status_code == 409:
+        resp = await client.post(
+            "/api/v1/auth/login",
+            data={"username": email, "password": password},
+        )
+    assert resp.status_code in (200, 201), resp.text
     token = resp.json()["access_token"]
     return {"authorization": f"Bearer {token}"}

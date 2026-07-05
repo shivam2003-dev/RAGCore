@@ -12,6 +12,18 @@ class FakeLLM:
     model = "fake-llm"
 
     async def stream(self, request: LLMRequest) -> AsyncIterator[LLMDelta]:
+        if "Kimbal question rewriter" in request.system:
+            latest = request.messages[-1].content if request.messages else ""
+            history_text = " ".join(message.content for message in request.messages[:-1])
+            if re.search(r"\b(it|that|this|those|they|them|same|previous|above)\b", latest, re.I):
+                topic = " ".join(re.findall(r"\b(?:deploy|deployment|image|registry|harbor|jira|sre|cvir|confluence|runbook)\b", history_text, re.I))
+                answer = f"{latest} about {topic}".strip() if topic else latest
+            else:
+                answer = latest
+            yield LLMDelta(text=answer)
+            yield LLMDelta(done=True, usage=LLMUsage(input_tokens=60, output_tokens=len(answer) // 4))
+            return
+
         if "Kimbal role prompt generator" in request.system:
             payload = _json_from_message(request.messages[-1].content if request.messages else "")
             role_name = str(payload.get("name") or "Custom Specialist")[:80]

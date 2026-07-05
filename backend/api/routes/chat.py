@@ -130,6 +130,13 @@ async def delete_conversation(conversation_id: uuid.UUID, user: CurrentUser, db:
     await db.commit()
 
 
+@router.delete("/conversations/{conversation_id}/messages", status_code=204)
+async def clear_conversation_history(
+    conversation_id: uuid.UUID, user: CurrentUser, chat: ChatServiceDep
+) -> None:
+    await chat.clear_history(user=user, conversation_id=conversation_id)
+
+
 @router.post("/conversations/{conversation_id}/ask")
 async def ask(
     conversation_id: uuid.UUID, body: AskRequest, user: CurrentUser, chat: ChatServiceDep

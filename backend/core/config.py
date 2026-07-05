@@ -25,6 +25,9 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     jwt_access_ttl_seconds: int = 900
     jwt_refresh_ttl_seconds: int = 1_209_600
+    auth_allowed_email_domain: str = "kimbal.io"
+    auth_super_admin_email: str = "s.kumar@kimbal.io"
+    auth_default_org_name: str = "Kimbal"
 
     # embeddings
     embedding_provider: str = "fake"  # openai | jina | voyage | tei | fake
@@ -90,6 +93,8 @@ class Settings(BaseSettings):
     confluence_page_limit: int = 100  # API page size, Atlassian Cloud caps this at 100
     confluence_sync_max_pages: int = 0  # 0 means sync every visible page
     confluence_request_timeout_seconds: float = 20.0
+    confluence_include_title_pattern: str = ""
+    confluence_exclude_title_pattern: str = ""
 
     # Jira Software Cloud source sync. Also read-only: GET board/project/issue
     # endpoints only, then local document indexing.
@@ -103,6 +108,10 @@ class Settings(BaseSettings):
     jira_issue_limit: int = 100  # API page size, Atlassian Cloud caps this at 100
     jira_sync_max_issues: int = 0  # 0 means sync every visible issue on the board/project
     jira_request_timeout_seconds: float = 20.0
+    jira_include_statuses: str = ""
+    jira_exclude_statuses: str = ""
+    jira_include_labels: str = ""
+    jira_exclude_labels: str = ""
 
     # Optional web search for Ask. Disabled by default so the app never fabricates
     # internet results when no real provider is configured.
