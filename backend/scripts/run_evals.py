@@ -11,9 +11,9 @@ import json
 import os
 import sys
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
-
 
 ROOT = Path(__file__).resolve().parents[2]
 DATASET = ROOT / "evals" / "golden" / "rag.jsonl"
@@ -66,9 +66,13 @@ def _load_dataset(path: Path) -> list[dict]:
 
 def _run_api_gate(api_base: str, token: str) -> int:
     url = f"{api_base}/evals/offline" if api_base.endswith("/api/v1") else f"{api_base}/api/v1/evals/offline"
-    request = urllib.request.Request(url, headers={"Authorization": f"Bearer {token}"})
+    parsed = urllib.parse.urlparse(url)
+    if parsed.scheme not in {"http", "https"}:
+        print(f"live_gate error=unsupported_url_scheme scheme={parsed.scheme}", file=sys.stderr)
+        return 2
+    request = urllib.request.Request(url, headers={"Authorization": f"Bearer {token}"})  # noqa: S310
     try:
-        with urllib.request.urlopen(request, timeout=120) as response:
+        with urllib.request.urlopen(request, timeout=120) as response:  # noqa: S310
             payload = json.loads(response.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
         print(f"live_gate error=http_{exc.code}", file=sys.stderr)

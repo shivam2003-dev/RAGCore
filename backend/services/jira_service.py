@@ -637,9 +637,7 @@ def _jira_issue_allowed(issue: JiraIssue, settings: Settings) -> bool:
         return False
     if include_labels and not (labels & include_labels):
         return False
-    if exclude_labels and labels & exclude_labels:
-        return False
-    return True
+    return not (exclude_labels and labels & exclude_labels)
 
 
 def _csv_set(value: str) -> set[str]:

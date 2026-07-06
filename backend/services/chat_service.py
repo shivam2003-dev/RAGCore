@@ -23,7 +23,7 @@ from llm.openai_compat import OpenAICompatLLM
 from models import Chunk, Citation, Conversation, Document, KnowledgeBase, Message, User
 from repositories.conversations import ConversationRepository, MessageRepository
 from repositories.knowledge import KnowledgeBaseRepository
-from retrieval.context import RetrievalContext, RetrievedChunk
+from retrieval.context import RetrievedChunk
 from retrieval.pipeline import RetrievalPipeline
 from services.chat_memory import MemoryManager
 from services.chat_sessions import ChatSessionManager
@@ -843,8 +843,9 @@ def _verify_and_shape_answer(answer: str, chunks: list[RetrievedChunk]) -> str:
 
 def _verification_summary(answer: str, chunks: list[RetrievedChunk]) -> dict[str, object]:
     invalid = _invalid_citation_markers(answer, len(chunks))
+    has_grounding = _is_refusal(answer) or bool(_valid_citation_markers(answer, len(chunks))) or not chunks
     return {
-        "grounded": not invalid and (_is_refusal(answer) or bool(_valid_citation_markers(answer, len(chunks))) or not chunks),
+        "grounded": not invalid and has_grounding,
         "unsupported_claim_rate": _unsupported_claim_rate(answer, len(chunks)),
         "invalid_citations": invalid,
     }

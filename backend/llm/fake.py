@@ -16,7 +16,13 @@ class FakeLLM:
             latest = request.messages[-1].content if request.messages else ""
             history_text = " ".join(message.content for message in request.messages[:-1])
             if re.search(r"\b(it|that|this|those|they|them|same|previous|above)\b", latest, re.I):
-                topic = " ".join(re.findall(r"\b(?:deploy|deployment|image|registry|harbor|jira|sre|cvir|confluence|runbook)\b", history_text, re.I))
+                topic = " ".join(
+                    re.findall(
+                        r"\b(?:deploy|deployment|image|registry|harbor|jira|sre|cvir|confluence|runbook)\b",
+                        history_text,
+                        re.I,
+                    )
+                )
                 answer = f"{latest} about {topic}".strip() if topic else latest
             else:
                 answer = latest

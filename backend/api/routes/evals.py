@@ -109,10 +109,16 @@ async def evals_overview(
         models=_model_breakdown(evals),
         recent_answers=_recent_answers(evals),
         methodology=[
-            "Kimbal Benchmark is a weighted live score over recent persisted assistant answers; no synthetic rows are generated.",
+            (
+                "Kimbal Benchmark is a weighted live score over recent persisted assistant answers; "
+                "no synthetic rows are generated."
+            ),
             "Groundedness proxy combines citation presence, citation marker coverage, and retrieval confidence.",
             "Answer relevance proxy uses lexical overlap between the user question and answer text.",
-            "Use golden datasets or LLM-as-judge suites for formal release gates; this live benchmark is for repeatable operational checks.",
+            (
+                "Use golden datasets or LLM-as-judge suites for formal release gates; "
+                "this live benchmark is for repeatable operational checks."
+            ),
         ],
     )
 
@@ -185,18 +191,18 @@ async def _run_offline_gate(
 
     kb_ids = [kb.id for kb in kbs]
     case_results: list[EvalGateCaseOut] = []
-    for case in cases:
+    for golden_case in cases:
         started = time.perf_counter()
         ctx = await retrieval.run(
             RetrievalContext(
                 kb_id=kbs[0].id,
                 kb_ids=kb_ids,
-                query=case.question,
+                query=golden_case.question,
                 top_k=8,
             )
         )
         latency_ms = int((time.perf_counter() - started) * 1000)
-        case_results.append(_evaluate_golden_case(case, ctx.chunks, latency_ms))
+        case_results.append(_evaluate_golden_case(golden_case, ctx.chunks, latency_ms))
 
     metrics = _offline_metrics(case_results)
     passed = all(metric.passed for metric in metrics)
@@ -290,24 +296,98 @@ def _evaluate_golden_case(
 
 def _offline_metrics(cases: list[EvalGateCaseOut]) -> list[EvalGateMetricOut]:
     values_by_id: dict[str, list[float]] = defaultdict(list)
-    for case in cases:
-        for key, value in case.scores.items():
+    for eval_case in cases:
+        for key, value in eval_case.scores.items():
             if value is not None:
                 values_by_id[key].append(float(value))
-    latency_values = sorted(case.latency_ms for case in cases)
+    latency_values = sorted(eval_case.latency_ms for eval_case in cases)
     metrics = [
-        _gate_metric("source_recall", "Expected source recall", _avg(values_by_id["source_recall"]), GATE_THRESHOLDS["source_recall"], "Expected source families retrieved at least once."),
-        _gate_metric("context_precision", "Context precision", _avg(values_by_id["context_precision"]), GATE_THRESHOLDS["context_precision"], "Relevant contexts ranked above irrelevant contexts."),
-        _gate_metric("top_k_hit_rate", "Top-k hit rate", _avg(values_by_id["top_k_hit_rate"]), GATE_THRESHOLDS["top_k_hit_rate"], "At least one expected source appears in retrieved top-k."),
-        _gate_metric("mrr", "MRR", _avg(values_by_id["mrr"]), GATE_THRESHOLDS["mrr"], "Reciprocal rank of first expected source."),
-        _gate_metric("source_freshness", "Source freshness", _avg(values_by_id["source_freshness"]), GATE_THRESHOLDS["source_freshness"], "Freshness from source_updated_at or connector metadata."),
-        _gate_metric("groundedness", "Groundedness", _avg(values_by_id["groundedness"]), GATE_THRESHOLDS["groundedness"], "Answer agreement proxy against retrieved contexts."),
-        _gate_metric("faithfulness", "Faithfulness", _avg(values_by_id["faithfulness"]), GATE_THRESHOLDS["faithfulness"], "Grounding with low unsupported-claim rate."),
-        _gate_metric("citation_coverage", "Citation coverage", _avg(values_by_id["citation_coverage"]), GATE_THRESHOLDS["citation_coverage"], "Dry-run answers include openable source markers."),
-        _gate_metric("answer_relevance", "Answer relevance", _avg(values_by_id["answer_relevance"]), GATE_THRESHOLDS["answer_relevance"], "Question terms appear in retrieved evidence."),
-        _gate_metric("refusal_correctness", "Refusal correctness", _avg(values_by_id["refusal_correctness"]), GATE_THRESHOLDS["refusal_correctness"], "Weak retrieval is treated as a refusal candidate."),
-        _gate_metric("unsupported_claim_rate", "Unsupported claim rate", _avg(values_by_id["unsupported_claim_rate"]), GATE_THRESHOLDS["unsupported_claim_rate"], "Lower is better; generated text should avoid uncited claims.", lower_is_better=True),
-        _gate_metric("p95_latency_ms", "P95 latency", float(_percentile(latency_values, 95)) if latency_values else None, GATE_THRESHOLDS["p95_latency_ms"], "Retriever p95 latency for golden cases.", lower_is_better=True),
+        _gate_metric(
+            "source_recall",
+            "Expected source recall",
+            _avg(values_by_id["source_recall"]),
+            GATE_THRESHOLDS["source_recall"],
+            "Expected source families retrieved at least once.",
+        ),
+        _gate_metric(
+            "context_precision",
+            "Context precision",
+            _avg(values_by_id["context_precision"]),
+            GATE_THRESHOLDS["context_precision"],
+            "Relevant contexts ranked above irrelevant contexts.",
+        ),
+        _gate_metric(
+            "top_k_hit_rate",
+            "Top-k hit rate",
+            _avg(values_by_id["top_k_hit_rate"]),
+            GATE_THRESHOLDS["top_k_hit_rate"],
+            "At least one expected source appears in retrieved top-k.",
+        ),
+        _gate_metric(
+            "mrr",
+            "MRR",
+            _avg(values_by_id["mrr"]),
+            GATE_THRESHOLDS["mrr"],
+            "Reciprocal rank of first expected source.",
+        ),
+        _gate_metric(
+            "source_freshness",
+            "Source freshness",
+            _avg(values_by_id["source_freshness"]),
+            GATE_THRESHOLDS["source_freshness"],
+            "Freshness from source_updated_at or connector metadata.",
+        ),
+        _gate_metric(
+            "groundedness",
+            "Groundedness",
+            _avg(values_by_id["groundedness"]),
+            GATE_THRESHOLDS["groundedness"],
+            "Answer agreement proxy against retrieved contexts.",
+        ),
+        _gate_metric(
+            "faithfulness",
+            "Faithfulness",
+            _avg(values_by_id["faithfulness"]),
+            GATE_THRESHOLDS["faithfulness"],
+            "Grounding with low unsupported-claim rate.",
+        ),
+        _gate_metric(
+            "citation_coverage",
+            "Citation coverage",
+            _avg(values_by_id["citation_coverage"]),
+            GATE_THRESHOLDS["citation_coverage"],
+            "Dry-run answers include openable source markers.",
+        ),
+        _gate_metric(
+            "answer_relevance",
+            "Answer relevance",
+            _avg(values_by_id["answer_relevance"]),
+            GATE_THRESHOLDS["answer_relevance"],
+            "Question terms appear in retrieved evidence.",
+        ),
+        _gate_metric(
+            "refusal_correctness",
+            "Refusal correctness",
+            _avg(values_by_id["refusal_correctness"]),
+            GATE_THRESHOLDS["refusal_correctness"],
+            "Weak retrieval is treated as a refusal candidate.",
+        ),
+        _gate_metric(
+            "unsupported_claim_rate",
+            "Unsupported claim rate",
+            _avg(values_by_id["unsupported_claim_rate"]),
+            GATE_THRESHOLDS["unsupported_claim_rate"],
+            "Lower is better; generated text should avoid uncited claims.",
+            lower_is_better=True,
+        ),
+        _gate_metric(
+            "p95_latency_ms",
+            "P95 latency",
+            float(_percentile(latency_values, 95)) if latency_values else None,
+            GATE_THRESHOLDS["p95_latency_ms"],
+            "Retriever p95 latency for golden cases.",
+            lower_is_better=True,
+        ),
     ]
     return metrics
 
@@ -502,9 +582,18 @@ def _regression_trend_placeholder(score: int | None) -> list[dict[str, float | i
 def _offline_methodology() -> list[str]:
     return [
         "Offline release gates run against evals/golden/rag.jsonl and current indexed sources.",
-        "Retriever metrics include expected source recall, context precision, top-k hit rate, MRR, and source freshness.",
-        "Generator metrics use deterministic dry-run answers to check groundedness, faithfulness, citation coverage, relevance, refusal correctness, and unsupported-claim rate.",
-        "Council comparison is a deterministic quality, latency, and cost estimate unless live council models are configured for a separate judged run.",
+        (
+            "Retriever metrics include expected source recall, context precision, top-k hit rate, "
+            "MRR, and source freshness."
+        ),
+        (
+            "Generator metrics use deterministic dry-run answers to check groundedness, faithfulness, "
+            "citation coverage, relevance, refusal correctness, and unsupported-claim rate."
+        ),
+        (
+            "Council comparison is a deterministic quality, latency, and cost estimate unless live council "
+            "models are configured for a separate judged run."
+        ),
     ]
 
 
@@ -629,7 +718,12 @@ def _scorecards(evals: list[AnswerEval], feedback: FeedbackMetricOut) -> list[Ev
             success,
             "Persisted assistant answers without terminal error text.",
         ),
-        _score("latency_health", "Latency health", latency_health, "P95 latency normalized against the live response target."),
+        _score(
+            "latency_health",
+            "Latency health",
+            latency_health,
+            "P95 latency normalized against the live response target.",
+        ),
         _score("helpful_rate", "Helpful feedback", feedback.helpful_rate, "User Helpful vs Not Helpful submissions."),
     ]
 

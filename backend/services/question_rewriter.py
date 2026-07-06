@@ -63,9 +63,9 @@ def _looks_standalone(question: str) -> bool:
     words = {part.strip(".,?!:;()[]{}\"'").lower() for part in normalized.split()}
     if words & set(followup_terms):
         return False
-    if len(question.split()) <= 5 and any(term in normalized for term in ("why", "how", "what about", "and")):
-        return False
-    return True
+    return not (
+        len(question.split()) <= 5 and any(term in normalized for term in ("why", "how", "what about", "and"))
+    )
 
 
 def _clean_rewrite(value: str) -> str:

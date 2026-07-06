@@ -560,9 +560,7 @@ def _confluence_page_allowed(page: ConfluencePage, settings: Settings) -> bool:
     exclude = settings.confluence_exclude_title_pattern.strip()
     if include and not re.search(include, title, flags=re.IGNORECASE):
         return False
-    if exclude and re.search(exclude, title, flags=re.IGNORECASE):
-        return False
-    return True
+    return not (exclude and re.search(exclude, title, flags=re.IGNORECASE))
 
 
 def _page_filename(page: ConfluencePage) -> str:

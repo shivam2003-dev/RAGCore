@@ -8,11 +8,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from core.config import Settings
 from models import Conversation, KnowledgeBase, Message, User
 from repositories.knowledge import KnowledgeBaseRepository
-from retrieval.crag import MIN_ACCEPT_CONFIDENCE
 from retrieval.context import RetrievalContext, RetrievedChunk
+from retrieval.crag import MIN_ACCEPT_CONFIDENCE
 from retrieval.pipeline import RetrievalPipeline
 from services.web_search_service import WebSearchService
-
 
 JIRA_TERMS = (
     "jira",

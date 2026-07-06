@@ -9,7 +9,6 @@ from models import Citation, Conversation, Message
 from repositories.conversations import ConversationRepository, MessageRepository
 from retrieval.context import RetrievedChunk
 
-
 TITLE_LEN = 80
 
 

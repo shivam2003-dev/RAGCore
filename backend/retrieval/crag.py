@@ -276,12 +276,25 @@ def _source_fit(query_tokens: set[str], chunk: RetrievedChunk) -> float:
         score += 0.6
     if query_tokens & CONFLUENCE_HINTS and _is_confluence_source(source, title, metadata):
         score += 0.6
-    if query_tokens & {"architecture", "architectural", "design", "diagram", "diagrams", "overview", "topology", "hld", "lld"}:
+    architecture_terms = {
+        "architecture",
+        "architectural",
+        "design",
+        "diagram",
+        "diagrams",
+        "overview",
+        "topology",
+        "hld",
+        "lld",
+    }
+    if query_tokens & architecture_terms:
         if _is_confluence_source(source, title, metadata):
             score += 0.25
         if any(term in title for term in ("architecture", "design", "diagram", "overview", "hld", "lld")):
             score += 0.15
-    if "sre" in query_tokens and ("sre" in title or "cvir" in title or metadata.get("confluence_space_key") in {"SRE", "AS"}):
+    if "sre" in query_tokens and (
+        "sre" in title or "cvir" in title or metadata.get("confluence_space_key") in {"SRE", "AS"}
+    ):
         score += 0.3
     if ("devops" in query_tokens or "devo" in query_tokens) and ("devo" in title or "devops" in title):
         score += 0.3
