@@ -380,6 +380,11 @@ class ConfluenceSyncService:
         metadata = _page_metadata(space=space, page=page)
 
         if existing is not None and _is_current(existing, page):
+            if (existing.doc_metadata or {}) != metadata:
+                await self._docs.update_metadata(existing.id, metadata)
+            await self._docs.soft_delete_metadata_duplicates(
+                kb.id, "confluence_page_id", page.id, existing.id
+            )
             return SyncedConfluenceDocument(
                 page_id=page.id,
                 title=page.title,
@@ -402,6 +407,7 @@ class ConfluenceSyncService:
             metadata=metadata,
             audit_action="confluence.page.sync",
         )
+        await self._docs.soft_delete_metadata_duplicates(kb.id, "confluence_page_id", page.id, doc.id)
         return SyncedConfluenceDocument(
             page_id=page.id,
             title=page.title,
@@ -509,8 +515,33 @@ def _render_page_html(*, space: ConfluenceSpace, page: ConfluencePage) -> str:
 
 def _page_metadata(*, space: ConfluenceSpace, page: ConfluencePage) -> dict[str, object]:
     rendered = _render_page_html(space=space, page=page).encode("utf-8")
+    updated_at = page.version_created_at
     return {
         "source": "confluence",
+        "source_type": "confluence",
+        "source_family": "confluence",
+        "source_system": "confluence",
+        "source_id": page.id,
+        "source_title": page.title,
+        "source_url": page.url,
+        "source_space": space.key,
+        "source_version": page.version_number,
+        "source_updated_at": updated_at,
+        "space": space.key,
+        "space_key": space.key,
+        "space_name": space.name,
+        "page_id": page.id,
+        "title": page.title,
+        "url": page.url,
+        "updated_at": updated_at,
+        "status": "current",
+        "labels": [],
+        "owner": space.name,
+        "acl": "connector-visible",
+        "connector": "confluence",
+        "connector_scope": space.key,
+        "connector_sync_id": f"confluence:{space.key}:{page.id}:{page.version_number or 'unknown'}",
+        "permission_state": "visible",
         "confluence_space_id": space.id,
         "confluence_space_key": space.key,
         "confluence_space_name": space.name,

@@ -71,12 +71,45 @@ class DocumentRepository:
         self, kb_id: uuid.UUID, key: str, value: str
     ) -> Document | None:
         return await self.db.scalar(
-            select(Document).where(
+            select(Document)
+            .where(
                 Document.knowledge_base_id == kb_id,
                 Document.is_deleted.is_(False),
                 Document.doc_metadata[key].as_string() == value,
             )
+            .order_by(Document.updated_at.desc(), Document.created_at.desc())
         )
+
+    async def update_metadata(self, doc_id: uuid.UUID, metadata: dict[str, object]) -> None:
+        await self.db.execute(
+            update(Document).where(Document.id == doc_id).values(doc_metadata=metadata)
+        )
+
+    async def soft_delete_metadata_duplicates(
+        self,
+        kb_id: uuid.UUID,
+        key: str,
+        value: str,
+        keep_doc_id: uuid.UUID,
+    ) -> int:
+        rows = await self.db.scalars(
+            select(Document.id).where(
+                Document.knowledge_base_id == kb_id,
+                Document.is_deleted.is_(False),
+                Document.id != keep_doc_id,
+                Document.doc_metadata[key].as_string() == value,
+            )
+        )
+        duplicate_ids = list(rows)
+        if not duplicate_ids:
+            return 0
+        await self.db.execute(
+            update(Document).where(Document.id.in_(duplicate_ids)).values(is_deleted=True)
+        )
+        await self.db.execute(
+            update(Chunk).where(Chunk.document_id.in_(duplicate_ids)).values(is_active=False)
+        )
+        return len(duplicate_ids)
 
     async def list_by_kb(
         self, kb_id: uuid.UUID, limit: int = 50, offset: int = 0

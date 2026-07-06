@@ -105,7 +105,12 @@ async def get_document_lineage(document_id: uuid.UUID, user: CurrentUser, db: Db
         source_system=source_system,
         source_id=_source_id(metadata, source_system),
         source_url=_source_url(metadata),
-        source_version=metadata.get("confluence_version") or metadata.get("jira_updated_at"),
+        source_version=(
+            metadata.get("source_version")
+            or metadata.get("confluence_version")
+            or metadata.get("jira_issue_updated_at")
+            or metadata.get("jira_updated_at")
+        ),
         source_updated_at=_source_updated_at(metadata, source_system),
         source_sha256=metadata.get("source_sha256") if isinstance(metadata.get("source_sha256"), str) else None,
         status=doc.status.value,
@@ -158,8 +163,8 @@ def _source_url(metadata: dict) -> str | None:
 
 def _source_id(metadata: dict, source_system: str) -> str | None:
     keys = {
-        "confluence": ("confluence_page_id", "page_id"),
-        "jira": ("jira_issue_key", "jira_issue_id", "issue_key", "issue_id"),
+        "confluence": ("source_id", "confluence_page_id", "page_id"),
+        "jira": ("source_id", "jira_issue_key", "jira_issue_id", "issue_key", "issue_id"),
     }.get(source_system.lower(), ("source_id", "id"))
     for key in keys:
         value = metadata.get(key)
@@ -170,9 +175,9 @@ def _source_id(metadata: dict, source_system: str) -> str | None:
 
 def _source_updated_at(metadata: dict, source_system: str) -> str | None:
     keys = {
-        "confluence": ("confluence_version_created_at",),
-        "jira": ("jira_updated_at",),
-    }.get(source_system.lower(), ("updated_at", "source_updated_at"))
+        "confluence": ("source_updated_at", "updated_at", "confluence_version_created_at"),
+        "jira": ("source_updated_at", "updated_at", "jira_issue_updated_at", "jira_updated_at"),
+    }.get(source_system.lower(), ("source_updated_at", "updated_at"))
     for key in keys:
         value = metadata.get(key)
         if isinstance(value, str) and value:

@@ -33,3 +33,16 @@ def test_jira_issue_rendering_indexes_assignment_and_status_fields() -> None:
     assert "Status category:** To Do" in rendered
     assert metadata["jira_assignee_email"] == "s.kumar@kimbal.io"
     assert metadata["jira_issue_status_category_key"] == "new"
+    assert metadata["source"] == "jira"
+    assert metadata["source_type"] == "jira"
+    assert metadata["project"] == "DEVO"
+    assert metadata["issue_key"] == "DEVO-10555"
+    assert metadata["title"] == "DEVO-10555: Broker installation"
+    assert metadata["url"] == "https://example.test/browse/DEVO-10555"
+    assert metadata["updated_at"] == "2026-07-04T01:00:00.000+0000"
+    assert metadata["source_updated_at"] == "2026-07-04T01:00:00.000+0000"
+    assert metadata["status"] == "To Do"
+    assert metadata["labels"] == []
+    assert metadata["owner"] == "s.kumar@kimbal.io"
+    assert metadata["acl"] == "connector-visible"
+    assert metadata["connector_sync_id"] == "jira:DEVO:DEVO-10555:2026-07-04T01:00:00.000+0000"

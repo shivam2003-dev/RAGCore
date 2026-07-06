@@ -51,6 +51,10 @@ async def ingest_document(
             await docs.set_status(document_id, DocumentStatus.PROCESSING)
             await db.commit()
 
+            doc = await docs.get(document_id)
+            if doc is None:
+                raise ValueError("Document not found")
+            document_metadata = dict(doc.doc_metadata or {})
             path = Path(file_path)
             extracted = extract_text(path)
             chunker = select_chunker(path.suffix.lower())
@@ -80,7 +84,7 @@ async def ingest_document(
                     ordinal=chunk.ordinal,
                     content=chunk.content,
                     token_count=chunk.token_count,
-                    chunk_metadata=chunk.metadata | extracted.metadata,
+                    chunk_metadata=chunk.metadata | extracted.metadata | document_metadata,
                     embedding=vector,
                     parent_id=(
                         ordinal_to_id.get(chunk.parent_ordinal)

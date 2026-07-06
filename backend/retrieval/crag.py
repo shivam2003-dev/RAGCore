@@ -303,6 +303,7 @@ def _freshness(metadata: dict) -> float:
         metadata.get("source_updated_at")
         or metadata.get("jira_issue_updated_at")
         or metadata.get("jira_updated_at")
+        or metadata.get("confluence_version_created_at")
         or metadata.get("updated_at")
     )
     if not raw:

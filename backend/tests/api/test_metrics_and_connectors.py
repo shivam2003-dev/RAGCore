@@ -1,7 +1,10 @@
 import uuid
 
+from sqlalchemy import select
+
 from database.base import utcnow
-from models import Document, DocumentStatus, DocumentVersion, Feedback, Message, User
+from models import Chunk, Document, DocumentStatus, DocumentVersion, Feedback, Message, User
+from repositories.knowledge import DocumentRepository
 
 
 async def test_metrics_overview_uses_live_database_counts(client, auth_headers):
@@ -46,6 +49,9 @@ async def test_document_lineage_exposes_source_provenance(client, auth_headers, 
         is_deleted=False,
         doc_metadata={
             "source": "confluence",
+            "source_id": "12345",
+            "source_url": "https://example.atlassian.net/wiki/spaces/SRE/pages/12345",
+            "source_updated_at": "2026-07-04T07:00:00.000Z",
             "confluence_page_id": "12345",
             "confluence_page_url": "https://example.atlassian.net/wiki/spaces/SRE/pages/12345",
             "confluence_version": 7,
@@ -58,7 +64,7 @@ async def test_document_lineage_exposes_source_provenance(client, auth_headers, 
         DocumentVersion(
             document_id=doc.id,
             version=1,
-            file_path="/tmp/sre.html",
+            file_path="var/tests/sre.html",
             file_sha256="b" * 64,
             file_size_bytes=128,
             created_at=utcnow(),
@@ -73,8 +79,104 @@ async def test_document_lineage_exposes_source_provenance(client, auth_headers, 
     assert body["source_id"] == "12345"
     assert body["source_url"].startswith("https://example.atlassian.net/wiki")
     assert body["source_version"] == 7
+    assert body["source_updated_at"] == "2026-07-04T07:00:00.000Z"
     assert body["versions"][0]["version"] == 1
     assert "api_key" not in str(body).lower()
+
+
+async def test_duplicate_connector_documents_are_soft_deleted(client, auth_headers, db):
+    kb = await client.post(
+        "/api/v1/knowledge-bases",
+        json={"name": "Dedup Docs", "description": "test"},
+        headers=auth_headers,
+    )
+    assert kb.status_code == 201, kb.text
+    kb_id = uuid.UUID(kb.json()["id"])
+
+    me = await client.get("/api/v1/auth/me", headers=auth_headers)
+    assert me.status_code == 200, me.text
+    user_id = uuid.UUID(me.json()["id"])
+
+    keep = Document(
+        knowledge_base_id=kb_id,
+        collection_id=None,
+        uploaded_by=user_id,
+        title="HES Architecture",
+        source_type="html",
+        status=DocumentStatus.READY,
+        current_version=1,
+        is_deleted=False,
+        doc_metadata={"source": "confluence", "confluence_page_id": "dup-123"},
+    )
+    duplicate = Document(
+        knowledge_base_id=kb_id,
+        collection_id=None,
+        uploaded_by=user_id,
+        title="HES Architecture duplicate",
+        source_type="html",
+        status=DocumentStatus.READY,
+        current_version=1,
+        is_deleted=False,
+        doc_metadata={"source": "confluence", "confluence_page_id": "dup-123"},
+    )
+    db.add_all([keep, duplicate])
+    await db.flush()
+    keep_version = DocumentVersion(
+        document_id=keep.id,
+        version=1,
+        file_path="var/tests/keep.html",
+        file_sha256="c" * 64,
+        file_size_bytes=128,
+        created_at=utcnow(),
+    )
+    duplicate_version = DocumentVersion(
+        document_id=duplicate.id,
+        version=1,
+        file_path="var/tests/duplicate.html",
+        file_sha256="d" * 64,
+        file_size_bytes=128,
+        created_at=utcnow(),
+    )
+    db.add_all([keep_version, duplicate_version])
+    await db.flush()
+    db.add_all(
+        [
+            Chunk(
+                knowledge_base_id=kb_id,
+                document_id=keep.id,
+                document_version_id=keep_version.id,
+                ordinal=0,
+                content="Keep",
+                token_count=1,
+                chunk_metadata={},
+                embedding=None,
+                created_at=utcnow(),
+            ),
+            Chunk(
+                knowledge_base_id=kb_id,
+                document_id=duplicate.id,
+                document_version_id=duplicate_version.id,
+                ordinal=0,
+                content="Duplicate",
+                token_count=1,
+                chunk_metadata={},
+                embedding=None,
+                created_at=utcnow(),
+            ),
+        ]
+    )
+    await db.commit()
+
+    deleted = await DocumentRepository(db).soft_delete_metadata_duplicates(
+        kb_id, "confluence_page_id", "dup-123", keep.id
+    )
+    await db.commit()
+
+    assert deleted == 1
+    assert (await db.get(Document, keep.id)).is_deleted is False
+    assert (await db.get(Document, duplicate.id)).is_deleted is True
+    duplicate_chunk = (await db.execute(select(Chunk).where(Chunk.document_id == duplicate.id))).scalar_one()
+    assert duplicate_chunk.is_active is False
 
 
 async def test_evals_overview_uses_persisted_answer_data(client, auth_headers, db):

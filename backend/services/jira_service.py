@@ -394,6 +394,11 @@ class JiraSyncService:
         existing = await self._docs.get_by_metadata_value(kb.id, "jira_issue_id", issue.id)
         metadata = _issue_metadata(board=board, issue=issue)
         if existing is not None and _is_current(existing, metadata):
+            if (existing.doc_metadata or {}) != metadata:
+                await self._docs.update_metadata(existing.id, metadata)
+            await self._docs.soft_delete_metadata_duplicates(
+                kb.id, "jira_issue_id", issue.id, existing.id
+            )
             return SyncedJiraDocument(
                 issue_id=issue.id,
                 issue_key=issue.key,
@@ -417,6 +422,7 @@ class JiraSyncService:
             metadata=metadata,
             audit_action="jira.issue.sync",
         )
+        await self._docs.soft_delete_metadata_duplicates(kb.id, "jira_issue_id", issue.id, doc.id)
         return SyncedJiraDocument(
             issue_id=issue.id,
             issue_key=issue.key,
@@ -561,8 +567,39 @@ def _render_issue_markdown(*, board: JiraBoard, issue: JiraIssue) -> str:
 
 def _issue_metadata(*, board: JiraBoard, issue: JiraIssue) -> dict[str, object]:
     rendered = _render_issue_markdown(board=board, issue=issue).encode("utf-8")
+    project = issue.project_key or ""
+    owner = issue.assignee_email or issue.assignee or issue.assignee_account_id
     return {
         "source": "jira",
+        "source_type": "jira",
+        "source_family": "jira",
+        "source_system": "jira",
+        "source_id": issue.key,
+        "source_title": f"{issue.key}: {issue.title}",
+        "source_url": issue.url,
+        "source_space": project,
+        "source_version": issue.updated_at,
+        "source_updated_at": issue.updated_at,
+        "project": project,
+        "project_key": issue.project_key,
+        "project_name": issue.project_name,
+        "issue_id": issue.id,
+        "issue_key": issue.key,
+        "title": f"{issue.key}: {issue.title}",
+        "url": issue.url,
+        "created_at": issue.created_at,
+        "updated_at": issue.updated_at,
+        "status": issue.status,
+        "labels": issue.labels,
+        "components": issue.components,
+        "owner": owner,
+        "acl": "connector-visible",
+        "connector": "jira",
+        "connector_scope": project or str(board.id),
+        "connector_sync_id": f"jira:{project or 'unknown'}:{issue.key}:{issue.updated_at or issue.id}",
+        "permission_state": "visible",
+        "priority": issue.priority,
+        "issue_type": issue.issue_type,
         "jira_board_id": board.id,
         "jira_board_name": board.name,
         "jira_project_key": issue.project_key,
