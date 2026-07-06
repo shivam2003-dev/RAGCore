@@ -17,6 +17,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 DATASET = ROOT / "evals" / "golden" / "rag.jsonl"
+MIN_GOLDEN_CASES = 100
+REQUIRED_CATEGORIES = {"SRE", "DevOps", "Developer", "HR", "Web", "Blended"}
+REQUIRED_SOURCE_TYPES = {"jira", "confluence", "upload", "web"}
 
 
 def main() -> int:
@@ -24,11 +27,13 @@ def main() -> int:
     parser.add_argument("--dataset", default=str(DATASET), help="Golden JSONL dataset path")
     parser.add_argument("--api-base", default=os.getenv("KIMBAL_EVALS_API_BASE", ""))
     parser.add_argument("--token", default=os.getenv("KIMBAL_EVALS_TOKEN", ""))
+    parser.add_argument("--min-cases", type=int, default=int(os.getenv("KIMBAL_EVALS_MIN_CASES", MIN_GOLDEN_CASES)))
     parser.add_argument("--strict-api", action="store_true", default=os.getenv("KIMBAL_EVALS_STRICT_API") == "1")
     args = parser.parse_args()
 
     cases = _load_dataset(Path(args.dataset))
     print(f"golden_dataset cases={len(cases)} path={args.dataset}")
+    _validate_release_gate_coverage(cases, min_cases=args.min_cases)
 
     if args.api_base and args.token:
         return _run_api_gate(args.api_base.rstrip("/"), args.token)
@@ -62,6 +67,36 @@ def _load_dataset(path: Path) -> list[dict]:
     if not cases:
         raise SystemExit(f"{path} has no eval cases")
     return cases
+
+
+def _validate_release_gate_coverage(cases: list[dict], *, min_cases: int) -> None:
+    if len(cases) < min_cases:
+        raise SystemExit(f"Golden dataset has {len(cases)} cases; minimum required is {min_cases}")
+
+    categories = {str(case["category"]) for case in cases}
+    missing_categories = REQUIRED_CATEGORIES - categories
+    if missing_categories:
+        raise SystemExit(f"Golden dataset missing categories: {', '.join(sorted(missing_categories))}")
+
+    source_types = {str(source) for case in cases for source in case["expected_source_types"]}
+    missing_source_types = REQUIRED_SOURCE_TYPES - source_types
+    if missing_source_types:
+        raise SystemExit(f"Golden dataset missing source types: {', '.join(sorted(missing_source_types))}")
+
+    duplicate_ids = _duplicate_ids(cases)
+    if duplicate_ids:
+        raise SystemExit(f"Golden dataset duplicate ids: {', '.join(duplicate_ids[:10])}")
+
+
+def _duplicate_ids(cases: list[dict]) -> list[str]:
+    seen: set[str] = set()
+    duplicates: list[str] = []
+    for case in cases:
+        case_id = str(case["id"])
+        if case_id in seen:
+            duplicates.append(case_id)
+        seen.add(case_id)
+    return duplicates
 
 
 def _run_api_gate(api_base: str, token: str) -> int:

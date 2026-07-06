@@ -39,7 +39,7 @@ Do not commit `.env` files or pasted tokens. The repository should contain only 
 
 ## Connector Safety
 
-Atlassian connectors use GET-only API calls. Production Confluence and Jira are never modified by Kimbal sync jobs.
+Atlassian connectors use GET-only API calls. Production Confluence and Jira are never modified by CVUM sync jobs.
 
 ## Frontend Settings Boundary
 

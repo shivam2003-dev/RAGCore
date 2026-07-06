@@ -189,7 +189,7 @@ export function DataSourcesClient() {
           </thead>
           <tbody className="divide-y divide-line">
             {visibleSources.map((source) => (
-              <tr key={`${source.name}-${source.source_type}`} className="transition hover:bg-brand-50/30">
+              <tr key={`${source.name}-${source.source_type}-${source.source_scope ?? "global"}`} className="transition hover:bg-brand-50/30">
                 <td className="py-3.5 pl-5">
                   <span className="inline-flex items-center gap-3">
                     <SourceIcon family={sourceFamily(source)} />
@@ -214,9 +214,9 @@ export function DataSourcesClient() {
                   )}
                 </td>
                 <td className="pr-5">
-                  <Badge tone={source.failed_documents || pendingDocuments(source) ? "amber" : "green"}>
+                  <Badge tone={source.health === "failing" || source.health === "syncing" ? "amber" : "green"}>
                     <CheckCircle2 size={11} className={cx("mr-1", source.failed_documents > 0 && "text-amber-600")} />
-                    {source.failed_documents ? "Needs review" : pendingDocuments(source) ? "Indexing" : "Healthy"}
+                    {source.health === "failing" ? "Needs review" : source.health === "syncing" ? "Indexing" : "Healthy"}
                   </Badge>
                 </td>
               </tr>

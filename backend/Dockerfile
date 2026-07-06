@@ -14,6 +14,12 @@ RUN /venv/bin/pip install .
 # --- runtime stage ---
 FROM python:3.13-slim
 
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        poppler-utils \
+        tesseract-ocr \
+    && rm -rf /var/lib/apt/lists/*
+
 RUN groupadd -r kimbal && useradd -r -g kimbal kimbal
 WORKDIR /app
 ENV PATH="/venv/bin:$PATH" PYTHONUNBUFFERED=1 APP_ENV=production

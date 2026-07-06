@@ -59,4 +59,4 @@ The backend includes:
 - Kubernetes manifests with migration init container, probes, HPA, and SSE-friendly ingress
 - GitHub Actions CI for lint, type-check, tests, image build, scan, and deploy gate
 
-The frontend currently runs locally on port `3100` and targets `http://localhost:8000/api/v1` unless `NEXT_PUBLIC_KIMBAL_API_BASE` overrides it.
+The frontend currently runs locally on port `3100` and targets `http://localhost:8000/api/v1` unless `NEXT_PUBLIC_CVUM_API_BASE` overrides it.

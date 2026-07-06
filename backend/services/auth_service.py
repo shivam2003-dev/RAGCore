@@ -200,7 +200,7 @@ class AuthService:
         if not domain:
             return
         if not email.endswith(f"@{domain}"):
-            raise ValidationError(f"Only @{domain} email addresses can access Kimbal Knowledge Hub")
+            raise ValidationError(f"Only @{domain} email addresses can access CVUM Knowledge Hub")
 
     def _is_super_admin(self, email: str) -> bool:
         return email == self._settings.auth_super_admin_email.strip().lower()
@@ -209,7 +209,7 @@ class AuthService:
         return Role.ADMIN if self._is_super_admin(email) else Role.VIEWER
 
     async def _get_or_create_default_org(self) -> Organization:
-        name = self._settings.auth_default_org_name.strip() or "Kimbal"
+        name = self._settings.auth_default_org_name.strip() or "CVUM"
         slug = name.lower().replace(" ", "-")[:80]
         org = await self._orgs.get_by_slug(slug)
         if org is None:

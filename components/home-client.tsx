@@ -69,7 +69,7 @@ export function HomeClient() {
     <div className="space-y-6">
       <section className="animate-rise">
         <h1 className="text-[34px] font-bold tracking-[-0.025em] text-ink-900">
-          Kimbal Knowledge Hub{" "}
+          CVUM Knowledge Hub{" "}
           <Sparkles size={22} className="inline -translate-y-1 text-brand-400" />
         </h1>
         <p className="mt-1.5 text-[15.5px] text-ink-500">

@@ -1,8 +1,8 @@
 # Evals
 
-Kimbal exposes a live eval dashboard at `/evals` backed by `GET /api/v1/evals/overview`.
+CVUM exposes a live eval dashboard at `/evals` backed by `GET /api/v1/evals/overview`.
 Scripts can fetch only the headline score from `GET /api/v1/evals/benchmark`, which returns
-the same `Kimbal Benchmark` object shown in the UI, for example `50/100`.
+the same `CVUM Benchmark` object shown in the UI, for example `50/100`.
 The release-gate dataset inventory is exposed by `GET /api/v1/evals/golden` and loaded from
 `evals/golden/rag.jsonl`. Offline release gates run through `GET /api/v1/evals/offline`.
 
@@ -21,7 +21,7 @@ The current implementation is intentionally deterministic and read-only. It does
 
 The dashboard reports:
 
-- Kimbal Benchmark: a single `NN/100` live score for quick deployment checks.
+- CVUM Benchmark: a single `NN/100` live score for quick deployment checks.
 - Citation coverage: share of assistant answers with at least one source citation.
 - Groundedness proxy: citation presence, rendered citation-marker coverage, and mean retrieved chunk confidence.
 - Answer relevance proxy: lexical overlap between the user question and answer text.
@@ -32,7 +32,7 @@ The dashboard reports:
 - Latency: average, p50, and p95 over recent persisted answers.
 - Model breakdown: answer count, average latency, citation coverage, and groundedness by model.
 
-The Kimbal Benchmark is deterministic and weighted from live persisted answer signals:
+The CVUM Benchmark is deterministic and weighted from live persisted answer signals:
 
 - groundedness: 30%
 - citation coverage: 20%
@@ -41,13 +41,13 @@ The Kimbal Benchmark is deterministic and weighted from live persisted answer si
 - streaming success: 10%
 - latency health: 5%
 
-These are production health signals. The Kimbal Benchmark is useful for repeatable operational checks after a deployment, but formal release gates use the golden-set offline gate below.
+These are production health signals. The CVUM Benchmark is useful for repeatable operational checks after a deployment, but formal release gates use the golden-set offline gate below.
 
 ## Why These Evals
 
 Current RAG evaluation practice separates retrieval quality from answer generation quality. Ragas documents RAG metrics such as context precision, context recall, response relevancy, faithfulness, and response groundedness. DeepEval also frames RAG testing around retriever and generator metrics such as answer relevancy and faithfulness. OpenAI's eval guidance emphasizes using evals to understand application behavior and model changes.
 
-Kimbal maps those ideas to the telemetry already available in this app:
+CVUM maps those ideas to the telemetry already available in this app:
 
 - Faithfulness / groundedness becomes a citation and chunk-score proxy.
 - Answer relevancy becomes a deterministic question-answer overlap proxy.
@@ -79,8 +79,8 @@ Run a live gate against a deployed API:
 ```bash
 cd backend
 python scripts/run_evals.py \
-  --api-base https://kb.kimbal.ai/api/v1 \
-  --token "$KIMBAL_EVALS_TOKEN"
+  --api-base http://localhost:8000/api/v1 \
+  --token "$CVUM_EVALS_TOKEN"
 ```
 
 Recommended future env variables if LLM-as-judge evals are added:

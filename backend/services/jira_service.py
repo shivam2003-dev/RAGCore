@@ -15,6 +15,7 @@ from core.config import Settings
 from core.exceptions import AuthorizationError, NotFoundError, ProviderError, ValidationError
 from embeddings.base import EmbeddingProvider
 from ingestion.queue import IngestionQueue
+from knowledgebase.source_metadata import normalize_source_metadata
 from models import Document, DocumentStatus, KnowledgeBase, User
 from repositories.audit import AuditLogRepository
 from repositories.knowledge import DocumentRepository, KnowledgeBaseRepository
@@ -105,7 +106,7 @@ class JiraClient:
             raise ValidationError("JIRA_AUTH_MODE must be auto, basic, or bearer")
 
         auth: httpx.Auth | None = None
-        headers = {"Accept": "application/json", "User-Agent": "kimbal-knowledge-hub/0.1"}
+        headers = {"Accept": "application/json", "User-Agent": "cvum-knowledge-hub/0.1"}
         email = jira_email(self._settings)
         if mode == "basic" or (mode == "auto" and email):
             if not email:
@@ -570,7 +571,7 @@ def _issue_metadata(*, board: JiraBoard, issue: JiraIssue) -> dict[str, object]:
     rendered = _render_issue_markdown(board=board, issue=issue).encode("utf-8")
     project = issue.project_key or ""
     owner = issue.assignee_email or issue.assignee or issue.assignee_account_id
-    return {
+    metadata: dict[str, object] = {
         "source": "jira",
         "source_type": "jira",
         "source_family": "jira",
@@ -624,6 +625,23 @@ def _issue_metadata(*, board: JiraBoard, issue: JiraIssue) -> dict[str, object]:
         "jira_issue_updated_at": issue.updated_at,
         "source_sha256": hashlib.sha256(rendered).hexdigest(),
     }
+    return normalize_source_metadata(
+        metadata,
+        source_type="jira",
+        title=f"{issue.key}: {issue.title}",
+        source_id=issue.key,
+        source_url=issue.url,
+        source_space=project,
+        source_version=issue.updated_at,
+        updated_at=issue.updated_at,
+        status=issue.status,
+        labels=issue.labels,
+        owner=owner,
+        acl="connector-visible",
+        connector="jira",
+        connector_scope=project or str(board.id),
+        source_sha256=str(metadata["source_sha256"]),
+    )
 
 
 def _jira_issue_allowed(issue: JiraIssue, settings: Settings) -> bool:

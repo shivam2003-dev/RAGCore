@@ -11,7 +11,7 @@ Documents enter the system from manual uploads or read-only source syncs.
 5. The embedding provider embeds chunk text.
 6. Chunks are stored in Postgres with pgvector embeddings and a generated full-text `tsv` column.
 
-Manual uploads go into `Kimbal Local Uploads`. Confluence and Jira write into dedicated source knowledge bases.
+Manual uploads go into `CVUM Local Uploads`. Confluence and Jira write into dedicated source knowledge bases.
 
 ## Chunking
 

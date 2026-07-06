@@ -26,3 +26,21 @@ async def test_architecture_queries_prefer_confluence_over_high_volume_jira() ->
 
     assert ranked[0].metadata["source"] == "confluence"
 
+
+async def test_exact_jira_key_beats_generic_high_score_chunk() -> None:
+    ranked = await HeuristicReranker().rerank(
+        RetrievalContext(kb_id=uuid.uuid4(), query="What happened in CVIR-6360?", top_k=2),
+        [
+            _chunk("Generic CVIR incident summary", "jira", 0.92),
+            RetrievedChunk(
+                chunk_id=uuid.uuid4(),
+                document_id=uuid.uuid4(),
+                document_title="CVIR-6360: RF Communication Down",
+                content="Issue key CVIR-6360 reports RF communication down.",
+                metadata={"source": "jira", "jira_issue_key": "CVIR-6360", "source_id": "CVIR-6360"},
+                score=0.70,
+            ),
+        ],
+    )
+
+    assert ranked[0].metadata["jira_issue_key"] == "CVIR-6360"

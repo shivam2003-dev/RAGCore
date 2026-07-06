@@ -15,6 +15,7 @@ from core.config import Settings
 from core.exceptions import ProviderError, ValidationError
 from database.base import utcnow
 from embeddings.base import EmbeddingProvider
+from knowledgebase.source_metadata import normalize_source_metadata
 from models import Chunk, Document, DocumentStatus, DocumentVersion, KnowledgeBase, User
 from repositories.chunks import ChunkRepository
 from repositories.knowledge import DocumentRepository, KnowledgeBaseRepository
@@ -114,8 +115,8 @@ class WebSearchService:
         if provider == "fake":
             return [
                 WebSearchResult(
-                    title="Kimbal web search result",
-                    url="https://example.com/kimbal-web-search",
+                    title="CVUM web search result",
+                    url="https://example.com/cvum-web-search",
                     snippet=f"Live web-search style result for query: {query}",
                     score=1.0,
                 )
@@ -137,7 +138,7 @@ class WebSearchService:
             base_url,
             headers={
                 "Accept": "text/html,application/xhtml+xml",
-                "User-Agent": "Mozilla/5.0 KimbalKnowledgeHub/1.0",
+                "User-Agent": "Mozilla/5.0 CVUMKnowledgeHub/1.0",
             },
             params=params,
         )
@@ -271,6 +272,20 @@ class WebSearchService:
         }
         if result.published_at:
             metadata["web_published_at"] = result.published_at
+        metadata = normalize_source_metadata(
+            metadata,
+            source_type="web",
+            title=result.title,
+            source_id=result.url,
+            source_url=result.url,
+            source_space=self._settings.web_search_provider.lower(),
+            updated_at=result.published_at,
+            status="current",
+            acl="public-web",
+            connector="web",
+            connector_scope=self._settings.web_search_provider.lower(),
+            source_sha256=content_hash,
+        )
 
         doc = await self._docs.get_by_metadata_value(kb.id, "web_url", result.url)
         if doc is not None and doc.doc_metadata.get("web_source_sha256") == content_hash:

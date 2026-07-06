@@ -23,7 +23,7 @@ import {
   PanelLeftOpen,
   type LucideIcon,
 } from "lucide-react";
-import { KimbalMark } from "./brand-icons";
+import { CVUMMark } from "./brand-icons";
 import { cx } from "./ui";
 import type { UserOut } from "@/lib/kimbal-api";
 
@@ -38,7 +38,7 @@ const groups: Array<{ label?: string; items: Item[] }> = [
   {
     label: "Knowledge",
     items: [
-      { label: "Ask Kimbal (RAG)", href: "/ask", icon: MessageSquare },
+      { label: "Ask CVUM (RAG)", href: "/ask", icon: MessageSquare },
       { label: "Knowledge Sources", href: "/knowledge-sources", icon: Database },
       { label: "Documents", href: "/documents", icon: FileText },
       { label: "Saved Answers", href: "/saved-answers", icon: BookmarkCheck },
@@ -86,7 +86,7 @@ export function Sidebar({ user, onLogout }: { user: UserOut; onLogout: () => voi
   const visibleGroups =
     user.role === "admin"
       ? groups
-      : [{ items: [{ label: "Ask Kimbal", href: "/ask", icon: MessageSquare }] }];
+      : [{ items: [{ label: "Ask CVUM", href: "/ask", icon: MessageSquare }] }];
 
   useEffect(() => {
     if (isAskPath) {
@@ -115,8 +115,8 @@ export function Sidebar({ user, onLogout }: { user: UserOut; onLogout: () => voi
     >
       <div className={cx("flex items-center gap-2.5 pb-5 pt-6", collapsed ? "justify-center px-3" : "px-6")}>
         <Link href={user.role === "admin" ? "/" : "/ask"} className="flex items-center gap-2.5" aria-label="Home">
-          <KimbalMark size={30} />
-          {!collapsed && <span className="text-[21px] font-bold tracking-[-0.02em] text-ink-900">kimbal</span>}
+          <CVUMMark size={30} />
+          {!collapsed && <span className="text-[21px] font-bold tracking-[-0.02em] text-ink-900">CVUM</span>}
         </Link>
         <button
           type="button"

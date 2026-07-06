@@ -6,7 +6,7 @@ import { Badge, Card, CardTitle, GhostButton, PageHeader, PrimaryButton } from "
 import { kimbalApi, type UserOut } from "@/lib/kimbal-api";
 
 const matrix = [
-  { perm: "Ask Kimbal & search", admin: true, editor: true, viewer: true },
+  { perm: "Ask CVUM & search", admin: true, editor: true, viewer: true },
   { perm: "Admin navigation", admin: true, editor: false, viewer: false },
   { perm: "Upload and reindex documents", admin: true, editor: false, viewer: false },
   { perm: "Sync Confluence", admin: true, editor: false, viewer: false },
@@ -93,8 +93,8 @@ export function AccessControlClient() {
 
   async function createMember() {
     const email = newEmail.trim().toLowerCase();
-    if (!email.endsWith("@kimbal.io")) {
-      setStatus("Use a kimbal.io email address");
+    if (!email.endsWith("@cvum.io")) {
+      setStatus("Use a cvum.io email address");
       return;
     }
     if (!newName.trim() || newPassword.length < 10) {
@@ -210,7 +210,7 @@ export function AccessControlClient() {
                 id="create-member-email"
                 value={newEmail}
                 onChange={(event) => setNewEmail(event.target.value)}
-                placeholder="name@kimbal.io"
+                placeholder="name@cvum.io"
                 className="h-9 w-full rounded-[9px] border border-line bg-canvas px-3 text-[12.5px] outline-none transition focus:border-brand-300 focus:bg-white"
               />
             </label>

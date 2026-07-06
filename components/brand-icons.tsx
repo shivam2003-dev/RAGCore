@@ -109,7 +109,7 @@ export function PdfIcon({ size = 20, className }: P) {
   );
 }
 
-export function KimbalMark({ size = 26, className }: P) {
+export function CVUMMark({ size = 26, className }: P) {
   return (
     <svg width={size} height={size} viewBox="0 0 32 32" className={className} aria-hidden>
       <defs>

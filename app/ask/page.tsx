@@ -7,7 +7,7 @@ export default function AskPage() {
     <Suspense
       fallback={
         <Card className="p-6">
-          <p className="text-[13.5px] font-semibold text-ink-700">Loading Ask Kimbal...</p>
+          <p className="text-[13.5px] font-semibold text-ink-700">Loading Ask CVUM...</p>
         </Card>
       }
     >

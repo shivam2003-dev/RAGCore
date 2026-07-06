@@ -12,7 +12,7 @@ class FakeLLM:
     model = "fake-llm"
 
     async def stream(self, request: LLMRequest) -> AsyncIterator[LLMDelta]:
-        if "Kimbal question rewriter" in request.system:
+        if "CVUM question rewriter" in request.system:
             latest = request.messages[-1].content if request.messages else ""
             history_text = " ".join(message.content for message in request.messages[:-1])
             if re.search(r"\b(it|that|this|those|they|them|same|previous|above)\b", latest, re.I):
@@ -30,7 +30,7 @@ class FakeLLM:
             yield LLMDelta(done=True, usage=LLMUsage(input_tokens=60, output_tokens=len(answer) // 4))
             return
 
-        if "Kimbal role prompt generator" in request.system:
+        if "CVUM role prompt generator" in request.system:
             payload = _json_from_message(request.messages[-1].content if request.messages else "")
             role_name = str(payload.get("name") or "Custom Specialist")[:80]
             goal = str(payload.get("goal") or "answer the user's workflow questions")
@@ -40,7 +40,7 @@ class FakeLLM:
                 {
                     "name": role_name,
                     "prompt": (
-                        f"Act as {role_name} for Kimbal. Primary focus: {goal}. "
+                        f"Act as {role_name} for CVUM. Primary focus: {goal}. "
                         f"Prefer these source areas when retrieval returns them: {source_focus}. "
                         f"Response style: {output_style}. Keep citations, RBAC, secret handling, "
                         "and source-grounding rules above this role."

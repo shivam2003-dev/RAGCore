@@ -21,7 +21,7 @@ class QuestionRewriter:
         ]
         request = LLMRequest(
             system=(
-                "You are the Kimbal question rewriter. Rewrite the latest user message into one "
+                "You are the CVUM question rewriter. Rewrite the latest user message into one "
                 "standalone retrieval question using the previous chat history for references. "
                 "Return only the standalone question. If the latest message is already standalone, "
                 "return it unchanged. Do not answer the question."

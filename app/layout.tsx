@@ -9,7 +9,7 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-  title: "Kimbal Knowledge Hub",
+  title: "CVUM Knowledge Hub",
   description: "Unified knowledge. Smarter answers. Better decisions.",
 };
 

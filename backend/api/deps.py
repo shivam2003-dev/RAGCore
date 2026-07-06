@@ -58,6 +58,11 @@ async def get_current_user(
     token: Annotated[str | None, Depends(oauth2_scheme)] = None,
     api_key: Annotated[str | None, Security(api_key_scheme)] = None,
 ) -> User:
+    if settings.auth_disabled:
+        user = await UserRepository(db).get_by_email(settings.auth_super_admin_email)
+        if user is None or not user.is_active:
+            raise AuthenticationError("AUTH_DISABLED is set but the local admin user is not available")
+        return user
     if token:
         payload = decode_access_token(token)
         user = await UserRepository(db).get(uuid.UUID(payload["sub"]))

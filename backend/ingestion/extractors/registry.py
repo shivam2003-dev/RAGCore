@@ -7,16 +7,85 @@ from core.exceptions import IngestionError
 from ingestion.extractors.base import ExtractedDocument
 
 
+def _pdf_reader(path: Path):
+    from pypdf import PdfReader
+
+    return PdfReader(path)
+
+
+def _convert_pdf_to_images(path: Path, dpi: int = 200):
+    from pdf2image import convert_from_path
+
+    return convert_from_path(str(path), dpi=dpi)
+
+
+def _open_image(path: Path):
+    from PIL import Image
+
+    return Image.open(path)
+
+
+def _ocr_image(image: object) -> str:
+    import pytesseract
+
+    if hasattr(image, "close"):
+        return pytesseract.image_to_string(image, config="--psm 6").strip()
+    with _open_image(image if isinstance(image, Path) else Path(str(image))) as pil_image:
+        return pytesseract.image_to_string(pil_image, config="--psm 6").strip()
+
+
 class PdfExtractor:
     suffixes = (".pdf",)
 
     def extract(self, path: Path) -> ExtractedDocument:
-        from pypdf import PdfReader
-
-        reader = PdfReader(path)
+        reader = _pdf_reader(path)
         pages = [page.extract_text() or "" for page in reader.pages]
+        page_count = len(pages)
+        extracted_text = "\n\n".join(text.strip() for text in pages if text and text.strip())
+        if extracted_text.strip():
+            return ExtractedDocument(
+                text=extracted_text,
+                metadata={"page_count": page_count, "extraction_strategy": "pdf-text"},
+            )
+
+        ocr_text = _extract_pdf_via_ocr(path, page_count)
+        if ocr_text:
+            return ExtractedDocument(
+                text=ocr_text,
+                metadata={
+                    "page_count": page_count,
+                    "extraction_strategy": "pdf-ocr",
+                },
+            )
+
+        return ExtractedDocument(text="", metadata={"page_count": page_count, "extraction_strategy": "pdf-empty"})
+
+
+class ImageExtractor:
+    suffixes = (
+        ".png",
+        ".jpg",
+        ".jpeg",
+        ".gif",
+        ".bmp",
+        ".webp",
+        ".tiff",
+        ".tif",
+    )
+
+    def extract(self, path: Path) -> ExtractedDocument:
+        text = _ocr_image(path)
+        if text:
+            return ExtractedDocument(
+                text=text,
+                metadata={
+                    "page_count": 1,
+                    "extraction_strategy": "image-ocr",
+                },
+            )
         return ExtractedDocument(
-            text="\n\n".join(pages).strip(), metadata={"page_count": len(pages)}
+            text="",
+            metadata={"page_count": 1, "extraction_strategy": "image-empty"},
         )
 
 
@@ -121,6 +190,7 @@ class HtmlExtractor:
 
 _EXTRACTORS = [
     PdfExtractor(),
+    ImageExtractor(),
     DocxExtractor(),
     MarkdownExtractor(),
     PlainTextExtractor(),
@@ -142,6 +212,25 @@ def extract_text(path: Path) -> ExtractedDocument:
                 raise IngestionError(f"No extractable text in {path.name}")
             return doc
     raise IngestionError(f"Unsupported file type: {suffix}")
+
+
+def _extract_pdf_via_ocr(path: Path, page_count: int) -> str:
+    try:
+        images = _convert_pdf_to_images(path)
+    except Exception:
+        return ""
+
+    chunks: list[str] = []
+    for index, image in enumerate(images, start=1):
+        try:
+            text = _ocr_image(image)
+        except Exception:
+            continue
+        if text:
+            chunks.append(f"Page {index}: {text.strip()}")
+    if not chunks and page_count > 0:
+        return ""
+    return "\n\n".join(chunks)
 
 
 def _has_parent(element: Any, names: set[str]) -> bool:

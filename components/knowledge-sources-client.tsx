@@ -11,7 +11,7 @@ type SourceRow = {
   docsTotal: number;
 };
 
-const LEGACY_SEED_KB_NAME = "Kimbal Local Runbook";
+const LEGACY_SEED_KB_NAME = "CVUM Local Runbook";
 
 export function KnowledgeSourcesClient() {
   const [sources, setSources] = useState<SourceRow[]>([]);
@@ -98,7 +98,7 @@ export function KnowledgeSourcesClient() {
     <div>
       <PageHeader
         title="Knowledge Sources"
-        subtitle="Live knowledge bases feeding the Kimbal retrieval API."
+        subtitle="Live knowledge bases feeding the CVUM retrieval API."
         actions={
           <div className="flex items-center gap-2.5">
             <span className="rounded-full border border-line bg-white px-3 py-1.5 text-[12.5px] font-semibold text-ink-500">

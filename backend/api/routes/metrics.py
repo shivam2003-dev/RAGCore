@@ -135,12 +135,23 @@ async def metrics_overview(user: CurrentUser, db: DbDep) -> MetricsOverviewOut:
 
 
 async def _source_metrics(db: AsyncSession, org_id: uuid.UUID) -> list[SourceMetricOut]:
-    source_expr = func.coalesce(Document.doc_metadata["source"].as_string(), Document.source_type)
+    source_expr = func.coalesce(Document.doc_metadata["source_type"].as_string(), Document.doc_metadata["source"].as_string(), Document.source_type)
+    scope_expr = func.coalesce(
+        Document.doc_metadata["connector_scope"].as_string(),
+        Document.doc_metadata["source_space"].as_string(),
+        Document.doc_metadata["space"].as_string(),
+        Document.doc_metadata["project"].as_string(),
+        Document.doc_metadata["file_type"].as_string(),
+        "global",
+    )
+    connector_expr = func.coalesce(Document.doc_metadata["connector"].as_string(), source_expr)
     rows = await db.execute(
         select(
             KnowledgeBase.id,
             KnowledgeBase.name,
             source_expr.label("source"),
+            scope_expr.label("scope"),
+            connector_expr.label("connector"),
             func.count(func.distinct(Document.id)),
             func.count(func.distinct(case((Document.status == DocumentStatus.READY, Document.id)))),
             func.count(func.distinct(case((Document.status == DocumentStatus.UPLOADED, Document.id)))),
@@ -156,33 +167,57 @@ async def _source_metrics(db: AsyncSession, org_id: uuid.UUID) -> list[SourceMet
             and_(Chunk.document_id == Document.id, Chunk.is_active.is_(True)),
         )
         .where(KnowledgeBase.organization_id == org_id, Document.is_deleted.is_(False))
-        .group_by(KnowledgeBase.id, KnowledgeBase.name, source_expr)
+        .group_by(KnowledgeBase.id, KnowledgeBase.name, source_expr, scope_expr, connector_expr)
         .order_by(desc(func.count(func.distinct(Document.id))))
     )
     sources: list[SourceMetricOut] = []
     for row in rows:
-        documents = int(row[3] or 0)
-        ready = int(row[4] or 0)
-        uploaded = int(row[5] or 0)
-        processing = int(row[6] or 0)
-        failed = int(row[7] or 0)
+        source_type = str(row[2] or "unknown")
+        source_scope = str(row[3] or "global")
+        connector = str(row[4] or source_type)
+        documents = int(row[5] or 0)
+        ready = int(row[6] or 0)
+        uploaded = int(row[7] or 0)
+        processing = int(row[8] or 0)
+        failed = int(row[9] or 0)
         sources.append(
             SourceMetricOut(
                 knowledge_base_id=row[0],
-                name=str(row[1] or _source_label(str(row[2] or "unknown"))),
-                source_type=str(row[2] or "unknown"),
+                name=_scoped_source_name(str(row[1] or _source_label(source_type)), source_type, source_scope),
+                source_type=source_type,
+                source_scope=source_scope,
+                connector=connector,
+                health=_source_health(documents=documents, ready=ready, uploaded=uploaded, processing=processing, failed=failed),
                 documents=documents,
                 ready_documents=ready,
                 pending_documents=max(0, uploaded + processing),
                 uploaded_documents=uploaded,
                 processing_documents=processing,
                 failed_documents=failed,
-                chunks_active=int(row[8] or 0),
-                last_updated_at=row[9],
-                last_ingested_at=row[10],
+                chunks_active=int(row[10] or 0),
+                last_updated_at=row[11],
+                last_ingested_at=row[12],
             )
         )
     return sources
+
+
+def _scoped_source_name(kb_name: str, source_type: str, source_scope: str) -> str:
+    if source_scope and source_scope != "global":
+        return f"{_source_label(source_type)}: {source_scope}"
+    return kb_name or _source_label(source_type)
+
+
+def _source_health(*, documents: int, ready: int, uploaded: int, processing: int, failed: int) -> str:
+    if failed:
+        return "failing"
+    if uploaded or processing:
+        return "syncing"
+    if documents and ready == documents:
+        return "ready"
+    if ready:
+        return "partial"
+    return "empty"
 
 
 async def _connector_runs(db: AsyncSession, org_id: uuid.UUID) -> list[ConnectorRunOut]:

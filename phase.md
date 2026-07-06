@@ -1,12 +1,12 @@
-# Kimbal Knowledge Hub: Retrieval Accuracy Roadmap
+# CVUM Knowledge Hub: Retrieval Accuracy Roadmap
 
-Primary goal: improve retrieval accuracy before improving answer style. A better answer generator cannot fix missing, stale, irrelevant, or poorly ranked evidence. This plan turns Kimbal Knowledge Hub from a basic enterprise RAG app into a measurable, self-correcting retrieval system for Jira, Confluence, web, uploads, and future multimodal sources.
+Primary goal: improve retrieval accuracy before improving answer style. A better answer generator cannot fix missing, stale, irrelevant, or poorly ranked evidence. This plan turns CVUM Knowledge Hub from a basic enterprise RAG app into a measurable, self-correcting retrieval system for Jira, Confluence, web, uploads, and future multimodal sources.
 
 Source basis: `RAG_Survey_2023-2026.pdf` in `~/Downloads`. The survey's strongest production lessons are: move beyond naive top-k dense search; use modular RAG operators; combine dense, sparse, metadata, reranking, and structured retrieval; evaluate continuously; make the system abstain when evidence is weak; and treat citations, freshness, ACLs, and latency as part of accuracy.
 
 ## Current Product Target
 
-Kimbal should answer from internal sources with:
+CVUM should answer from internal sources with:
 
 - High source recall for SRE, DevOps, Jira analytics, Confluence runbooks, uploaded docs, and web/blended questions.
 - Correct answers for numeric Jira questions by computing from structured metadata instead of asking the LLM to infer counts from text chunks.
@@ -14,6 +14,45 @@ Kimbal should answer from internal sources with:
 - Every citation opening a real source.
 - Conversation context without letting old chat history pollute retrieval.
 - Release gates so retrieval regressions cannot ship silently.
+
+## Implementation Status - 2026-07-06
+
+Current completed implementation slice:
+
+- Phase 1 source fidelity is implemented in code for new/reindexed content:
+  - canonical source metadata helper for Jira, Confluence, web, and uploads
+  - stable inventory keys, connector scope, source freshness bucket, ACL state, owner, URL, title, status, and source id
+  - scoped source metrics so inventory separates Jira DEVO/CVIR, Confluence DevOps1/SRE/AS, uploads, and web
+  - duplicate connector rows are still handled by connector identity keys, with chunks deactivated when duplicate documents are soft-deleted
+- Phase 2 chunking is implemented for Markdown and Confluence HTML:
+  - Confluence HTML now routes through Markdown-aware section chunking
+  - chunks carry heading path, section title, table/procedure/code flags, chunk kind, and parent section context
+  - contextual chunk text includes source, title, scope, status, freshness, section, kind, and parent section context
+- Source-diverse final context selection is implemented:
+  - architecture/runbook/documentation questions keep Confluence evidence even when Jira has many high-scoring chunks
+  - final context limits repeated chunks from the same document/source key
+- Phase 3 exact identifier handling is implemented in the heuristic reranker/evaluator:
+  - Jira keys, source ids, source URLs, page ids, section titles, hostnames, and exact page title terms boost relevant chunks
+  - final context selection enforces document/source diversity after reranking
+- Phase 4 query classification is implemented in retrieval traces:
+  - source/done events now include query classification such as `jira_count_stat`, `architecture_docs`, `procedure_runbook`, `multi_hop_rca`, `comparison`, and `global_summary`
+- Phase 10 offline release-gate hardening is implemented:
+  - CI runs the golden eval gate when backend or golden dataset files change
+  - the eval runner now enforces at least 100 golden cases, required categories, required source types, and unique case ids
+
+Verification evidence:
+
+- `PYTHONPATH=backend pytest -q backend/tests/unit/test_source_metadata.py backend/tests/unit/test_confluence_service.py backend/tests/unit/test_jira_service.py backend/tests/unit/test_chunkers.py backend/tests/unit/test_final_context_selection.py backend/tests/unit/test_crag_source_ranking.py backend/tests/unit/test_retrieval_diversity.py backend/tests/unit/test_citations.py` -> 30 passed
+- `PYTHONPATH=backend pytest -q backend/tests/unit/test_retrieval_diversity.py backend/tests/unit/test_crag_source_ranking.py backend/tests/unit/test_final_context_selection.py backend/tests/unit/test_chunkers.py backend/tests/unit/test_source_metadata.py` -> 20 passed
+- `python -m py_compile` on changed backend modules -> passed
+- `npx tsc --noEmit` -> passed
+- `npx eslint components/ask-client.tsx components/data-sources-client.tsx` -> passed
+- `python backend/scripts/run_evals.py` -> passed with 129 golden cases across Blended, DevOps, Developer, HR, SRE, and Web
+
+Not complete yet:
+
+- Existing production content must be reindexed/resynced to receive the new metadata and chunk structure.
+- Remaining enterprise features still in progress: live API eval gate in protected CI, pluggable cross-encoder/LLM reranker, full corrective CRAG loop, full claim-level verifier, graph retrieval, and deep investigation mode.
 
 ## North-Star Metrics
 
@@ -392,7 +431,7 @@ Exit criteria:
 5. Phase 10 continuously: release gates should begin as soon as the first golden dataset exists.
 6. Phase 9, Phase 11, and Phase 12 after core retrieval quality is stable.
 
-## Immediate Priorities for Kimbal
+## Immediate Priorities for CVUM
 
 - Fix retrieval quality before adding more answer UI.
 - Make SRE and DevOps source routing explicit and measurable.

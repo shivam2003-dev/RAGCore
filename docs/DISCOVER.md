@@ -1,6 +1,6 @@
 # Discover
 
-Discover is the department update surface for Kimbal Knowledge Hub. It keeps teams current with external articles, alerts, research, and an internal board pulse from indexed Jira, Confluence, uploads, and web snippets.
+Discover is the department update surface for CVUM Knowledge Hub. It keeps teams current with external articles, alerts, research, and an internal board pulse from indexed Jira, Confluence, uploads, and web snippets.
 
 ## User Experience
 

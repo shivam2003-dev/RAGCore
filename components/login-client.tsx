@@ -3,7 +3,7 @@
 import { FormEvent, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ArrowRight, LockKeyhole, Mail } from "lucide-react";
-import { KimbalMark } from "@/components/brand-icons";
+import { CVUMMark } from "@/components/brand-icons";
 import { ApiError, kimbalApi } from "@/lib/kimbal-api";
 
 const ASK_PATH = "/ask";
@@ -43,8 +43,8 @@ export function LoginClient() {
     event.preventDefault();
     const normalizedEmail = email.trim().toLowerCase();
     setError("");
-    if (!normalizedEmail.endsWith("@kimbal.io")) {
-      setError("Use your kimbal.io email address.");
+    if (!normalizedEmail.endsWith("@cvum.io")) {
+      setError("Use your cvum.io email address.");
       return;
     }
     setSubmitting(true);
@@ -66,10 +66,10 @@ export function LoginClient() {
     <main className="flex min-h-screen items-center justify-center bg-canvas px-5 py-8">
       <section className="w-full max-w-[420px] rounded-[16px] border border-line bg-white p-7 shadow-[var(--shadow-card)]">
         <div className="mb-6 flex items-center gap-3">
-          <KimbalMark size={38} />
+          <CVUMMark size={38} />
           <div>
-            <h1 className="text-[24px] font-bold text-ink-900">Kimbal Knowledge Hub</h1>
-            <p className="mt-0.5 text-[13px] font-medium text-ink-500">Sign in with your kimbal.io account.</p>
+            <h1 className="text-[24px] font-bold text-ink-900">CVUM Knowledge Hub</h1>
+            <p className="mt-0.5 text-[13px] font-medium text-ink-500">Sign in with your cvum.io account.</p>
           </div>
         </div>
 
@@ -86,7 +86,7 @@ export function LoginClient() {
                 type="email"
                 autoComplete="email"
                 required
-                placeholder="name@kimbal.io"
+                placeholder="name@cvum.io"
                 className="min-w-0 flex-1 bg-transparent text-[14px] text-ink-900 outline-none placeholder:text-ink-400"
               />
             </span>

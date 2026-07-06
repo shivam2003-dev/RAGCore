@@ -27,8 +27,8 @@ export type SettingsState = {
 };
 
 export const defaultSettings: SettingsState = {
-  organizationName: "Kimbal",
-  organizationId: "kimbal-tech",
+  organizationName: "CVUM",
+  organizationId: "cvum-tech",
   timeZone: "(GMT+05:30) Asia/Kolkata",
   language: "English",
   dateFormat: "DD MMM, YYYY",

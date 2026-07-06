@@ -268,7 +268,7 @@ export function SettingsClient() {
             <SettingCard icon={Workflow} title="Implemented Connectors" desc="Production-backed integrations in this build.">
               <StaticRow title="Confluence" desc="Read-only DevOps1 space sync through the backend API." />
               <StaticRow title="Jira" desc="Read-only DEVO board sync through the backend API." />
-              <StaticRow title="Kimbal API" desc="OpenAPI available at the backend /docs endpoint." />
+              <StaticRow title="CVUM API" desc="OpenAPI available at the backend /docs endpoint." />
             </SettingCard>
             <SettingCard icon={Mail} title="Digest" desc="Scheduled summaries.">
               <StaticRow title="Email Digest" desc="Not implemented yet; no background email worker exists." />

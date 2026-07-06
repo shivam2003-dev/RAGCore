@@ -32,7 +32,7 @@ export function IntegrationsClient() {
       status: jira?.configured ? "Configured" : "Needs config",
     },
     {
-      name: "Kimbal API",
+      name: "CVUM API",
       desc: "FastAPI endpoints for auth, documents, search, chat, metrics, Confluence, and Jira sync.",
       icon: TerminalSquare,
       tone: "green" as const,

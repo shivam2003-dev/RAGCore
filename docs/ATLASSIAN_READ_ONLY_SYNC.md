@@ -4,7 +4,7 @@
 
 The Confluence and Jira integrations are read-only. They use Atlassian GET endpoints and never edit production Confluence pages, Jira boards, or Jira issues.
 
-Synced content is written only into the local Kimbal database for indexing and retrieval.
+Synced content is written only into the local CVUM database for indexing and retrieval.
 
 ## Configuration
 

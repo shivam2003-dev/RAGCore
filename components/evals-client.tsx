@@ -119,7 +119,7 @@ export function EvalsClient() {
         <Card className="col-span-12 p-5">
           <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
             <div>
-              <CardTitle icon={Gauge} title={overview?.benchmark.label ?? "Kimbal Benchmark"} tint="bg-brand-50 text-brand-500" />
+              <CardTitle icon={Gauge} title={overview?.benchmark.label ?? "CVUM Benchmark"} tint="bg-brand-50 text-brand-500" />
               <p className="mt-3 max-w-3xl text-[13px] leading-6 text-ink-500">
                 {overview?.benchmark.detail ?? "Loading benchmark from stored answer evaluations."}
               </p>

@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
+import { ChangeEvent, FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import {
@@ -10,6 +10,7 @@ import {
   Check,
   Clock,
   FileText,
+  Paperclip,
   Globe,
   Info,
   Layers,
@@ -31,6 +32,7 @@ import {
   Users,
   Wrench,
   Zap,
+  X,
   type LucideIcon,
 } from "lucide-react";
 import { Badge, Card, CardLink, GhostButton, cx } from "@/components/ui";
@@ -74,6 +76,7 @@ const ANSWER_MODES: Array<{ value: AnswerMode; label: string; icon: LucideIcon }
 ];
 const COUNCIL_SETTINGS_KEY = "kimbal.council.settings.v1";
 const CUSTOM_ROLE_SETTINGS_KEY = "kimbal.custom.role.v1";
+const ASK_ATTACHMENT_ACCEPT = ".md,.txt,.pdf,.docx,.csv,.html,.png,.jpg,.jpeg,.gif,.bmp,.webp,.tif,.tiff";
 
 type OrgSpaceId = "sre" | "devops" | "developer" | "hr" | "custom";
 
@@ -103,7 +106,7 @@ const ORG_SPACES: OrgSpace[] = [
       "New observability research and articles",
     ],
     prompt:
-      "Act as a senior Site Reliability Engineer for Kimbal. Focus on incident triage, production debugging, reliability risk, service health, logs, metrics, SLO impact, rollback safety, and validation steps. Prefer Jira incidents, operational runbooks, postmortems, Confluence production notes, and deployment evidence. Give tight next actions, commands/checks when supported by sources, severity/blast-radius framing, and escalation criteria.",
+      "Act as a senior Site Reliability Engineer for CVUM. Focus on incident triage, production debugging, reliability risk, service health, logs, metrics, SLO impact, rollback safety, and validation steps. Prefer Jira incidents, operational runbooks, postmortems, Confluence production notes, and deployment evidence. Give tight next actions, commands/checks when supported by sources, severity/blast-radius framing, and escalation criteria.",
   },
   {
     id: "devops",
@@ -119,7 +122,7 @@ const ORG_SPACES: OrgSpace[] = [
       "New CI/CD supply chain hardening guidance",
     ],
     prompt:
-      "Act as a senior DevOps engineer for Kimbal. Focus on Kubernetes, CI/CD, ArgoCD, Terraform, deployment safety, release validation, rollback procedure, secrets handling, access requests, and infrastructure automation. Prefer synced Confluence DevOps runbooks, Jira DEVO work items, and uploaded deployment docs. Keep responses operational, ordered, and ready for an engineer to execute.",
+      "Act as a senior DevOps engineer for CVUM. Focus on Kubernetes, CI/CD, ArgoCD, Terraform, deployment safety, release validation, rollback procedure, secrets handling, access requests, and infrastructure automation. Prefer synced Confluence DevOps runbooks, Jira DEVO work items, and uploaded deployment docs. Keep responses operational, ordered, and ready for an engineer to execute.",
   },
   {
     id: "developer",
@@ -151,7 +154,7 @@ const ORG_SPACES: OrgSpace[] = [
       "Developer experience research summaries",
     ],
     prompt:
-      "Act as an HR and people-operations assistant for Kimbal. Focus on onboarding, role/process guidance, people policy, access request paths, team communication, and internal operating procedures. Prefer HR policy documents, onboarding docs, and approved internal guidance. Avoid legal, compensation, or private employee claims unless directly supported by sources.",
+      "Act as an HR and people-operations assistant for CVUM. Focus on onboarding, role/process guidance, people policy, access request paths, team communication, and internal operating procedures. Prefer HR policy documents, onboarding docs, and approved internal guidance. Avoid legal, compensation, or private employee claims unless directly supported by sources.",
   },
   {
     id: "custom",
@@ -453,10 +456,15 @@ export function AskClient() {
   const params = useSearchParams();
   const initialQuestion = params.get("q") ?? "";
   const autoAsked = useRef(false);
+  const attachmentInputRef = useRef<HTMLInputElement>(null);
+  const streamingFenceOpenRef = useRef(false);
   const [input, setInput] = useState(initialQuestion);
   const [state, setState] = useState<ChatState>("idle");
   const [error, setError] = useState("");
   const [conversationId, setConversationId] = useState<string | null>(null);
+  const [conversationKnowledgeBaseId, setConversationKnowledgeBaseId] = useState<string | null>(null);
+  const [attachments, setAttachments] = useState<File[]>([]);
+  const [attachmentUploading, setAttachmentUploading] = useState(false);
   const [turn, setTurn] = useState<Turn>({
     question: "",
     answer: "",
@@ -488,6 +496,7 @@ export function AskClient() {
   const [customRoleGoal, setCustomRoleGoal] = useState("");
   const [customRoleSourceFocus, setCustomRoleSourceFocus] = useState("");
   const [customRoleOutputStyle, setCustomRoleOutputStyle] = useState("");
+  const maxAttachments = 8;
 
   const loadConversations = useCallback(async () => {
     setLoadingConversations(true);
@@ -580,7 +589,14 @@ export function AskClient() {
 
   async function ask(question: string) {
     const trimmed = question.trim();
-    if (!trimmed || state === "preparing" || state === "searching" || state === "streaming") return;
+    if (
+      !trimmed ||
+      attachmentUploading ||
+      state === "preparing" ||
+      state === "searching" ||
+      state === "streaming"
+    )
+      return;
     if ((sourceMode === "web" || sourceMode === "blended") && webStatus?.configured !== true) {
       setState("error");
       setError(webStatus?.reason ?? "Web search is not configured.");
@@ -629,13 +645,50 @@ export function AskClient() {
       assistantRole: requestAssistantRole.name,
     });
 
+    const hasAttachments = attachments.length > 0;
+    if (hasAttachments) {
+      setAttachmentUploading(true);
+      setActionStatus(`Uploading ${attachments.length} attachment${attachments.length === 1 ? "" : "s"}...`);
+    }
+
     try {
-      const kb = await kimbalApi.ensureKnowledgeBase();
       let activeConversationId = conversationId;
+      let activeConversationKnowledgeBaseId = conversationKnowledgeBaseId;
+      streamingFenceOpenRef.current = false;
+      if (hasAttachments) {
+        const uploadKb = await kimbalApi.ensureUploadKnowledgeBase();
+        const pending = [...attachments];
+        for (const attachment of pending) {
+          await kimbalApi.uploadDocument(uploadKb.id, attachment);
+        }
+        setAttachments([]);
+        activeConversationKnowledgeBaseId = uploadKb.id;
+        if (!activeConversationId || activeConversationKnowledgeBaseId !== uploadKb.id) {
+          const conversation = await kimbalApi.createConversation(uploadKb.id, trimmed.slice(0, 80));
+          activeConversationId = conversation.id;
+          setConversationId(conversation.id);
+          setConversationKnowledgeBaseId(conversation.knowledge_base_id);
+        }
+        setConversationKnowledgeBaseId(uploadKb.id);
+        setActionStatus("Attachments uploaded. Asking from local documents.");
+      }
+
       if (!activeConversationId) {
+        const kb = await kimbalApi.ensureKnowledgeBase();
         const conversation = await kimbalApi.createConversation(kb.id, trimmed.slice(0, 80));
         activeConversationId = conversation.id;
         setConversationId(conversation.id);
+        setConversationKnowledgeBaseId(conversation.knowledge_base_id);
+      } else if (!activeConversationKnowledgeBaseId) {
+        const conv = conversations.find((item) => item.id === activeConversationId);
+        if (conv) {
+          activeConversationKnowledgeBaseId = conv.knowledge_base_id;
+          setConversationKnowledgeBaseId(conv.knowledge_base_id);
+        }
+      }
+
+      if (!activeConversationId) {
+        throw new Error("Could not create or find a conversation.");
       }
       setState("searching");
       for await (const event of kimbalApi.ask(
@@ -657,13 +710,16 @@ export function AskClient() {
           setState("streaming");
         }
         if (event.type === "delta") {
-          const text = event.data.text ?? event.data.delta ?? event.data.content ?? "";
+          const rawText = event.data.text ?? event.data.delta ?? event.data.content ?? "";
+          const text = sanitizeStreamingText(rawText);
           setTurn((current) => ({ ...current, answer: current.answer + text }));
           setState("streaming");
         }
         if (event.type === "done") {
+          streamingFenceOpenRef.current = false;
           setTurn((current) => ({
             ...current,
+            answer: event.data.answer ? stripCodeFencesFromText(event.data.answer) : current.answer,
             messageId: event.data.message_id,
             timings: event.data.timings_ms ?? current.timings,
             model: event.data.model ?? current.model,
@@ -680,7 +736,45 @@ export function AskClient() {
     } catch (cause) {
       setState("error");
       setError(cause instanceof Error ? cause.message : "Unknown error");
+    } finally {
+      streamingFenceOpenRef.current = false;
+      if (hasAttachments) {
+        setAttachmentUploading(false);
+      }
     }
+  }
+
+  function sanitizeStreamingText(chunk: string) {
+    const lines = chunk.split("\n");
+    const output: string[] = [];
+
+    for (const line of lines) {
+      if (/^\s*```/.test(line)) {
+        streamingFenceOpenRef.current = !streamingFenceOpenRef.current;
+        continue;
+      }
+      if (streamingFenceOpenRef.current) {
+        continue;
+      }
+      output.push(line);
+    }
+
+    return output.join("\n");
+  }
+
+  function stripCodeFencesFromText(text: string) {
+    const lines = text.split("\n");
+    const output: string[] = [];
+    let inFence = false;
+    for (const line of lines) {
+      if (/^\s*```/.test(line)) {
+        inFence = !inFence;
+        continue;
+      }
+      if (inFence) continue;
+      output.push(line);
+    }
+    return output.join("\n").trim();
   }
 
   useEffect(() => {
@@ -700,9 +794,11 @@ export function AskClient() {
   function startNewChat() {
     if (busy) return;
     setConversationId(null);
+    setConversationKnowledgeBaseId(null);
     setFocusWorkspace("chat");
     setTurn({ question: "", answer: "", sources: [], timings: {} });
     setInput("");
+    setAttachments([]);
     setError("");
     setFeedback("");
     setHighlightedMarker(null);
@@ -719,6 +815,7 @@ export function AskClient() {
       await kimbalApi.clearConversationHistory(conversationId);
       setTurn({ question: "", answer: "", sources: [], timings: {} });
       setInput("");
+      setAttachments([]);
       setError("");
       setFeedback("");
       setHighlightedMarker(null);
@@ -730,11 +827,65 @@ export function AskClient() {
     }
   }
 
+  function triggerAttachmentPicker() {
+    attachmentInputRef.current?.click();
+  }
+
+  function handleAttachmentInput(event: ChangeEvent<HTMLInputElement>) {
+    const picked = event.target.files ? Array.from(event.target.files) : [];
+    if (!picked.length) return;
+    setAttachments((current) => {
+      const next = [...current, ...picked];
+      if (next.length > maxAttachments) {
+        setActionStatus(`Only ${maxAttachments} attachments allowed. Keeping the latest ${maxAttachments}.`);
+        return next.slice(-maxAttachments);
+      }
+      setActionStatus(`${picked.length} attachment(s) queued.`);
+      return next;
+    });
+    event.target.value = "";
+  }
+
+  function removeAttachment(index: number) {
+    setAttachments((current) => {
+      const next = current.filter((_, i) => i !== index);
+      if (!next.length) setActionStatus("");
+      return next;
+    });
+  }
+
+  function renderAttachmentBar() {
+    if (!attachments.length) return null;
+    return (
+      <div className="mb-2 flex flex-wrap gap-1.5">
+        {attachments.map((item, index) => (
+          <span
+            key={`${item.name}-${item.size}-${item.lastModified}-${index}`}
+            className="inline-flex items-center gap-1 rounded-full border border-line bg-white px-2 py-1 text-[11px] font-semibold text-ink-600"
+          >
+            <Paperclip size={12} />
+            <span className="max-w-[180px] truncate">{item.name}</span>
+            <button
+              type="button"
+              onClick={() => removeAttachment(index)}
+              className="rounded-full p-0.5 transition hover:bg-rose-50 hover:text-rose-600"
+              aria-label={`Remove attachment ${item.name}`}
+            >
+              <X size={11} />
+            </button>
+          </span>
+        ))}
+      </div>
+    );
+  }
+
   async function openConversation(conversation: Conversation) {
     if (busy) return;
     setFocusWorkspace("chat");
     setOpeningConversationId(conversation.id);
     setConversationId(conversation.id);
+    setConversationKnowledgeBaseId(conversation.knowledge_base_id);
+    setAttachments([]);
     setState("preparing");
     setError("");
     setFeedback("");
@@ -761,7 +912,7 @@ export function AskClient() {
 
       setTurn({
         question: userMessage?.content ?? conversation.title,
-        answer: assistantMessage?.content ?? "",
+        answer: stripCodeFencesFromText(assistantMessage?.content ?? ""),
         sources: sourcesFromMessage(assistantMessage),
         timings: assistantMessage?.timings ?? {},
         answerMode: answerModeFromModel(assistantMessage?.model),
@@ -825,7 +976,7 @@ export function AskClient() {
       if (navigator.clipboard) {
         await navigator.clipboard.writeText(text);
       } else if (navigator.share) {
-        await navigator.share({ title: "Kimbal answer", text });
+        await navigator.share({ title: "CVUM answer", text });
       } else {
         throw new Error("Clipboard sharing is not available in this browser");
       }
@@ -836,7 +987,7 @@ export function AskClient() {
     }
   }
 
-  const busy = state === "preparing" || state === "searching" || state === "streaming";
+  const busy = state === "preparing" || state === "searching" || state === "streaming" || attachmentUploading;
   const hasAnswer = Boolean(turn.answer);
   const webReady = webStatus?.configured === true;
   const councilAvailableModels = councilChoicesFromCapabilities(chatCapabilities);
@@ -1296,7 +1447,7 @@ export function AskClient() {
           <div>
             <p className="text-[14px] font-bold text-ink-900">Custom role builder</p>
             <p className="mt-1 text-[12.5px] leading-5 text-ink-500">
-              Answer these prompts once. Kimbal uses the configured LLM to generate a reusable background role prompt.
+              Answer these prompts once. CVUM uses the configured LLM to generate a reusable background role prompt.
             </p>
           </div>
           <button
@@ -1409,7 +1560,7 @@ export function AskClient() {
             aria-label="Home"
           >
             <Sparkles size={16} />
-            {focusRailExpanded && "kimbal"}
+            {focusRailExpanded && "CVUM"}
           </Link>
           <div className={cx("mt-8 flex flex-col gap-3", focusRailExpanded && "w-full")}>
             <button
@@ -1567,7 +1718,7 @@ export function AskClient() {
           <section className="mx-auto flex min-h-[calc(100vh-86px)] max-w-[920px] flex-col items-center justify-center px-6 pb-12">
             {!turn.question && (
               <div className="mb-8 flex flex-col items-center">
-                <h2 className="text-[54px] font-semibold tracking-[-0.04em] text-ink-900">kimbal</h2>
+                <h2 className="text-[54px] font-semibold tracking-[-0.04em] text-ink-900">CVUM</h2>
               </div>
             )}
 
@@ -1583,7 +1734,7 @@ export function AskClient() {
                     <span className="flex h-7 w-7 items-center justify-center rounded-[9px] bg-brand-50 text-brand-500">
                       <Sparkles size={14} />
                     </span>
-                    <p className="text-[14px] font-semibold text-ink-900">Kimbal AI</p>
+                    <p className="text-[14px] font-semibold text-ink-900">CVUM AI</p>
                     {renderRoleBadge()}
                     {renderRunBadge()}
                   </div>
@@ -1610,6 +1761,16 @@ export function AskClient() {
               className="w-full rounded-[18px] border border-[#e8e5dc] bg-white p-3 shadow-[0_18px_60px_-38px_rgba(23,26,44,0.55)] transition focus-within:border-ink-300"
             >
               <input
+                ref={attachmentInputRef}
+                type="file"
+                accept={ASK_ATTACHMENT_ACCEPT}
+                multiple
+                onChange={handleAttachmentInput}
+                className="hidden"
+                aria-label="Upload question attachments"
+              />
+              {renderAttachmentBar()}
+              <input
                 value={input}
                 onChange={(event) => setInput(event.target.value)}
                 placeholder={activePlaceholder}
@@ -1617,6 +1778,15 @@ export function AskClient() {
               />
               <div className="mt-2 flex flex-wrap items-center justify-between gap-3 border-t border-[#f0eee8] pt-3">
                 {renderModeControls(true)}
+                <button
+                  type="button"
+                  onClick={triggerAttachmentPicker}
+                  disabled={busy}
+                  aria-label="Attach documents"
+                  className="inline-flex h-10 w-10 items-center justify-center rounded-full bg-ink-50 text-ink-500 transition hover:bg-brand-100 disabled:opacity-60"
+                >
+                  <Paperclip size={15} />
+                </button>
                 <button
                   type="submit"
                   disabled={busy}
@@ -1633,7 +1803,7 @@ export function AskClient() {
               renderRadarChips()
             )}
             <p className="mt-4 text-[12px] font-semibold text-ink-400">
-              Kimbal can make mistakes. Please verify.
+              CVUM can make mistakes. Please verify.
             </p>
           </section>
           )}
@@ -1676,7 +1846,7 @@ export function AskClient() {
             <ArrowLeft size={18} />
           </Link>
           <h1 className="text-[17px] font-bold text-ink-900">
-            Ask Kimbal <span className="font-normal text-ink-500">({selectedSpace.label})</span>
+            Ask CVUM <span className="font-normal text-ink-500">({selectedSpace.label})</span>
           </h1>
           <div className="ml-auto flex items-center gap-2">
             <GhostButton className="px-3 py-2 text-[12.5px]" disabled={busy} onClick={startNewChat}>
@@ -1747,7 +1917,7 @@ export function AskClient() {
               <span className="flex h-7 w-7 items-center justify-center rounded-[9px] bg-brand-50 text-brand-500">
                 <Sparkles size={14} />
               </span>
-              <p className="text-[14px] font-semibold text-ink-900">Kimbal AI</p>
+              <p className="text-[14px] font-semibold text-ink-900">CVUM AI</p>
               {renderRoleBadge()}
               {renderRunBadge()}
             </div>
@@ -1777,16 +1947,35 @@ export function AskClient() {
           </Card>
         )}
 
+        {renderAttachmentBar()}
         <form
           onSubmit={submit}
           className="mt-5 flex items-center gap-2 rounded-[16px] border border-line bg-white py-1.5 pl-5 pr-1.5 shadow-[var(--shadow-card)] transition focus-within:border-brand-300 focus-within:ring-4 focus-within:ring-brand-50"
         >
+          <input
+            ref={attachmentInputRef}
+            type="file"
+            accept={ASK_ATTACHMENT_ACCEPT}
+            multiple
+            onChange={handleAttachmentInput}
+            className="hidden"
+            aria-label="Upload question attachments"
+          />
           <input
             value={input}
             onChange={(event) => setInput(event.target.value)}
             placeholder={activePlaceholder}
             className="h-10 min-w-0 flex-1 bg-transparent text-[14px] outline-none placeholder:text-ink-400"
           />
+          <button
+            type="button"
+            onClick={triggerAttachmentPicker}
+            disabled={busy}
+            aria-label="Attach documents"
+            className="inline-flex h-10 w-10 items-center justify-center rounded-full text-ink-500 transition hover:bg-brand-50 disabled:opacity-60"
+          >
+            <Paperclip size={14} />
+          </button>
           <button
             type="submit"
             disabled={busy}

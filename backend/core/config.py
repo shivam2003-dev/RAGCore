@@ -10,7 +10,7 @@ class Settings(BaseSettings):
     app_env: str = "local"
     app_debug: bool = False
     app_secret_key: str = "dev-secret-change-me"  # noqa: S105 — overridden via env
-    app_name: str = "kimbal-backend"
+    app_name: str = "cvum-backend"
 
     # database
     database_url: str = "postgresql+asyncpg://kimbal:kimbal_dev_password@localhost:5433/kimbal"
@@ -25,9 +25,10 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     jwt_access_ttl_seconds: int = 900
     jwt_refresh_ttl_seconds: int = 1_209_600
-    auth_allowed_email_domain: str = "kimbal.io"
-    auth_super_admin_email: str = "s.kumar@kimbal.io"
-    auth_default_org_name: str = "Kimbal"
+    auth_disabled: bool = False
+    auth_allowed_email_domain: str = "cvum.io"
+    auth_super_admin_email: str = "s.kumar@cvum.io"
+    auth_default_org_name: str = "CVUM"
 
     # embeddings
     embedding_provider: str = "fake"  # openai | jina | voyage | tei | fake

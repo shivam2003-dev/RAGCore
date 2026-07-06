@@ -4,7 +4,7 @@
 
 Every sidebar item routes to a real page. Pages that do not have backend support must show an honest disabled or read-only state instead of fake data.
 
-## Ask Kimbal
+## Ask CVUM
 
 `/ask` opens as an empty chat when visited directly. It only starts generation when the user submits a question or arrives with an explicit `?q=` query parameter from Home search.
 
@@ -50,7 +50,7 @@ Manual local documents are managed through `/documents`.
 
 ## Documents
 
-The Documents page lists documents from all knowledge bases, including Jira, Confluence, and local uploads. It uses backend pagination with large pages, so large connector syncs are browsable instead of capped at the first 100 rows. New manual uploads go to `Kimbal Local Uploads` so read-only connector KBs are not polluted.
+The Documents page lists documents from all knowledge bases, including Jira, Confluence, and local uploads. It uses backend pagination with large pages, so large connector syncs are browsable instead of capped at the first 100 rows. New manual uploads go to `CVUM Local Uploads` so read-only connector KBs are not polluted.
 
 ## Saved Answers
 

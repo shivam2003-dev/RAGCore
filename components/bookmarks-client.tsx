@@ -19,7 +19,7 @@ export function BookmarksClient() {
         </span>
         <p className="mt-4 text-[16px] font-bold text-ink-900">No document bookmarks API exists yet</p>
         <p className="mx-auto mt-1 max-w-lg text-[13px] leading-relaxed text-ink-500">
-          This page no longer shows synthetic pinned documents. Saved answers are available today and persist locally from Ask Kimbal.
+          This page no longer shows synthetic pinned documents. Saved answers are available today and persist locally from Ask CVUM.
         </p>
         <Link
           href="/saved-answers"

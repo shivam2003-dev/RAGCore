@@ -32,7 +32,7 @@ export function HomeAsk() {
           </span>
           <div>
             <p className="text-[15px] font-semibold text-ink-900">
-              Ask Kimbal <span className="font-normal text-ink-500">(Powered by RAG)</span>
+              Ask CVUM <span className="font-normal text-ink-500">(Powered by RAG)</span>
             </p>
             <p className="text-[12.5px] text-ink-500">Ask anything across your company knowledge</p>
           </div>

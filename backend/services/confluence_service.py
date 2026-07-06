@@ -16,6 +16,7 @@ from core.config import Settings
 from core.exceptions import AuthorizationError, NotFoundError, ProviderError, ValidationError
 from embeddings.base import EmbeddingProvider
 from ingestion.queue import IngestionQueue
+from knowledgebase.source_metadata import normalize_source_metadata
 from models import Document, DocumentStatus, KnowledgeBase, User
 from repositories.audit import AuditLogRepository
 from repositories.knowledge import DocumentRepository, KnowledgeBaseRepository
@@ -86,7 +87,7 @@ class ConfluenceClient:
         auth: httpx.Auth | None = None
         headers = {
             "Accept": "application/json",
-            "User-Agent": "kimbal-knowledge-hub/0.1",
+            "User-Agent": "cvum-knowledge-hub/0.1",
         }
         email = self._settings.confluence_email.strip()
         if mode == "basic" or (mode == "auto" and email):
@@ -517,7 +518,7 @@ def _render_page_html(*, space: ConfluenceSpace, page: ConfluencePage) -> str:
 def _page_metadata(*, space: ConfluenceSpace, page: ConfluencePage) -> dict[str, object]:
     rendered = _render_page_html(space=space, page=page).encode("utf-8")
     updated_at = page.version_created_at
-    return {
+    metadata: dict[str, object] = {
         "source": "confluence",
         "source_type": "confluence",
         "source_family": "confluence",
@@ -554,6 +555,22 @@ def _page_metadata(*, space: ConfluenceSpace, page: ConfluencePage) -> dict[str,
         "confluence_version_created_at": page.version_created_at,
         "source_sha256": hashlib.sha256(rendered).hexdigest(),
     }
+    return normalize_source_metadata(
+        metadata,
+        source_type="confluence",
+        title=page.title,
+        source_id=page.id,
+        source_url=page.url,
+        source_space=space.key,
+        source_version=page.version_number,
+        updated_at=updated_at,
+        status="current",
+        owner=space.name,
+        acl="connector-visible",
+        connector="confluence",
+        connector_scope=space.key,
+        source_sha256=str(metadata["source_sha256"]),
+    )
 
 
 def _confluence_page_allowed(page: ConfluencePage, settings: Settings) -> bool:

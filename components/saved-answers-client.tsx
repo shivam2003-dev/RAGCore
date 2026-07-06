@@ -60,7 +60,7 @@ export function SavedAnswersClient() {
     const text = `${item.question}\n\n${item.answer}`;
     try {
       if (navigator.share) {
-        await navigator.share({ title: "Kimbal saved answer", text });
+        await navigator.share({ title: "CVUM saved answer", text });
       } else if (navigator.clipboard) {
         await navigator.clipboard.writeText(text);
       } else {
@@ -83,7 +83,7 @@ export function SavedAnswersClient() {
     <div>
       <PageHeader
         title="Saved Answers"
-        subtitle="Answers saved from Ask Kimbal in this browser."
+        subtitle="Answers saved from Ask CVUM in this browser."
         actions={
           <span className="rounded-full border border-line bg-white px-3 py-1.5 text-[12.5px] font-semibold text-ink-500">
             {status || `${items.length} saved`}
@@ -150,7 +150,7 @@ export function SavedAnswersClient() {
           <Card className="p-8 text-center">
             <p className="text-[15px] font-bold text-ink-900">No saved answers yet</p>
             <p className="mt-1 text-[13px] text-ink-500">
-              Save an answer from Ask Kimbal and it will appear here.
+              Save an answer from Ask CVUM and it will appear here.
             </p>
           </Card>
         )}

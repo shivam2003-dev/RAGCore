@@ -89,6 +89,7 @@ class RetrievalResult:
     chunks: list[RetrievedChunk] = field(default_factory=list)
     timings_ms: dict[str, int] = field(default_factory=dict)
     confidence: float | None = None
+    query_classification: str = "factual_lookup"
     subqueries: list[str] = field(default_factory=list)
     attempts: list[dict[str, object]] = field(default_factory=list)
     quality_notes: list[str] = field(default_factory=list)
@@ -126,6 +127,7 @@ class ConversationalRetriever:
         assistant_role_prompt: str | None = None,
     ) -> RetrievalResult:
         query = standalone_question or current_question
+        query_classification = _classify_query(query)
         chunks: list[RetrievedChunk] = []
         timings_ms: dict[str, int] = {}
         confidence: float | None = None
@@ -194,6 +196,7 @@ class ConversationalRetriever:
             chunks=_dedupe_chunks(chunks, limit=max(self._settings.retrieval_top_k, 20)),
             timings_ms=timings_ms,
             confidence=confidence,
+            query_classification=query_classification,
             subqueries=subqueries or [query],
             attempts=attempts,
             quality_notes=quality_notes,
@@ -215,7 +218,7 @@ class ConversationalRetriever:
 
         normalized = question.lower()
         non_web = [kb for kb in kbs if kb.name != self._settings.web_search_default_kb_name]
-        candidates = [kb for kb in non_web if kb.name != "Kimbal Local Runbook"] or non_web or kbs
+        candidates = [kb for kb in non_web if kb.name != "CVUM Local Runbook"] or non_web or kbs
 
         named_scope = _named_scope(candidates, normalized)
         if named_scope:
@@ -304,10 +307,10 @@ def _kb_name_contains(kb: KnowledgeBase, needles: tuple[str, ...]) -> bool:
 
 def _kb_source_family(kb: KnowledgeBase) -> str:
     name = kb.name.lower()
-    if "jira" in name or "devo" in name or "cvir" in name:
-        return "jira"
     if "confluence" in name or "devops1" in name or "sre" in name:
         return "confluence"
+    if "jira" in name or "devo" in name or "cvir" in name:
+        return "jira"
     if "web" in name:
         return "web"
     return "knowledge"
@@ -362,6 +365,23 @@ def _decompose_query(query: str) -> list[str]:
     if source_signals < 2:
         return [normalized]
     return _dedupe_strings([*parts, normalized])[:3]
+
+
+def _classify_query(query: str) -> str:
+    normalized = query.lower()
+    if _contains_any(normalized, COUNT_TERMS):
+        return "jira_count_stat" if _contains_any(normalized, JIRA_TERMS) else "count_stat"
+    if _contains_any(normalized, DOC_INTENT_TERMS):
+        if any(term in normalized for term in ("architecture", "design", "diagram", "topology", "hld", "lld")):
+            return "architecture_docs"
+        return "procedure_runbook"
+    if any(term in normalized for term in ("rca", "root cause", "incident", "outage", "alarm", "failure")):
+        return "multi_hop_rca"
+    if any(term in normalized for term in ("compare", "difference", "versus", " vs ")):
+        return "comparison"
+    if any(term in normalized for term in ("summarize", "summary", "overview", "all ", "common", "trend")):
+        return "global_summary"
+    return "factual_lookup"
 
 
 def _dedupe_strings(values: list[str]) -> list[str]:

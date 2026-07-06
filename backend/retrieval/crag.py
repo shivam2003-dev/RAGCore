@@ -16,6 +16,9 @@ from retrieval.context import RetrievalContext, RetrievedChunk
 MIN_ACCEPT_CONFIDENCE = 0.22
 MIN_STRONG_CONFIDENCE = 0.34
 TOKEN_RE = re.compile(r"[a-zA-Z][a-zA-Z0-9_+-]{2,}")
+IDENTIFIER_RE = re.compile(
+    r"\b(?:[A-Z][A-Z0-9]{1,9}-\d+|[a-zA-Z0-9][a-zA-Z0-9.-]{2,}\.[a-zA-Z]{2,}|[a-zA-Z0-9_-]{3,})\b"
+)
 STOPWORDS = {
     "and",
     "are",
@@ -164,18 +167,21 @@ class HeuristicEvaluator:
         mean_score = _clamp01(sum(_clamp01(chunk.score) for chunk in top) / len(top))
         lexical = _mean([_overlap(query_tokens, _chunk_tokens(chunk)) for chunk in top])
         source_fit = _mean([_source_fit(query_tokens, chunk) for chunk in top])
+        identifier_fit = _mean([_identifier_fit(ctx.effective_query, chunk) for chunk in top])
         diversity = len({chunk.document_id for chunk in top}) / len(top)
 
         score = (
-            (0.36 * top_score)
-            + (0.20 * mean_score)
-            + (0.26 * lexical)
-            + (0.12 * source_fit)
+            (0.30 * top_score)
+            + (0.17 * mean_score)
+            + (0.24 * lexical)
+            + (0.13 * source_fit)
+            + (0.10 * identifier_fit)
             + (0.06 * diversity)
         )
         confidence = round(_clamp01(score), 4)
         ctx.quality_notes.append(
-            f"retrieval_quality={confidence} lexical={round(lexical, 3)} source_fit={round(source_fit, 3)}"
+            f"retrieval_quality={confidence} lexical={round(lexical, 3)} "
+            f"source_fit={round(source_fit, 3)} identifier_fit={round(identifier_fit, 3)}"
         )
         return confidence
 
@@ -192,15 +198,17 @@ class HeuristicReranker:
         for rank, chunk in enumerate(chunks):
             lexical = _overlap(query_tokens, _chunk_tokens(chunk))
             source_fit = _source_fit(query_tokens, chunk)
+            identifier_fit = _identifier_fit(ctx.effective_query, chunk)
             freshness = _freshness(chunk.metadata)
             position = 1 / math.sqrt(rank + 1)
             chunk.score = round(
                 _clamp01(
-                    (0.58 * _clamp01(chunk.score))
-                    + (0.24 * lexical)
-                    + (0.10 * source_fit)
+                    (0.46 * _clamp01(chunk.score))
+                    + (0.22 * lexical)
+                    + (0.14 * source_fit)
+                    + (0.12 * identifier_fit)
                     + (0.04 * freshness)
-                    + (0.04 * position)
+                    + (0.02 * position)
                 ),
                 6,
             )
@@ -258,11 +266,44 @@ def _chunk_tokens(chunk: RetrievedChunk) -> set[str]:
         chunk.document_title,
         chunk.content[:1800],
         str(metadata.get("source") or ""),
+        str(metadata.get("source_id") or ""),
+        str(metadata.get("source_inventory_key") or ""),
         str(metadata.get("jira_issue_key") or ""),
         str(metadata.get("jira_issue_status") or ""),
         str(metadata.get("confluence_space_key") or ""),
+        str(metadata.get("section_title") or ""),
+        str(metadata.get("chunk_heading_path") or ""),
     ]
     return _tokens(" ".join(values))
+
+
+def _identifier_fit(query: str, chunk: RetrievedChunk) -> float:
+    identifiers = _identifiers(query)
+    if not identifiers:
+        return 0.0
+    metadata = chunk.metadata or {}
+    haystack = " ".join(
+        str(value or "")
+        for value in (
+            chunk.document_title,
+            chunk.content[:1400],
+            metadata.get("source_id"),
+            metadata.get("source_inventory_key"),
+            metadata.get("source_url"),
+            metadata.get("url"),
+            metadata.get("jira_issue_key"),
+            metadata.get("confluence_page_id"),
+            metadata.get("section_title"),
+            metadata.get("chunk_heading_path"),
+        )
+    ).lower()
+    matched = sum(1 for identifier in identifiers if identifier.lower() in haystack)
+    return _clamp01(matched / len(identifiers))
+
+
+def _identifiers(text: str) -> set[str]:
+    identifiers = {match.group(0) for match in IDENTIFIER_RE.finditer(text)}
+    return {identifier for identifier in identifiers if identifier.lower() not in STOPWORDS}
 
 
 def _source_fit(query_tokens: set[str], chunk: RetrievedChunk) -> float:

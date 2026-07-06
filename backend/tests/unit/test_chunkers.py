@@ -3,7 +3,7 @@ from ingestion.chunkers.code import CodeChunker
 from ingestion.chunkers.markdown import MarkdownChunker
 from ingestion.chunkers.recursive import RecursiveChunker
 from ingestion.chunkers.sliding import SlidingWindowChunker
-from ingestion.pipeline import _chunk_metadata, _contextual_content
+from ingestion.pipeline import _chunk_metadata, _contextual_content, select_chunker
 
 
 def test_recursive_respects_chunk_size():
@@ -26,6 +26,25 @@ def test_markdown_keeps_heading_metadata():
     assert len(chunks) >= 3
     setup = next(c for c in chunks if "Install" in c.content)
     assert "Setup" in setup.metadata["headings"]
+    assert setup.metadata["section_title"] == "Setup"
+    assert setup.metadata["chunk_kind"] == "section"
+    assert setup.metadata["parent_context"]
+
+
+def test_markdown_marks_table_and_procedure_sections():
+    md = "# HES Architecture\n\n## Flow\n\n| Step | Owner |\n| Ingest | SRE |\n\n## Runbook\n\n1. Verify alarm.\n2. Restart broker."
+    chunks = MarkdownChunker().chunk(md, chunk_size=200, overlap=20)
+
+    table = next(c for c in chunks if "Owner" in c.content)
+    runbook = next(c for c in chunks if "Restart broker" in c.content)
+
+    assert table.metadata["contains_table"] is True
+    assert runbook.metadata["contains_procedure"] is True
+
+
+def test_html_uses_markdown_aware_chunker():
+    assert isinstance(select_chunker(".html"), MarkdownChunker)
+    assert isinstance(select_chunker(".htm"), MarkdownChunker)
 
 
 def test_markdown_without_headings_falls_back():
@@ -58,7 +77,7 @@ def test_count_tokens_positive():
 
 def test_contextual_content_prepends_source_metadata():
     metadata = _chunk_metadata(
-        chunk_metadata={"headings": ["Architecture", "Broker"]},
+        chunk_metadata={"headings": ["Architecture", "Broker"], "parent_context": "Architecture Broker overview."},
         extracted_metadata={"format": "html"},
         document_metadata={
             "source": "Confluence DevOps1",
@@ -76,4 +95,5 @@ def test_contextual_content_prepends_source_metadata():
     assert "Title: HES Architecture" in content
     assert "Space/project: SRE" in content
     assert "Section: Architecture > Broker" in content
+    assert "Parent section context:" in content
     assert content.endswith("The broker receives meter events.")

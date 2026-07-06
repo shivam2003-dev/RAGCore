@@ -215,6 +215,7 @@ class ChatService:
                 "source_mode": source_mode,
                 "answer_mode": answer_mode,
                 "standalone_question": standalone_question,
+                "query_classification": retrieval.query_classification,
                 "subqueries": retrieval.subqueries,
                 "retrieval_attempts": retrieval.attempts,
                 "quality_notes": retrieval.quality_notes,
@@ -281,6 +282,7 @@ class ChatService:
         yield ChatEvent(
             type="done",
             data={
+                "answer": answer,
                 "message_id": str(message_id),
                 "usage": {"input_tokens": usage.input_tokens, "output_tokens": usage.output_tokens},
                 "latency_ms": latency_ms,
@@ -289,6 +291,7 @@ class ChatService:
                 "source_mode": source_mode,
                 "answer_mode": answer_mode,
                 "standalone_question": standalone_question,
+                "query_classification": retrieval.query_classification,
                 "verification": _verification_summary(answer, chunks),
             },
         )
@@ -361,6 +364,7 @@ class ChatService:
         yield ChatEvent(
             type="done",
             data={
+                "answer": answer,
                 "message_id": str(message_id),
                 "usage": {"input_tokens": 0, "output_tokens": 0},
                 "latency_ms": latency_ms,
@@ -407,6 +411,7 @@ class ChatService:
         yield ChatEvent(
             type="done",
             data={
+                "answer": answer,
                 "message_id": str(message_id),
                 "usage": {"input_tokens": 0, "output_tokens": 0},
                 "latency_ms": latency_ms,
@@ -705,7 +710,7 @@ class ChatService:
 
         normalized = question.lower()
         non_web_kbs = [kb for kb in kbs if kb.name != self._settings.web_search_default_kb_name]
-        external_kbs = [kb for kb in non_web_kbs if kb.name != "Kimbal Local Runbook"]
+        external_kbs = [kb for kb in non_web_kbs if kb.name != "CVUM Local Runbook"]
         candidates = external_kbs or non_web_kbs or kbs
 
         if _contains_any(normalized, JIRA_TERMS):
@@ -825,7 +830,8 @@ def _should_refuse_for_weak_retrieval(
 
 
 def _verify_and_shape_answer(answer: str, chunks: list[RetrievedChunk]) -> str:
-    clean = _remove_invalid_citation_markers(answer.strip(), len(chunks))
+    clean = _normalize_generated_answer(answer)
+    clean = _remove_invalid_citation_markers(clean.strip(), len(chunks))
     if not clean:
         return "I couldn't generate an answer from the retrieved sources."
     if _is_refusal(clean) or not chunks:
@@ -841,6 +847,20 @@ def _verify_and_shape_answer(answer: str, chunks: list[RetrievedChunk]) -> str:
             f"Review the top retrieved sources instead: {markers}"
         )
     return _compact_answer(clean)
+
+
+def _normalize_generated_answer(answer: str) -> str:
+    lines = answer.splitlines()
+    normalized: list[str] = []
+    in_fence = False
+    for line in lines:
+        if re.match(r"^\s*```", line):
+            in_fence = not in_fence
+            continue
+        if in_fence:
+            continue
+        normalized.append(line)
+    return "\n".join(normalized).strip()
 
 
 def _verification_summary(answer: str, chunks: list[RetrievedChunk]) -> dict[str, object]:
@@ -890,6 +910,8 @@ def _compact_answer(answer: str) -> str:
     compact: list[str] = []
     blank = False
     for line in lines:
+        if re.match(r"^\s*```", line):
+            continue
         is_blank = not line.strip()
         if is_blank and blank:
             continue

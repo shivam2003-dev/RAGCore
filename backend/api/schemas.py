@@ -220,6 +220,9 @@ class SourceMetricOut(BaseModel):
     knowledge_base_id: uuid.UUID | None = None
     name: str
     source_type: str
+    source_scope: str | None = None
+    connector: str | None = None
+    health: str = "unknown"
     documents: int
     ready_documents: int
     pending_documents: int = 0

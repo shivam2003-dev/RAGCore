@@ -3,9 +3,9 @@ name: backend-ci
 on:
   push:
     branches: [main]
-    paths: ["backend/**", ".github/workflows/backend-ci.yml"]
+    paths: ["backend/**", "evals/golden/**", ".github/workflows/backend-ci.yml"]
   pull_request:
-    paths: ["backend/**", ".github/workflows/backend-ci.yml"]
+    paths: ["backend/**", "evals/golden/**", ".github/workflows/backend-ci.yml"]
 
 defaults:
   run:

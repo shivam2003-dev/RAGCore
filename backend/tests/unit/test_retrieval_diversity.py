@@ -2,7 +2,7 @@ import uuid
 
 from models import KnowledgeBase
 from retrieval.context import RetrievedChunk
-from services.conversational_retriever import _dedupe_chunks, _role_scope
+from services.conversational_retriever import _classify_query, _dedupe_chunks, _kb_source_family, _role_scope
 
 
 def _chunk(source_key: str, score: float) -> RetrievedChunk:
@@ -60,6 +60,11 @@ def test_devops_role_scope_prefers_devo_and_devops1_sources():
     assert [kb.name for kb in scoped] == ["Jira DEVO", "Confluence DevOps1"]
 
 
+def test_devops1_confluence_is_not_misclassified_as_jira():
+    assert _kb_source_family(_kb("Confluence DevOps1")) == "confluence"
+    assert _kb_source_family(_kb("Jira DEVO")) == "jira"
+
+
 def test_sre_role_scope_prefers_cvir_sre_and_as_sources():
     kbs = [
         _kb("Jira DEVO"),
@@ -72,3 +77,9 @@ def test_sre_role_scope_prefers_cvir_sre_and_as_sources():
     scoped = _role_scope(kbs, "SRE Space")
 
     assert [kb.name for kb in scoped] == ["Jira CVIR", "Confluence SRE", "Confluence AS"]
+
+
+def test_query_classifier_identifies_architecture_and_jira_analytics():
+    assert _classify_query("How many Jira issues are open in CVIR?") == "jira_count_stat"
+    assert _classify_query("Explain HES Architecture") == "architecture_docs"
+    assert _classify_query("What is the restart runbook for broker?") == "procedure_runbook"

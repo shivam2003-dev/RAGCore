@@ -191,6 +191,9 @@ export type SourceMetric = {
   knowledge_base_id: string | null;
   name: string;
   source_type: string;
+  source_scope: string | null;
+  connector: string | null;
+  health: string;
   documents: number;
   ready_documents: number;
   pending_documents: number;
@@ -481,18 +484,21 @@ export type AskStreamEvent =
         hits?: RagSource[];
         source_mode?: SourceMode;
         answer_mode?: AnswerMode;
+        query_classification?: string;
       };
     }
   | { type: "delta"; data: { text?: string; delta?: string; content?: string } }
   | {
       type: "done";
       data: {
+        answer?: string;
         message_id?: string;
         timings_ms?: Record<string, number>;
         citations?: RagSource[];
         model?: string | null;
         source_mode?: SourceMode;
         answer_mode?: AnswerMode;
+        query_classification?: string;
       };
     }
   | { type: "error"; data: { code?: string; message?: string } };
@@ -527,9 +533,9 @@ export type UserCreateInput = {
 };
 
 const API_BASE =
-  process.env.NEXT_PUBLIC_KIMBAL_API_BASE?.replace(/\/$/, "") ?? "http://localhost:8000/api/v1";
+  process.env.NEXT_PUBLIC_CVUM_API_BASE?.replace(/\/$/, "") ?? "http://localhost:8000/api/v1";
 const SESSION_KEY = "kimbal.local.session.v1";
-const PREFERRED_KB_NAMES = ["Jira DEVO", "Confluence DevOps1", "Kimbal Local Uploads"];
+const PREFERRED_KB_NAMES = ["Jira DEVO", "Confluence DevOps1", "CVUM Local Uploads"];
 const SESSION_CACHE_MS = 30_000;
 const LIVE_CACHE_MS = 15_000;
 
@@ -576,7 +582,7 @@ async function parseError(response: Response): Promise<ApiError> {
   return new ApiError(message, response.status, code);
 }
 
-export class KimbalApi {
+export class CVUMApi {
   private token: TokenPair | null = readJson<TokenPair>(SESSION_KEY);
   private sessionPromise: Promise<UserOut> | null = null;
   private sessionUser: UserOut | null = null;
@@ -668,9 +674,6 @@ export class KimbalApi {
   }
 
   private async ensureSessionOnce(): Promise<UserOut> {
-    if (!this.hasSession()) {
-      throw new ApiError("Login required", 401, "login_required");
-    }
     if (this.sessionUser && Date.now() - this.sessionCheckedAt < SESSION_CACHE_MS) {
       return this.sessionUser;
     }
@@ -718,7 +721,7 @@ export class KimbalApi {
     return this.request<KnowledgeBase>("/knowledge-bases", {
       method: "POST",
       body: {
-        name: "Kimbal Local Uploads",
+        name: "CVUM Local Uploads",
         description: "Operator-uploaded documents used when no external knowledge base has been synced yet.",
       },
     });
@@ -727,12 +730,12 @@ export class KimbalApi {
   async ensureUploadKnowledgeBase(): Promise<KnowledgeBase> {
     await this.ensureSession();
     const existing = await this.listKnowledgeBases();
-    const kb = existing.find((item) => item.name === "Kimbal Local Uploads");
+    const kb = existing.find((item) => item.name === "CVUM Local Uploads");
     if (kb) return kb;
     return this.request<KnowledgeBase>("/knowledge-bases", {
       method: "POST",
       body: {
-        name: "Kimbal Local Uploads",
+        name: "CVUM Local Uploads",
         description: "Operator-uploaded documents kept separate from read-only external source syncs.",
       },
     });
@@ -924,7 +927,6 @@ export class KimbalApi {
     council?: CouncilConfig,
     assistantRole?: AssistantRoleConfig
   ): AsyncGenerator<AskStreamEvent> {
-    if (!this.token?.access_token) throw new ApiError("Missing session", 401);
     const body: {
       question: string;
       source_mode: SourceMode;
@@ -942,12 +944,13 @@ export class KimbalApi {
       body.council_models = council.models;
       body.council_chair_model = council.chairModel;
     }
+    const headers = new Headers({ "Content-Type": "application/json" });
+    if (this.token?.access_token) {
+      headers.set("Authorization", `Bearer ${this.token.access_token}`);
+    }
     const response = await fetch(`${API_BASE}/conversations/${conversationId}/ask`, {
       method: "POST",
-      headers: {
-        Authorization: `Bearer ${this.token.access_token}`,
-        "Content-Type": "application/json",
-      },
+      headers,
       body: JSON.stringify(body),
     });
     if (!response.ok || !response.body) throw await parseError(response);
@@ -987,4 +990,4 @@ function decodeSseFrame(frame: string): AskStreamEvent | null {
   }
 }
 
-export const kimbalApi = new KimbalApi();
+export const kimbalApi = new CVUMApi();

@@ -28,7 +28,7 @@ EMBED_BATCH_SIZE = 64
 
 
 def select_chunker(suffix: str) -> Chunker:
-    if suffix == ".md":
+    if suffix in {".md", ".html", ".htm"}:
         return MarkdownChunker()
     if suffix in _CODE_SUFFIXES:
         return CodeChunker()
@@ -154,6 +154,8 @@ def _chunk_metadata(
         or "upload"
     ).lower()
     merged["chunk_heading_path"] = heading_path
+    if heading_path and not merged.get("section_title"):
+        merged["section_title"] = heading_path.split(" > ")[-1]
     merged["chunk_source_key"] = str(source_key or "")
     merged["chunk_source_family"] = source_family
     merged["chunk_strategy_version"] = str(merged.get("chunk_strategy_version") or "phase2-structure-v1")
@@ -167,6 +169,8 @@ def _contextual_content(content: str, metadata: dict) -> str:
     status = str(metadata.get("status") or "").strip()
     updated = str(metadata.get("source_updated_at") or metadata.get("updated_at") or "").strip()
     headings = str(metadata.get("chunk_heading_path") or "").strip()
+    kind = str(metadata.get("chunk_kind") or "").strip()
+    parent_context = str(metadata.get("parent_context") or "").strip()
     prefix_parts = [
         f"Source type: {source}" if source else "",
         f"Title: {title}" if title else "",
@@ -174,6 +178,8 @@ def _contextual_content(content: str, metadata: dict) -> str:
         f"Status: {status}" if status else "",
         f"Updated: {updated}" if updated else "",
         f"Section: {headings}" if headings else "",
+        f"Chunk kind: {kind}" if kind else "",
+        f"Parent section context: {parent_context}" if parent_context and parent_context not in content else "",
     ]
     prefix = "\n".join(part for part in prefix_parts if part)
     return f"{prefix}\n\n{content.strip()}" if prefix else content.strip()

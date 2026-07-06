@@ -1,7 +1,7 @@
 [project]
-name = "kimbal-backend"
+name = "cvum-backend"
 version = "0.1.0"
-description = "Kimbal Knowledge Hub — enterprise RAG backend"
+description = "CVUM Knowledge Hub — enterprise RAG backend"
 requires-python = ">=3.13"
 dependencies = [
     # web
@@ -34,6 +34,9 @@ dependencies = [
     "beautifulsoup4>=4.12",
     "defusedxml>=0.7",
     "markdown-it-py>=3.0",
+    "pdf2image>=1.17",
+    "pytesseract>=0.3",
+    "pillow>=10.4",
 ]
 
 [project.optional-dependencies]

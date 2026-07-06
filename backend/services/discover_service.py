@@ -290,7 +290,7 @@ class DiscoverService:
         async with httpx.AsyncClient(timeout=self._settings.web_search_request_timeout_seconds) as client:
             response = await client.get(
                 url,
-                headers={"Accept": "text/html,application/rss+xml,application/xml", "User-Agent": "KimbalDiscover/1.0"},
+                headers={"Accept": "text/html,application/rss+xml,application/xml", "User-Agent": "CVUMDiscover/1.0"},
                 params=params,
                 follow_redirects=True,
             )

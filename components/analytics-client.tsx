@@ -24,7 +24,7 @@ export function AnalyticsClient() {
     <div>
       <PageHeader
         title="Analytics"
-        subtitle="Live usage data from the Kimbal backend."
+        subtitle="Live usage data from the CVUM backend."
         actions={<GhostButton disabled><Download size={15} /> Export unavailable</GhostButton>}
       />
 

@@ -13,6 +13,7 @@ from ingestion.extractors.base import MAGIC_BYTES
 from ingestion.extractors.registry import SUPPORTED_SUFFIXES
 from ingestion.pipeline import ingest_document
 from ingestion.queue import IngestionQueue
+from knowledgebase.source_metadata import normalize_source_metadata
 from models import Document, DocumentStatus, DocumentVersion, User
 from repositories.audit import AuditLogRepository
 from repositories.knowledge import DocumentRepository, KnowledgeBaseRepository
@@ -82,6 +83,18 @@ class DocumentService:
         if not content:
             raise ValidationError("Empty file")
         self._validate_magic(suffix, content)
+        content_hash = hashlib.sha256(content).hexdigest()
+        normalized_metadata = normalize_source_metadata(
+            metadata,
+            source_type=str((metadata or {}).get("source_type") or (metadata or {}).get("source") or "upload"),
+            title=title or Path(filename or "untitled").name,
+            source_sha256=content_hash,
+            filename=filename,
+            file_type=suffix.lstrip(".") or "unknown",
+            connector=str((metadata or {}).get("connector") or (metadata or {}).get("source") or "upload"),
+            connector_scope=str((metadata or {}).get("connector_scope") or (metadata or {}).get("source_space") or "uploads"),
+            acl=str((metadata or {}).get("acl") or "user-upload"),
+        )
 
         if existing_document_id:  # new version of an existing document
             doc = await self._docs.get(existing_document_id)
@@ -91,8 +104,7 @@ class DocumentService:
             doc.status = DocumentStatus.UPLOADED
             doc.error = None
             doc.title = title or doc.title
-            if metadata is not None:
-                doc.doc_metadata = metadata
+            doc.doc_metadata = normalized_metadata
             version_number = doc.current_version
         else:
             doc = Document(
@@ -102,7 +114,7 @@ class DocumentService:
                 title=title or Path(filename or "untitled").name,
                 source_type=suffix.lstrip("."),
                 status=DocumentStatus.UPLOADED,
-                doc_metadata=metadata or {},
+                doc_metadata=normalized_metadata,
             )
             self._docs.add(doc)
             version_number = 1
@@ -113,7 +125,7 @@ class DocumentService:
             document_id=doc.id,
             version=version_number,
             file_path=str(stored_path),
-            file_sha256=hashlib.sha256(content).hexdigest(),
+            file_sha256=content_hash,
             file_size_bytes=len(content),
             created_at=utcnow(),
         )

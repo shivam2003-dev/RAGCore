@@ -8,7 +8,7 @@ import { Card, PageHeader, PrimaryButton, GhostButton, Badge } from "@/component
 import { kimbalApi, type DocumentLineage, type DocumentOut, type KnowledgeBase } from "@/lib/kimbal-api";
 
 const freshTone = { ready: "green", processing: "amber", uploaded: "amber", failed: "red", deleted: "gray" } as const;
-const LEGACY_SEED_KB_NAME = "Kimbal Local Runbook";
+const LEGACY_SEED_KB_NAME = "CVUM Local Runbook";
 const PAGE_SIZE = 500;
 
 export function DocumentsClient() {
@@ -40,7 +40,7 @@ export function DocumentsClient() {
         visibleKbs = [await kimbalApi.ensureUploadKnowledgeBase()];
       }
       setKnowledgeBases(visibleKbs);
-      setKb(visibleKbs.find((item) => item.name === "Kimbal Local Uploads") ?? visibleKbs[0]);
+      setKb(visibleKbs.find((item) => item.name === "CVUM Local Uploads") ?? visibleKbs[0]);
       const kbById = new Map(visibleKbs.map((item) => [item.id, item.name]));
       const sourceKb = sourceFilter
         ? visibleKbs.find((item) => item.name.toLowerCase() === sourceFilter.toLowerCase())
@@ -63,13 +63,16 @@ export function DocumentsClient() {
   }
 
   async function uploadFile(event: ChangeEvent<HTMLInputElement>) {
-    const file = event.target.files?.[0];
-    if (!file) return;
+    const files = Array.from(event.target.files ?? []);
+    if (!files.length) return;
     setBusy(true);
-    setStatus(`Uploading ${file.name}`);
+    const fileNames = files.map((file) => file.name).join(", ");
+    setStatus(`Uploading ${files.length} file${files.length === 1 ? "" : "s"}: ${fileNames}`);
     try {
-      const nextKb = kb?.name === "Kimbal Local Uploads" ? kb : await kimbalApi.ensureUploadKnowledgeBase();
-      await kimbalApi.uploadDocument(nextKb.id, file);
+      const nextKb = kb?.name === "CVUM Local Uploads" ? kb : await kimbalApi.ensureUploadKnowledgeBase();
+      for (const file of files) {
+        await kimbalApi.uploadDocument(nextKb.id, file);
+      }
       event.target.value = "";
       await refresh(0);
     } catch (error) {
@@ -155,7 +158,14 @@ export function DocumentsClient() {
                 Clear filter
               </Link>
             )}
-            <input ref={fileInput} type="file" accept=".md,.txt,.pdf" className="hidden" onChange={(event) => void uploadFile(event)} />
+            <input
+              ref={fileInput}
+              type="file"
+              accept=".md,.txt,.pdf,.docx,.csv,.html,.png,.jpg,.jpeg,.gif,.bmp,.webp,.tif,.tiff"
+              multiple
+              className="hidden"
+              onChange={(event) => void uploadFile(event)}
+            />
             <PrimaryButton onClick={() => fileInput.current?.click()} disabled={busy}>
               <Upload size={15} /> Upload Documents
             </PrimaryButton>
