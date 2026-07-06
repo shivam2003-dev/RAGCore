@@ -13,6 +13,8 @@ def test_jira_issue_rendering_indexes_assignment_and_status_fields() -> None:
         status_category="To Do",
         status_category_key="new",
         priority="Medium",
+        labels=[],
+        components=[],
         assignee="Shivam Kumar",
         assignee_email="s.kumar@kimbal.io",
         assignee_account_id="abc-123",
