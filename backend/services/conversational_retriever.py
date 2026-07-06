@@ -328,15 +328,29 @@ def _dedupe_strings(values: list[str]) -> list[str]:
 
 def _dedupe_chunks(chunks: list[RetrievedChunk], *, limit: int | None = None) -> list[RetrievedChunk]:
     seen: set[uuid.UUID] = set()
+    per_source: dict[str, int] = {}
     deduped: list[RetrievedChunk] = []
     for chunk in sorted(chunks, key=lambda item: item.score, reverse=True):
         if chunk.chunk_id in seen:
             continue
+        source_key = _source_dedupe_key(chunk)
+        if per_source.get(source_key, 0) >= 2:
+            continue
         seen.add(chunk.chunk_id)
+        per_source[source_key] = per_source.get(source_key, 0) + 1
         deduped.append(chunk)
         if limit is not None and len(deduped) >= limit:
             break
     return deduped
+
+
+def _source_dedupe_key(chunk: RetrievedChunk) -> str:
+    metadata = chunk.metadata or {}
+    for key in ("chunk_source_key", "source_id", "issue_key", "page_id", "jira_issue_key", "confluence_page_id"):
+        value = metadata.get(key)
+        if isinstance(value, (str, int)) and str(value):
+            return str(value)
+    return str(chunk.document_id)
 
 
 def _confidence_from_chunks(chunks: list[RetrievedChunk]) -> float | None:

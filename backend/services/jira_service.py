@@ -21,6 +21,7 @@ from repositories.knowledge import DocumentRepository, KnowledgeBaseRepository
 from services.document_service import DocumentService
 
 JsonDict = dict[str, object]
+CHUNK_STRATEGY_VERSION = "phase2-structure-v1"
 JIRA_FIELDS = (
     "summary,status,issuetype,priority,labels,components,assignee,reporter,"
     "updated,created,description,project"
@@ -597,6 +598,7 @@ def _issue_metadata(*, board: JiraBoard, issue: JiraIssue) -> dict[str, object]:
         "connector": "jira",
         "connector_scope": project or str(board.id),
         "connector_sync_id": f"jira:{project or 'unknown'}:{issue.key}:{issue.updated_at or issue.id}",
+        "chunk_strategy_version": CHUNK_STRATEGY_VERSION,
         "permission_state": "visible",
         "priority": issue.priority,
         "issue_type": issue.issue_type,
@@ -654,7 +656,10 @@ def _is_current(existing: Document | None, metadata: dict[str, object]) -> bool:
     if existing is None or existing.status != DocumentStatus.READY:
         return False
     existing_metadata = existing.doc_metadata or {}
-    return existing_metadata.get("source_sha256") == metadata.get("source_sha256")
+    return (
+        existing_metadata.get("source_sha256") == metadata.get("source_sha256")
+        and existing_metadata.get("chunk_strategy_version") == CHUNK_STRATEGY_VERSION
+    )
 
 
 def _dict(value: object) -> JsonDict:

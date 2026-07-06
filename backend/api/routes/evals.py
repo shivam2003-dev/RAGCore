@@ -233,7 +233,10 @@ def _evaluate_golden_case(
     expected = [source.lower() for source in case.expected_source_types]
     returned = [_source_family(chunk) for chunk in chunks]
     returned_unique = _dedupe_strings(returned)
-    relevant_flags = [source in expected for source in returned]
+    relevant_flags = [
+        _matches_expected_source(case, chunk, source)
+        for chunk, source in zip(chunks, returned, strict=False)
+    ]
     source_recall = _source_recall(expected, returned_unique)
     top_k_hit = 1.0 if any(relevant_flags) else 0.0
     mrr = _mrr(relevant_flags)
@@ -441,6 +444,29 @@ def _source_recall(expected: list[str], returned: list[str]) -> float:
     if not expected:
         return 1.0
     return _clamp01(len(set(expected) & set(returned)) / len(set(expected)))
+
+
+def _matches_expected_source(case: GoldenEvalCaseOut, chunk: RetrievedChunk, source_family: str) -> bool:
+    metadata = chunk.metadata or {}
+    expected_ids = {value.lower() for value in case.expected_source_ids}
+    expected_titles = {value.lower() for value in case.expected_source_titles}
+    ids = {
+        str(metadata.get(key) or "").lower()
+        for key in (
+            "chunk_source_key",
+            "source_id",
+            "issue_key",
+            "page_id",
+            "jira_issue_key",
+            "confluence_page_id",
+        )
+    }
+    title = chunk.document_title.lower()
+    if expected_ids and expected_ids & ids:
+        return True
+    if expected_titles and any(expected_title and expected_title in title for expected_title in expected_titles):
+        return True
+    return source_family in {source.lower() for source in case.expected_source_types}
 
 
 def _context_precision(relevant_flags: list[bool]) -> float:

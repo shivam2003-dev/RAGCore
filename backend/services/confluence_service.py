@@ -65,6 +65,7 @@ class ConfluenceSyncResult:
 
 
 JsonDict = dict[str, object]
+CHUNK_STRATEGY_VERSION = "phase2-structure-v1"
 
 
 class ConfluenceClient:
@@ -541,6 +542,7 @@ def _page_metadata(*, space: ConfluenceSpace, page: ConfluencePage) -> dict[str,
         "connector": "confluence",
         "connector_scope": space.key,
         "connector_sync_id": f"confluence:{space.key}:{page.id}:{page.version_number or 'unknown'}",
+        "chunk_strategy_version": CHUNK_STRATEGY_VERSION,
         "permission_state": "visible",
         "confluence_space_id": space.id,
         "confluence_space_key": space.key,
@@ -573,7 +575,10 @@ def _is_current(existing: Document | None, page: ConfluencePage) -> bool:
     if existing is None or existing.status != DocumentStatus.READY:
         return False
     metadata = existing.doc_metadata or {}
-    return metadata.get("confluence_version") == page.version_number
+    return (
+        metadata.get("confluence_version") == page.version_number
+        and metadata.get("chunk_strategy_version") == CHUNK_STRATEGY_VERSION
+    )
 
 
 def _dict(value: object) -> JsonDict:

@@ -3,6 +3,7 @@ from ingestion.chunkers.code import CodeChunker
 from ingestion.chunkers.markdown import MarkdownChunker
 from ingestion.chunkers.recursive import RecursiveChunker
 from ingestion.chunkers.sliding import SlidingWindowChunker
+from ingestion.pipeline import _chunk_metadata, _contextual_content
 
 
 def test_recursive_respects_chunk_size():
@@ -53,3 +54,26 @@ def test_sliding_window_parent_child():
 
 def test_count_tokens_positive():
     assert count_tokens("hello world") >= 2
+
+
+def test_contextual_content_prepends_source_metadata():
+    metadata = _chunk_metadata(
+        chunk_metadata={"headings": ["Architecture", "Broker"]},
+        extracted_metadata={"format": "html"},
+        document_metadata={
+            "source": "Confluence DevOps1",
+            "source_type": "confluence",
+            "source_title": "HES Architecture",
+            "space": "SRE",
+            "source_updated_at": "2026-07-04T00:00:00Z",
+        },
+    )
+
+    content = _contextual_content("The broker receives meter events.", metadata)
+
+    assert metadata["chunk_source_family"] == "confluence"
+    assert "Source type: confluence" in content
+    assert "Title: HES Architecture" in content
+    assert "Space/project: SRE" in content
+    assert "Section: Architecture > Broker" in content
+    assert content.endswith("The broker receives meter events.")

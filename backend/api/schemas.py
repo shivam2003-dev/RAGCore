@@ -347,6 +347,8 @@ class GoldenEvalCaseOut(BaseModel):
     category: str
     question: str
     expected_source_types: list[str]
+    expected_source_ids: list[str] = []
+    expected_source_titles: list[str] = []
     expected_answer_traits: list[str]
     tags: list[str] = []
 

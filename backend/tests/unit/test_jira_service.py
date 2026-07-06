@@ -48,3 +48,4 @@ def test_jira_issue_rendering_indexes_assignment_and_status_fields() -> None:
     assert metadata["owner"] == "s.kumar@kimbal.io"
     assert metadata["acl"] == "connector-visible"
     assert metadata["connector_sync_id"] == "jira:DEVO:DEVO-10555:2026-07-04T01:00:00.000+0000"
+    assert metadata["chunk_strategy_version"] == "phase2-structure-v1"

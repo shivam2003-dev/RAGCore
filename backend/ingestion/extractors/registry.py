@@ -1,6 +1,7 @@
 import csv
 import io
 from pathlib import Path
+from typing import Any
 
 from core.exceptions import IngestionError
 from ingestion.extractors.base import ExtractedDocument
@@ -77,6 +78,7 @@ class HtmlExtractor:
 
     def extract(self, path: Path) -> ExtractedDocument:
         from bs4 import BeautifulSoup
+        from bs4.element import Tag
 
         soup = BeautifulSoup(path.read_text(encoding="utf-8", errors="replace"), "html.parser")
         for tag in soup(["script", "style", "nav", "footer"]):
@@ -89,7 +91,32 @@ class HtmlExtractor:
                 content = tag.get("content")
                 if isinstance(content, str) and content.strip():
                     metadata[meta_name] = content.strip()
-        return ExtractedDocument(text=soup.get_text(separator="\n", strip=True), metadata=metadata)
+        lines: list[str] = []
+        headings: list[str] = []
+        for element in soup.find_all(["h1", "h2", "h3", "h4", "h5", "h6", "p", "li", "pre", "table"]):
+            if not isinstance(element, Tag) or _has_parent(element, {"li", "pre", "table"}):
+                continue
+            name = element.name.lower()
+            text = element.get_text(separator=" ", strip=True)
+            if not text:
+                continue
+            if name.startswith("h") and len(name) == 2 and name[1].isdigit():
+                level = min(max(int(name[1]), 1), 6)
+                headings.append(text)
+                lines.append(f"{'#' * level} {text}")
+            elif name == "li":
+                lines.append(f"- {text}")
+            elif name == "pre":
+                lines.append(f"```\n{text}\n```")
+            elif name == "table":
+                table_lines = _table_lines(element)
+                if table_lines:
+                    lines.extend(table_lines)
+            else:
+                lines.append(text)
+        metadata["headings"] = headings[:50]
+        metadata["format"] = "html"
+        return ExtractedDocument(text="\n\n".join(lines).strip(), metadata=metadata)
 
 
 _EXTRACTORS = [
@@ -115,3 +142,23 @@ def extract_text(path: Path) -> ExtractedDocument:
                 raise IngestionError(f"No extractable text in {path.name}")
             return doc
     raise IngestionError(f"Unsupported file type: {suffix}")
+
+
+def _has_parent(element: Any, names: set[str]) -> bool:
+    parent = getattr(element, "parent", None)
+    while parent is not None:
+        name = getattr(parent, "name", None)
+        if isinstance(name, str) and name.lower() in names:
+            return True
+        parent = getattr(parent, "parent", None)
+    return False
+
+
+def _table_lines(table: Any) -> list[str]:
+    rows: list[str] = []
+    for tr in table.find_all("tr"):
+        cells = [cell.get_text(" ", strip=True) for cell in tr.find_all(["th", "td"])]
+        cells = [cell for cell in cells if cell]
+        if cells:
+            rows.append(" | ".join(cells))
+    return rows
