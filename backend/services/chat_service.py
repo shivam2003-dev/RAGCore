@@ -200,6 +200,8 @@ class ChatService:
             standalone_question=standalone_question,
             history=history,
             source_mode=source_mode,
+            assistant_role=assistant_role,
+            assistant_role_prompt=assistant_role_prompt,
         )
         chunks = retrieval.chunks
         timings_ms = {"question_rewrite": rewrite_ms, **retrieval.timings_ms}

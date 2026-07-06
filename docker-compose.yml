@@ -43,11 +43,6 @@ services:
       DATABASE_URL: postgresql+asyncpg://kimbal:kimbal_dev_password@postgres:5432/kimbal
       REDIS_URL: redis://redis:6379/0
       APP_ENV: production
-      APP_SECRET_KEY: ${APP_SECRET_KEY:-compose-dev-secret}
-      LLM_PROVIDER: ${LLM_PROVIDER:-fake}
-      LLM_MODEL: ${LLM_MODEL:-anthropic/claude-haiku-4.5}
-      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
-      EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-fake}
     ports:
       - "127.0.0.1:8000:8000"
     depends_on:

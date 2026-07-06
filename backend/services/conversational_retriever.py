@@ -122,6 +122,8 @@ class ConversationalRetriever:
         standalone_question: str,
         history: list[Message],
         source_mode: str,
+        assistant_role: str | None = None,
+        assistant_role_prompt: str | None = None,
     ) -> RetrievalResult:
         query = standalone_question or current_question
         chunks: list[RetrievedChunk] = []
@@ -137,6 +139,7 @@ class ConversationalRetriever:
                 org_id=user.organization_id,
                 fallback_kb_id=conversation.knowledge_base_id,
                 question=query,
+                role_context=" ".join(part for part in (assistant_role, assistant_role_prompt) if part),
             )
             top_k = self._settings.retrieval_top_k
             if _contains_any(query, COUNT_TERMS):
@@ -204,6 +207,7 @@ class ConversationalRetriever:
         org_id: uuid.UUID,
         fallback_kb_id: uuid.UUID,
         question: str,
+        role_context: str = "",
     ) -> list[uuid.UUID]:
         kbs = await self._kbs.list_by_org(org_id)
         if not kbs:
@@ -220,6 +224,14 @@ class ConversationalRetriever:
                 if confluence_named_scope:
                     return [kb.id for kb in confluence_named_scope]
             return [kb.id for kb in named_scope]
+
+        role_scope = _role_scope(candidates, role_context)
+        if role_scope:
+            if _contains_any(normalized, DOC_INTENT_TERMS) and not _contains_any(normalized, JIRA_TERMS):
+                confluence_role_scope = [kb for kb in role_scope if _kb_source_family(kb) == "confluence"]
+                if confluence_role_scope:
+                    return [kb.id for kb in confluence_role_scope]
+            return [kb.id for kb in role_scope]
 
         if _contains_any(normalized, JIRA_TERMS):
             jira_kbs = [kb.id for kb in candidates if _kb_source_family(kb) == "jira"]
@@ -250,6 +262,44 @@ def _named_scope(kbs: list[KnowledgeBase], normalized_question: str) -> list[Kno
             if any(needle in name for needle in needles):
                 selected.append(kb)
     return _dedupe_kbs(selected)
+
+
+def _role_scope(kbs: list[KnowledgeBase], role_context: str) -> list[KnowledgeBase]:
+    normalized = role_context.lower()
+    if not normalized:
+        return []
+    if "devops" in normalized or "devops space" in normalized:
+        return _dedupe_kbs(
+            [
+                kb
+                for kb in kbs
+                if _kb_name_contains(kb, ("jira devo", "devo", "confluence devops1", "devops1", "devops"))
+            ]
+        )
+    if "sre" in normalized or "sre space" in normalized:
+        return _dedupe_kbs(
+            [
+                kb
+                for kb in kbs
+                if _kb_name_contains(kb, ("jira cvir", "cvir", "confluence sre", "sre", "confluence as", " as"))
+            ]
+        )
+    if "hr" in normalized:
+        return _dedupe_kbs([kb for kb in kbs if _kb_name_contains(kb, ("hr", "people"))])
+    if "developer" in normalized or "dev space" in normalized:
+        return _dedupe_kbs(
+            [
+                kb
+                for kb in kbs
+                if _kb_name_contains(kb, ("developer", "engineering", "confluence dev", "dev docs"))
+            ]
+        )
+    return []
+
+
+def _kb_name_contains(kb: KnowledgeBase, needles: tuple[str, ...]) -> bool:
+    name = f" {kb.name.lower()} "
+    return any(needle in name for needle in needles)
 
 
 def _kb_source_family(kb: KnowledgeBase) -> str:

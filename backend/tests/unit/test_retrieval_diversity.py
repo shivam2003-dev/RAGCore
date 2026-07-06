@@ -1,7 +1,8 @@
 import uuid
 
+from models import KnowledgeBase
 from retrieval.context import RetrievedChunk
-from services.conversational_retriever import _dedupe_chunks
+from services.conversational_retriever import _dedupe_chunks, _role_scope
 
 
 def _chunk(source_key: str, score: float) -> RetrievedChunk:
@@ -32,3 +33,42 @@ def test_final_retrieval_limits_repeated_chunks_per_source():
         "page-b",
         "page-c",
     ]
+
+
+def _kb(name: str) -> KnowledgeBase:
+    return KnowledgeBase(
+        id=uuid.uuid4(),
+        organization_id=uuid.uuid4(),
+        name=name,
+        description="",
+        embedding_model="fake",
+        embedding_dimensions=8,
+    )
+
+
+def test_devops_role_scope_prefers_devo_and_devops1_sources():
+    kbs = [
+        _kb("Jira DEVO"),
+        _kb("Jira CVIR"),
+        _kb("Confluence DevOps1"),
+        _kb("Confluence SRE"),
+        _kb("Confluence AS"),
+    ]
+
+    scoped = _role_scope(kbs, "DevOps Space")
+
+    assert [kb.name for kb in scoped] == ["Jira DEVO", "Confluence DevOps1"]
+
+
+def test_sre_role_scope_prefers_cvir_sre_and_as_sources():
+    kbs = [
+        _kb("Jira DEVO"),
+        _kb("Jira CVIR"),
+        _kb("Confluence DevOps1"),
+        _kb("Confluence SRE"),
+        _kb("Confluence AS"),
+    ]
+
+    scoped = _role_scope(kbs, "SRE Space")
+
+    assert [kb.name for kb in scoped] == ["Jira CVIR", "Confluence SRE", "Confluence AS"]
