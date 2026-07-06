@@ -38,6 +38,25 @@ CONFLUENCE_TERMS = (
     "documentation",
     "runbook",
     "checklist",
+    "procedure",
+    "process",
+    "architecture",
+    "architectural",
+    "design",
+    "diagram",
+    "diagrams",
+    "overview",
+    "topology",
+    "flow",
+    "flows",
+    "hld",
+    "lld",
+    "sop",
+    "guide",
+    "deployment",
+    "release",
+    "configuration",
+    "implementation",
     "broker",
     "install",
     "installation",
@@ -46,6 +65,24 @@ CONFLUENCE_TERMS = (
     "sre",
 )
 COUNT_TERMS = ("count", "how many", "number", "no of", "no. of", "total")
+DOC_INTENT_TERMS = (
+    "architecture",
+    "architectural",
+    "design",
+    "diagram",
+    "diagrams",
+    "overview",
+    "topology",
+    "hld",
+    "lld",
+    "documentation",
+    "docs",
+    "runbook",
+    "sop",
+    "guide",
+    "procedure",
+    "process",
+)
 
 
 @dataclass(slots=True)
@@ -179,6 +216,10 @@ class ConversationalRetriever:
 
         named_scope = _named_scope(candidates, normalized)
         if named_scope:
+            if _contains_any(normalized, DOC_INTENT_TERMS) and not _contains_any(normalized, JIRA_TERMS):
+                confluence_named_scope = [kb for kb in named_scope if _kb_source_family(kb) == "confluence"]
+                if confluence_named_scope:
+                    return [kb.id for kb in confluence_named_scope]
             return [kb.id for kb in named_scope]
 
         if _contains_any(normalized, JIRA_TERMS):

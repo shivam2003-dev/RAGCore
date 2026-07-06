@@ -44,10 +44,29 @@ CONFLUENCE_HINTS = {
     "wiki",
     "space",
     "page",
+    "docs",
+    "documentation",
     "runbook",
     "procedure",
     "process",
     "checklist",
+    "architecture",
+    "architectural",
+    "design",
+    "diagram",
+    "diagrams",
+    "overview",
+    "topology",
+    "flow",
+    "flows",
+    "hld",
+    "lld",
+    "sop",
+    "guide",
+    "deployment",
+    "release",
+    "configuration",
+    "implementation",
 }
 
 
@@ -255,13 +274,28 @@ def _source_fit(query_tokens: set[str], chunk: RetrievedChunk) -> float:
     score = 0.0
     if query_tokens & JIRA_HINTS and ("jira" in source or "jira" in title or "devo" in title or "cvir" in title):
         score += 0.6
-    if query_tokens & CONFLUENCE_HINTS and ("confluence" in source or "confluence" in title):
+    if query_tokens & CONFLUENCE_HINTS and _is_confluence_source(source, title, metadata):
         score += 0.6
+    if query_tokens & {"architecture", "architectural", "design", "diagram", "diagrams", "overview", "topology", "hld", "lld"}:
+        if _is_confluence_source(source, title, metadata):
+            score += 0.25
+        if any(term in title for term in ("architecture", "design", "diagram", "overview", "hld", "lld")):
+            score += 0.15
     if "sre" in query_tokens and ("sre" in title or "cvir" in title or metadata.get("confluence_space_key") in {"SRE", "AS"}):
         score += 0.3
     if ("devops" in query_tokens or "devo" in query_tokens) and ("devo" in title or "devops" in title):
         score += 0.3
     return _clamp01(score)
+
+
+def _is_confluence_source(source: str, title: str, metadata: dict) -> bool:
+    return bool(
+        "confluence" in source
+        or "confluence" in title
+        or metadata.get("confluence_space_key")
+        or metadata.get("confluence-page-id")
+        or metadata.get("confluence_page_id")
+    )
 
 
 def _freshness(metadata: dict) -> float:
