@@ -241,7 +241,7 @@ async def test_evals_overview_uses_persisted_answer_data(client, auth_headers, d
     body = resp.json()
     assert body["answers_total"] == 1
     assert body["sample_size"] == 1
-    assert body["benchmark"]["label"] == "Kimbal Benchmark"
+    assert body["benchmark"]["label"] == "CVUM Benchmark"
     assert body["benchmark"]["display"].endswith("/100")
     assert body["benchmark"]["sample_size"] == 1
     assert body["golden_dataset"]["cases"] >= 8

@@ -3,7 +3,7 @@ import uuid
 from chat.citations import extract_citations
 from chat.prompts import build_system_prompt
 from retrieval.context import RetrievedChunk
-from services.chat_service import _source_payload
+from services.chat_service import _source_payload, _verify_and_shape_answer
 
 
 def _chunk(title: str = "Doc", content: str = "Some content here.", metadata: dict | None = None) -> RetrievedChunk:
@@ -28,6 +28,31 @@ def test_extracts_markers_in_range():
 
 def test_no_markers_no_citations():
     assert extract_citations("No citations at all.", [_chunk()]) == []
+
+
+def test_answer_shaping_preserves_fenced_code_and_ignores_array_indexes() -> None:
+    chunk = _chunk()
+    answer = """Use this complete example. [1]
+
+```c
+#include <stdio.h>
+
+int main(void) {
+    int values[99] = {0};
+    printf("Hello, World!\\n");
+    return values[0];
+}
+```
+
+Compile it with GCC. [1]
+"""
+
+    shaped = _verify_and_shape_answer(answer, [chunk])
+
+    assert "```c" in shaped
+    assert "int values[99] = {0};" in shaped
+    assert 'printf("Hello, World!\\n");' in shaped
+    assert "```" in shaped
 
 
 def test_snippet_truncated():

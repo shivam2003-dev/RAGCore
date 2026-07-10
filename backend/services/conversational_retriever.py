@@ -3,14 +3,17 @@ import time
 import uuid
 from dataclasses import dataclass, field
 
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.config import Settings
-from models import Conversation, KnowledgeBase, Message, User
+from core.exceptions import AuthorizationError, NotFoundError, ProviderError, ValidationError
+from models import Chunk, Conversation, Document, KnowledgeBase, Message, User
 from repositories.knowledge import KnowledgeBaseRepository
 from retrieval.context import RetrievalContext, RetrievedChunk
 from retrieval.crag import MIN_ACCEPT_CONFIDENCE
 from retrieval.pipeline import RetrievalPipeline
+from services.jira_service import retrieve_live_jira_relationships
 from services.web_search_service import WebSearchService
 
 JIRA_TERMS = (
@@ -82,6 +85,7 @@ DOC_INTENT_TERMS = (
     "procedure",
     "process",
 )
+JIRA_ISSUE_KEY_RE = re.compile(r"\b[A-Z][A-Z0-9]{1,9}-\d+\b", re.IGNORECASE)
 
 
 @dataclass(slots=True)
@@ -127,6 +131,15 @@ class ConversationalRetriever:
         assistant_role_prompt: str | None = None,
     ) -> RetrievalResult:
         query = standalone_question or current_question
+        current_issue_keys = JIRA_ISSUE_KEY_RE.findall(current_question)
+        if current_issue_keys:
+            prior_user_intent = " ".join(
+                message.content[:500]
+                for message in history[-6:]
+                if message.role == "user"
+            ).strip()
+            if prior_user_intent:
+                query = f"{query}\nPrior user intent: {prior_user_intent[-900:]}"
         query_classification = _classify_query(query)
         chunks: list[RetrievedChunk] = []
         timings_ms: dict[str, int] = {}
@@ -135,6 +148,7 @@ class ConversationalRetriever:
         attempts: list[dict[str, object]] = []
         quality_notes: list[str] = []
         fallback_requested = False
+        live_jira_chunks: list[RetrievedChunk] = []
 
         if source_mode in {"knowledge", "blended"}:
             kb_scope = await self._knowledge_scope(
@@ -146,7 +160,9 @@ class ConversationalRetriever:
             top_k = self._settings.retrieval_top_k
             if _contains_any(query, COUNT_TERMS):
                 top_k = max(top_k, 20)
-            subqueries = _decompose_query(query)
+            issue_keys = list(dict.fromkeys(match.upper() for match in JIRA_ISSUE_KEY_RE.findall(query)))
+            exact_jira_scope = bool(issue_keys) and not _contains_any(query, CONFLUENCE_TERMS)
+            subqueries = [] if exact_jira_scope else _decompose_query(query)
             confidences: list[float] = []
             for index, subquery in enumerate(subqueries, start=1):
                 ctx = RetrievalContext(
@@ -176,6 +192,54 @@ class ConversationalRetriever:
             if confidences:
                 confidence = round(sum(confidences) / len(confidences), 4)
 
+            for issue_key in issue_keys[:3]:
+                relationship_started = time.perf_counter()
+                relationship_chunks = await self._retrieval.jira_relationship_context(
+                    kb_scope=kb_scope,
+                    issue_key=issue_key,
+                    query=query,
+                    limit=max(self._settings.retrieval_candidate_k, 24),
+                )
+                timings_ms[f"jira_relationship_{issue_key.lower()}"] = int(
+                    (time.perf_counter() - relationship_started) * 1000
+                )
+                chunks.extend(relationship_chunks)
+                if relationship_chunks:
+                    quality_notes.append(
+                        f"expanded_jira_relationship={issue_key} chunks={len(relationship_chunks)}"
+                    )
+                live_started = time.perf_counter()
+                try:
+                    live_chunks = await retrieve_live_jira_relationships(
+                        settings=self._settings,
+                        issue_key=issue_key,
+                        query=query,
+                        limit=max(self._settings.retrieval_top_k, 12),
+                    )
+                    live_chunks = await self._map_live_jira_chunks(
+                        chunks=live_chunks,
+                        kb_scope=kb_scope,
+                    )
+                except (AuthorizationError, NotFoundError, ProviderError, ValidationError):
+                    live_chunks = []
+                    quality_notes.append(f"live_jira_relationship_failed={issue_key}")
+                timings_ms[f"live_jira_{issue_key.lower()}"] = int(
+                    (time.perf_counter() - live_started) * 1000
+                )
+                chunks.extend(live_chunks)
+                if live_chunks:
+                    live_jira_chunks.extend(live_chunks)
+                    quality_notes.append(
+                        f"live_jira_relationship={issue_key} chunks={len(live_chunks)}"
+                    )
+
+            if live_jira_chunks:
+                confidence = max(confidence or 0.0, 0.8)
+                fallback_requested = False
+                if not _contains_any(query, CONFLUENCE_TERMS):
+                    chunks = live_jira_chunks
+                    quality_notes.append("exact_jira_scope=live_issue_family")
+
         if source_mode in {"web", "blended"}:
             web_started = time.perf_counter()
             web_chunks = await self._web_search.search(
@@ -204,6 +268,70 @@ class ConversationalRetriever:
             fallback_requested=fallback_requested,
         )
 
+    async def _map_live_jira_chunks(
+        self,
+        *,
+        chunks: list[RetrievedChunk],
+        kb_scope: list[uuid.UUID],
+    ) -> list[RetrievedChunk]:
+        """Use persisted IDs for live Jira text so stored citations retain valid foreign keys."""
+
+        issue_keys = {
+            str(chunk.metadata.get("jira_issue_key") or "").upper()
+            for chunk in chunks
+            if chunk.metadata.get("jira_issue_key")
+        }
+        if not issue_keys:
+            return []
+        issue_key_field = Document.doc_metadata["jira_issue_key"].astext
+        rows = (
+            await self._db.execute(
+                select(Document.id, Document.title, Document.doc_metadata, Chunk.id)
+                .join(Chunk, Chunk.document_id == Document.id)
+                .where(
+                    Document.knowledge_base_id.in_(kb_scope),
+                    Document.is_deleted.is_(False),
+                    Chunk.is_active.is_(True),
+                    func.upper(issue_key_field).in_(issue_keys),
+                )
+                .order_by(Document.updated_at.desc(), Chunk.ordinal)
+            )
+        ).all()
+        by_issue: dict[str, list[tuple[uuid.UUID, uuid.UUID, str]]] = {}
+        chosen_document: dict[str, uuid.UUID] = {}
+        for document_id, title, metadata, chunk_id in rows:
+            key = str((metadata or {}).get("jira_issue_key") or "").upper()
+            if not key:
+                continue
+            chosen_document.setdefault(key, document_id)
+            if chosen_document[key] != document_id:
+                continue
+            by_issue.setdefault(key, []).append((document_id, chunk_id, title))
+
+        mapped: list[RetrievedChunk] = []
+        ordinal_by_issue: dict[str, int] = {}
+        for chunk in chunks:
+            key = str(chunk.metadata.get("jira_issue_key") or "").upper()
+            persisted = by_issue.get(key) or []
+            if not persisted:
+                continue
+            ordinal = ordinal_by_issue.get(key, 0)
+            document_id, chunk_id, title = persisted[min(ordinal, len(persisted) - 1)]
+            ordinal_by_issue[key] = ordinal + 1
+            mapped.append(
+                RetrievedChunk(
+                    chunk_id=chunk_id,
+                    document_id=document_id,
+                    document_title=title,
+                    content=chunk.content,
+                    metadata=chunk.metadata,
+                    dense_score=chunk.dense_score,
+                    sparse_score=chunk.sparse_score,
+                    score=chunk.score,
+                )
+            )
+        return mapped
+
     async def _knowledge_scope(
         self,
         *,
@@ -231,9 +359,11 @@ class ConversationalRetriever:
         role_scope = _role_scope(candidates, role_context)
         if role_scope:
             if _contains_any(normalized, DOC_INTENT_TERMS) and not _contains_any(normalized, JIRA_TERMS):
-                confluence_role_scope = [kb for kb in role_scope if _kb_source_family(kb) == "confluence"]
-                if confluence_role_scope:
-                    return [kb.id for kb in confluence_role_scope]
+                # A persona can prioritize response framing, but it must not hide a relevant
+                # architecture/runbook page owned by another internal Confluence space.
+                confluence_scope = [kb for kb in candidates if _kb_source_family(kb) == "confluence"]
+                if confluence_scope:
+                    return [kb.id for kb in confluence_scope]
             return [kb.id for kb in role_scope]
 
         if _contains_any(normalized, JIRA_TERMS):

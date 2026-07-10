@@ -28,15 +28,17 @@ Use a real browser for UI verification after passing automated checks.
 Minimum browser path:
 
 1. Open `http://localhost:3100`.
-2. Visit every sidebar route.
+2. Open `/admin` and visit every admin sidebar route.
 3. Open `/knowledge-sources` and verify Confluence/Jira status cards.
 4. Sync Jira and Confluence if configured.
 5. Open `/documents` and verify synced documents are listed.
-6. Open `/ask` directly and verify it does not auto-submit.
+6. Open `/` directly and verify it does not auto-submit; verify `/ask` redirects to `/`.
 7. Ask a Jira issue question and verify Jira sources appear in the right rail.
-8. Click Helpful, Not Helpful, Save, Share, and New Chat.
-9. Open Saved Answers and verify saved answers can be searched, shared, and deleted.
-10. Open Settings and verify non-backed runtime settings are read-only/server-managed.
+8. Ask for an epic's benchmarking/server details and verify child-ticket comments and attachment
+   evidence appear, including a child that is not semantically similar to the epic title.
+9. Click Copy, Helpful, Not Helpful, New Chat, reopen a chat, and open its source drawer.
+10. Open Settings and verify connector tests/sync actions work and non-backed settings stay read-only.
+11. Open Evals twice and verify the prior benchmark renders immediately while background refresh runs.
 
 ## Regression Cases
 

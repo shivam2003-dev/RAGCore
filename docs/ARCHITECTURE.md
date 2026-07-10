@@ -32,10 +32,11 @@ Vector search is isolated in `backend/repositories/chunks.py`. The retrieval pip
 
 ## Frontend Shape
 
-The frontend is an enterprise SaaS interface with a persistent sidebar and top bar. Major routes are:
+The frontend uses a conversation-first Ask surface plus a separate enterprise admin shell. Major routes are:
 
-- `/` Home dashboard
-- `/ask` RAG chat
+- `/` RAG chat
+- `/ask` permanent compatibility redirect to `/`
+- `/admin` Home dashboard
 - `/knowledge-sources`
 - `/documents`
 - `/saved-answers`

@@ -22,7 +22,9 @@ from api.schemas import (
     EvalGateRunOut,
     EvalLatencyOut,
     EvalModelOut,
+    EvalModeOut,
     EvalOverviewOut,
+    EvalQualitySummaryOut,
     EvalRecentAnswerOut,
     EvalScoreOut,
     FeedbackMetricOut,
@@ -70,6 +72,12 @@ class AnswerEval:
     relevance: float | None
     completeness: float
     success: float
+    unsupported_claim_rate: float | None
+    source_mode: str
+    answer_mode: str
+    verdict: str
+    issues: tuple[str, ...]
+    observed: bool
 
 
 @router.get("/overview", response_model=EvalOverviewOut)
@@ -107,13 +115,18 @@ async def evals_overview(
         scores=scores,
         latency=latency,
         models=_model_breakdown(evals),
+        modes=_mode_breakdown(evals),
+        quality=_quality_summary(evals),
         recent_answers=_recent_answers(evals),
         methodology=[
             (
-                "Kimbal Benchmark is a weighted live score over recent persisted assistant answers; "
+                "CVUM Benchmark is a weighted live score over recent persisted assistant answers; "
                 "no synthetic rows are generated."
             ),
-            "Groundedness proxy combines citation presence, citation marker coverage, and retrieval confidence.",
+            (
+                "New answers persist source mode, answer mode, retrieval confidence, unsupported-claim rate, "
+                "grounding-gate state, and quality notes; legacy rows use citation-based fallback scoring."
+            ),
             "Answer relevance proxy uses lexical overlap between the user question and answer text.",
             (
                 "Use golden datasets or LLM-as-judge suites for formal release gates; "
@@ -565,20 +578,15 @@ def _judge_rationale(
 
 
 def _model_comparison(scores: dict[str, float | None], latency_ms: int) -> dict[str, float | int | str | None]:
-    fast_quality = _clamp01(
+    quality_proxy = _clamp01(
         ((scores.get("groundedness") or 0.0) * 0.45)
         + ((scores.get("answer_relevance") or 0.0) * 0.25)
         + ((scores.get("citation_coverage") or 0.0) * 0.30)
     )
-    council_quality = _clamp01(fast_quality + (0.03 if scores.get("citation_coverage") else 0.0))
     return {
-        "fast_quality": round(fast_quality, 4),
-        "council_quality": round(council_quality, 4),
-        "fast_latency_ms": latency_ms,
-        "council_latency_ms_estimate": latency_ms * 3,
-        "fast_cost_units": 1,
-        "council_cost_units_estimate": 3,
-        "citation_discipline_delta": round(council_quality - fast_quality, 4),
+        "quality_proxy": round(quality_proxy, 4),
+        "retrieval_latency_ms": latency_ms,
+        "evaluation_mode": "deterministic_retrieval_dry_run",
     }
 
 
@@ -616,6 +624,7 @@ def _offline_methodology() -> list[str]:
             "Generator metrics use deterministic dry-run answers to check groundedness, faithfulness, "
             "citation coverage, relevance, refusal correctness, and unsupported-claim rate."
         ),
+        "The offline gate does not compare Fast and Council models; live mode rows contain observed behavior.",
         (
             "Council comparison is a deterministic quality, latency, and cost estimate unless live council "
             "models are configured for a separate judged run."
@@ -691,15 +700,38 @@ def _evaluate_answers(messages: list[Message]) -> list[AnswerEval]:
         citation_count = len(citations)
         citation_coverage = 1.0 if citation_count else 0.0
         marker_coverage = _marker_coverage(message.content, citations)
-        citation_confidence = _citation_confidence(citations)
-        groundedness = _groundedness(
-            citation_coverage=citation_coverage,
-            marker_coverage=marker_coverage,
-            citation_confidence=citation_confidence,
+        evaluation = message.evaluation if isinstance(message.evaluation, dict) else {}
+        observed = evaluation.get("schema_version") == 1
+        retrieval_confidence = evaluation.get("retrieval_confidence")
+        citation_confidence = (
+            _clamp01(float(retrieval_confidence))
+            if observed and isinstance(retrieval_confidence, (int, float))
+            else _citation_confidence(citations)
+        )
+        unsupported_claim_rate = (
+            _clamp01(float(evaluation.get("unsupported_claim_rate") or 0.0)) if observed else None
+        )
+        groundedness = (
+            _clamp01(1.0 - float(unsupported_claim_rate or 0.0))
+            if observed and bool(evaluation.get("grounded"))
+            else 0.0
+            if observed
+            else _groundedness(
+                citation_coverage=citation_coverage,
+                marker_coverage=marker_coverage,
+                citation_confidence=citation_confidence,
+            )
         )
         relevance = _relevance(question, message.content)
         completeness = _completeness(message.content)
-        success = 1.0 if message.content.strip() and "terminal error" not in message.content.lower() else 0.0
+        issues = _answer_issues(
+            content=message.content,
+            evaluation=evaluation,
+            citation_count=citation_count,
+            unsupported_claim_rate=unsupported_claim_rate,
+        )
+        verdict = _answer_verdict(issues)
+        success = 0.0 if verdict == "failure" else 1.0
         evals.append(
             AnswerEval(
                 message=message,
@@ -712,9 +744,65 @@ def _evaluate_answers(messages: list[Message]) -> list[AnswerEval]:
                 relevance=relevance,
                 completeness=completeness,
                 success=success,
+                unsupported_claim_rate=unsupported_claim_rate,
+                source_mode=str(evaluation.get("source_mode") or "unknown"),
+                answer_mode=str(evaluation.get("answer_mode") or "unknown"),
+                verdict=verdict,
+                issues=tuple(issues),
+                observed=observed,
             )
         )
     return evals
+
+
+def _answer_issues(
+    *,
+    content: str,
+    evaluation: dict[str, object],
+    citation_count: int,
+    unsupported_claim_rate: float | None,
+) -> list[str]:
+    issues: list[str] = []
+    lowered = content.lower()
+    if not content.strip() or "terminal error" in lowered:
+        issues.append("generation_error")
+    if bool(evaluation.get("grounding_gate_triggered")):
+        issues.append("grounding_gate_triggered")
+    if evaluation.get("grounded") is False:
+        issues.append("not_grounded")
+    if evaluation.get("invalid_citations"):
+        issues.append("invalid_citations")
+    if unsupported_claim_rate is not None and unsupported_claim_rate > 0.35:
+        issues.append("unsupported_claims")
+    if bool(evaluation.get("weak_internal_retrieval")):
+        issues.append("weak_retrieval")
+    source_mode = str(evaluation.get("source_mode") or "unknown")
+    web_source_count = int(evaluation.get("web_source_count") or 0)
+    if source_mode in {"web", "blended"} and web_source_count == 0:
+        issues.append("missing_web_evidence")
+    if str(evaluation.get("answer_mode") or "") == "council" and re.search(
+        r"(?im)^#{0,3}\s*(evaluation|candidate\s+[12])\b", content
+    ):
+        issues.append("council_process_leak")
+    if citation_count == 0 and not bool(evaluation.get("refusal")):
+        issues.append("missing_citations")
+    return _dedupe_strings(issues)
+
+
+def _answer_verdict(issues: list[str]) -> str:
+    failure_issues = {
+        "generation_error",
+        "grounding_gate_triggered",
+        "not_grounded",
+        "invalid_citations",
+        "missing_web_evidence",
+        "council_process_leak",
+    }
+    if any(issue in failure_issues for issue in issues):
+        return "failure"
+    if issues:
+        return "needs_review"
+    return "healthy"
 
 
 def _scorecards(evals: list[AnswerEval], feedback: FeedbackMetricOut) -> list[EvalScoreOut]:
@@ -727,13 +815,22 @@ def _scorecards(evals: list[AnswerEval], feedback: FeedbackMetricOut) -> list[Ev
         [item.citation_confidence for item in evals if item.citation_confidence is not None]
     )
     latency_health = _latency_health([item.message.latency_ms for item in evals if item.message.latency_ms is not None])
+    unsupported_claim_rate = _avg(
+        [item.unsupported_claim_rate for item in evals if item.unsupported_claim_rate is not None]
+    )
     return [
         _score("citation_coverage", "Citation coverage", citation_coverage, "Answers with at least one cited source."),
         _score(
             "groundedness",
-            "Groundedness proxy",
+            "Groundedness",
             groundedness,
-            "Citation presence, marker coverage, and retrieval score.",
+            "Observed unsupported-claim rate for new answers; citation-based fallback for legacy rows.",
+        ),
+        _score(
+            "unsupported_claim_rate",
+            "Supported claims",
+            None if unsupported_claim_rate is None else 1 - unsupported_claim_rate,
+            "Share of factual claims that passed citation-marker validation.",
         ),
         _score("answer_relevance", "Answer relevance proxy", relevance, "Question-to-answer lexical alignment."),
         _score("retrieval_confidence", "Retrieval confidence", retrieval_confidence, "Mean score of cited chunks."),
@@ -786,6 +883,45 @@ def _model_breakdown(evals: list[AnswerEval]) -> list[EvalModelOut]:
     return sorted(rows, key=lambda item: item.answers, reverse=True)
 
 
+def _mode_breakdown(evals: list[AnswerEval]) -> list[EvalModeOut]:
+    grouped: dict[tuple[str, str], list[AnswerEval]] = defaultdict(list)
+    for item in evals:
+        grouped[(item.source_mode, item.answer_mode)].append(item)
+    rows: list[EvalModeOut] = []
+    for (source_mode, answer_mode), items in grouped.items():
+        latencies = [item.message.latency_ms for item in items if item.message.latency_ms is not None]
+        rows.append(
+            EvalModeOut(
+                source_mode=source_mode,
+                answer_mode=answer_mode,
+                answers=len(items),
+                avg_latency_ms=round(mean(latencies)) if latencies else None,
+                groundedness_score=_avg([item.groundedness for item in items]),
+                unsupported_claim_rate=_avg(
+                    [
+                        item.unsupported_claim_rate
+                        for item in items
+                        if item.unsupported_claim_rate is not None
+                    ]
+                ),
+                failure_rate=_avg([1.0 if item.verdict == "failure" else 0.0 for item in items]),
+            )
+        )
+    return sorted(rows, key=lambda item: item.answers, reverse=True)
+
+
+def _quality_summary(evals: list[AnswerEval]) -> EvalQualitySummaryOut:
+    observed = [item for item in evals if item.observed]
+    issue_counts = Counter(issue for item in observed for issue in item.issues)
+    return EvalQualitySummaryOut(
+        evaluated=len(observed),
+        healthy=sum(1 for item in observed if item.verdict == "healthy"),
+        needs_review=sum(1 for item in observed if item.verdict == "needs_review"),
+        failures=sum(1 for item in observed if item.verdict == "failure"),
+        issue_counts=dict(issue_counts.most_common()),
+    )
+
+
 def _recent_answers(evals: list[AnswerEval]) -> list[EvalRecentAnswerOut]:
     rows = sorted(evals, key=lambda item: item.message.created_at, reverse=True)[:10]
     return [
@@ -800,6 +936,11 @@ def _recent_answers(evals: list[AnswerEval]) -> list[EvalRecentAnswerOut]:
             citations=item.citation_count,
             groundedness_score=item.groundedness,
             relevance_score=item.relevance,
+            unsupported_claim_rate=item.unsupported_claim_rate,
+            source_mode=item.source_mode,
+            answer_mode=item.answer_mode,
+            verdict=item.verdict,
+            issues=list(item.issues),
         )
         for item in rows
     ]
@@ -839,7 +980,7 @@ def _benchmark(scores: list[EvalScoreOut], latency: EvalLatencyOut, *, sample_si
 
     if not sample_size or active_weight == 0:
         return EvalBenchmarkOut(
-            label="Kimbal Benchmark",
+            label="CVUM Benchmark",
             score=None,
             value=None,
             display="N/A",
@@ -853,7 +994,7 @@ def _benchmark(scores: list[EvalScoreOut], latency: EvalLatencyOut, *, sample_si
     score = round(value * 100)
     latency_text = "no latency sample" if latency.sample_size == 0 else f"p95 {latency.p95_ms} ms"
     return EvalBenchmarkOut(
-        label="Kimbal Benchmark",
+        label="CVUM Benchmark",
         score=score,
         value=round(value, 4),
         display=f"{score}/100",

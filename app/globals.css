@@ -114,8 +114,10 @@ body.ask-focus-mode .kimbal-shell {
   padding-left: 0;
 }
 
-body.sidebar-collapsed .kimbal-shell {
-  padding-left: 72px;
+@media (min-width: 64rem) {
+  body.sidebar-collapsed .kimbal-shell {
+    padding-left: 72px;
+  }
 }
 
 body.ask-focus-mode .kimbal-shell > main {

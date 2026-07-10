@@ -20,7 +20,19 @@ Chunking is implemented under `backend/ingestion/chunkers`. The system keeps chu
 - `CHUNK_SIZE_TOKENS`
 - `CHUNK_OVERLAP_TOKENS`
 
-Chunk metadata is preserved where available, including headings and source-specific metadata.
+Source profiles are intentionally different:
+
+- Confluence uses `400/60` heading-aware chunks with parent-section context
+  (`confluence-heading-context-v2`). A larger `600/80` ablation reduced recall and MRR on the
+  local golden set, so it is not the default.
+- Jira uses `320/40` relationship-aware chunks
+  (`jira-relationship-comments-attachments-v5`). Descriptions, visible comments, parent/child and
+  issue-link metadata, and extracted XLSX/DOCX/PDF/image evidence are kept with the issue title and
+  key in every chunk.
+
+Jira preprocessing removes empty/automation boilerplate but preserves headings, tables, lists,
+code, user-visible mentions, and comments. Attachment extraction is size/count bounded and the
+connector remains read-only.
 
 ## Retrieval
 
@@ -31,44 +43,57 @@ For a query, the pipeline:
 1. Optionally rewrites the query.
 2. Embeds the effective query.
 3. Runs dense vector search over pgvector.
-4. Runs sparse keyword search through Postgres full-text search.
-5. Fuses results using max-normalized weighted fusion.
-6. Evaluates confidence and applies the retrieval policy loop.
+4. Runs strict and relaxed sparse search through Postgres full-text search, with normalized content
+   ranking, document-title boosts, and exact Jira-key boosts.
+5. Fuses dense and sparse results. Local deterministic embeddings use a lexical-first fusion balance;
+   configured semantic embedding providers use the configured dense/sparse weights.
+6. Reranks against the original user intent, evaluates evidence quality and source coverage, and
+   applies the corrective retrieval policy loop.
+
+An exact Jira key also activates relationship retrieval. Indexed metadata expands the issue to
+parent, child, and linked tickets. Ask then performs a read-only live Jira refresh for that issue
+family so comments and supported attachments are current even when the routine board refresh has
+not reached an older epic. Live text is mapped to persisted Jira document/chunk ids before citation
+storage.
 
 Default fusion weights:
 
 - Dense: `0.7`
 - Sparse: `0.3`
 
-The CRAG seams already exist:
+The CRAG path includes:
 
 - `RetrievalEvaluator`
 - `RetrievalPolicy`
 - `QueryRewriter`
 - `GroundingVerifier`
 
-The current shipped policy accepts results, but the loop is in place for future retry/rewrite behavior.
+The pipeline keeps the strongest attempt across retries so a weaker rewrite cannot replace better
+evidence found earlier.
 
 ## CRAG Status
 
-This application has the CRAG extension points and retry loop, but it does not yet ship a full corrective RAG grader.
+This application ships a deterministic corrective retrieval grader and retry policy. It does not add
+an LLM grading call to every request.
 
 Implemented now:
 
 - Dense plus sparse retrieval with weighted fusion.
-- Confidence plumbing on retrieval contexts.
-- Protocols for retrieval evaluation, retry policy, query rewriting, and grounding verification.
-- A working policy loop that can rerun retrieval after a rewrite.
-- An accept-always default implementation so the pipeline is stable for production traffic.
+- Retrieval quality grading from fused score, original-query overlap, source-family fit, exact
+  identifier agreement, document diversity, and source coverage.
+- Corrective query rewriting, top-k widening, a three-attempt hard stop, and weak-evidence fallback.
+- Best-attempt retention across the corrective loop.
+- Final answer citation validation and unsupported-claim gating.
 
 Not implemented yet:
 
-- A real retrieval-quality grader that marks retrieved evidence as correct, ambiguous, or irrelevant.
-- A corrective policy that expands or rewrites the query based on grader output.
-- A groundedness verifier that blocks or regenerates unsupported final answers.
-- A web-fallback decision that only triggers when internal retrieval quality is insufficient.
+- An optional model-based relevance grader for ambiguous semantic questions.
+- Claim-level natural-language inference against each cited source.
+- Automatic web fallback for Knowledge mode. Web evidence remains explicit through Web or Both mode.
 
-So the honest answer is: CRAG scaffolding exists and is wired into the retrieval pipeline, but production accuracy today comes from hybrid search, citations, source scoping, prompt hierarchy, and optional Council mode. A full CRAG implementation should add an evaluator, corrective policy, grounding verifier, and regression tests before being called complete.
+The current CRAG implementation is provider-free and operational. It improves retrieval and blocks
+weak internal answers, while the remaining model-based grader and claim-level verifier are future
+quality layers rather than prerequisites for the corrective loop.
 
 ## Multi-KB Scope
 
@@ -97,7 +122,7 @@ The chat API streams Server-Sent Events:
 3. `done` - persisted message id, token usage, model, latency, and stage timings
 4. `error` - terminal stream error if the model or backend fails mid-stream
 
-The frontend maps source markers to the right rail in `/ask`.
+The frontend maps source markers to the right-side source drawer on `/`.
 
 ## Optional Source Modes
 
@@ -115,6 +140,10 @@ After the answer is complete, citation extraction maps `[n]` markers back to ret
 
 ## Known Limitations
 
-- Embeddings are deterministic local embeddings unless a production embedding provider is configured.
+- Local deterministic embeddings carry lexical similarity rather than full semantic meaning. The
+  pipeline compensates by weighting sparse/title retrieval more heavily in that mode; configure a
+  production embedding provider for stronger semantic recall.
 - Exact analytics questions over Jira, such as counts by assignee, are only as good as the synced Jira issue fields and the retrieved issue set.
 - Historical trend charts are not fabricated; the UI only shows data that the backend collects.
+- Live exact-key Jira expansion depends on the configured Jira account's issue/comment/attachment
+  visibility. It never bypasses Atlassian permissions.

@@ -324,6 +324,29 @@ class EvalRecentAnswerOut(BaseModel):
     citations: int
     groundedness_score: float | None
     relevance_score: float | None
+    unsupported_claim_rate: float | None = None
+    source_mode: str = "unknown"
+    answer_mode: str = "unknown"
+    verdict: str = "unknown"
+    issues: list[str] = []
+
+
+class EvalModeOut(BaseModel):
+    source_mode: str
+    answer_mode: str
+    answers: int
+    avg_latency_ms: int | None
+    groundedness_score: float | None
+    unsupported_claim_rate: float | None
+    failure_rate: float | None
+
+
+class EvalQualitySummaryOut(BaseModel):
+    evaluated: int
+    healthy: int
+    needs_review: int
+    failures: int
+    issue_counts: dict[str, int]
 
 
 class EvalBenchmarkComponentOut(BaseModel):
@@ -417,6 +440,8 @@ class EvalOverviewOut(BaseModel):
     scores: list[EvalScoreOut]
     latency: EvalLatencyOut
     models: list[EvalModelOut]
+    modes: list[EvalModeOut]
+    quality: EvalQualitySummaryOut
     recent_answers: list[EvalRecentAnswerOut]
     methodology: list[str]
 

@@ -6,7 +6,7 @@ Yields typed SSE events; the router only serializes them.
 import re
 import time
 import uuid
-from collections.abc import AsyncIterator, Iterable
+from collections.abc import AsyncIterator, Iterable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
@@ -265,7 +265,37 @@ class ChatService:
                 model = delta.model or model
         timings_ms["llm"] = int((time.perf_counter() - llm_started) * 1000)
 
-        answer = _verify_and_shape_answer("".join(answer_parts), chunks)
+        draft_answer = "".join(answer_parts)
+        answer = _verify_and_shape_answer(draft_answer, chunks)
+        if _grounding_gate_triggered(answer) and chunks:
+            repair_started = time.perf_counter()
+            try:
+                repaired, repair_usage = await self._response_generator.repair_grounding(
+                    draft=draft_answer,
+                    chunks=chunks,
+                    question=question,
+                    assistant_role=assistant_role,
+                    assistant_role_prompt=assistant_role_prompt,
+                )
+                usage.input_tokens += repair_usage.input_tokens
+                usage.output_tokens += repair_usage.output_tokens
+                answer = _verify_and_shape_answer(repaired, chunks)
+            except ProviderError:
+                timings_ms["grounding_repair_failed"] = 1
+            timings_ms["grounding_repair"] = int((time.perf_counter() - repair_started) * 1000)
+        verification = _verification_summary(answer, chunks)
+        evaluation = _answer_evaluation_payload(
+            answer=answer,
+            chunks=chunks,
+            source_mode=source_mode,
+            answer_mode=answer_mode,
+            verification=verification,
+            retrieval_confidence=confidence,
+            weak_internal_retrieval=retrieval.weak_internal_retrieval,
+            query_classification=retrieval.query_classification,
+            quality_notes=retrieval.quality_notes,
+            retrieval_attempts=retrieval.attempts,
+        )
         latency_ms = int((time.perf_counter() - started) * 1000)
         message_id = await self._memory.persist_turn(
             conversation=conversation,
@@ -277,6 +307,7 @@ class ChatService:
             timings=timings_ms,
             regenerate=regenerate,
             model=model,
+            evaluation=evaluation,
         )
 
         yield ChatEvent(
@@ -292,7 +323,7 @@ class ChatService:
                 "answer_mode": answer_mode,
                 "standalone_question": standalone_question,
                 "query_classification": retrieval.query_classification,
-                "verification": _verification_summary(answer, chunks),
+                "verification": verification,
             },
         )
 
@@ -360,6 +391,18 @@ class ChatService:
             timings=timings,
             regenerate=regenerate,
             model="deterministic-jira-count",
+            evaluation=_answer_evaluation_payload(
+                answer=answer,
+                chunks=chunks,
+                source_mode=source_mode,
+                answer_mode="fast",
+                verification=_verification_summary(answer, chunks),
+                retrieval_confidence=1.0,
+                weak_internal_retrieval=False,
+                query_classification="jira_structured_count",
+                quality_notes=["Count computed from structured Jira document metadata."],
+                retrieval_attempts=[],
+            ),
         )
         yield ChatEvent(
             type="done",
@@ -407,6 +450,18 @@ class ChatService:
             timings=timings,
             regenerate=regenerate,
             model="deterministic-retrieval-gate",
+            evaluation=_answer_evaluation_payload(
+                answer=answer,
+                chunks=chunks,
+                source_mode=source_mode,
+                answer_mode=answer_mode,
+                verification={"grounded": True, "unsupported_claim_rate": 0.0, "invalid_citations": []},
+                retrieval_confidence=0.0,
+                weak_internal_retrieval=True,
+                query_classification="weak_retrieval_refusal",
+                quality_notes=["Internal retrieval was too weak to answer safely."],
+                retrieval_attempts=[],
+            ),
         )
         yield ChatEvent(
             type="done",
@@ -850,17 +905,7 @@ def _verify_and_shape_answer(answer: str, chunks: list[RetrievedChunk]) -> str:
 
 
 def _normalize_generated_answer(answer: str) -> str:
-    lines = answer.splitlines()
-    normalized: list[str] = []
-    in_fence = False
-    for line in lines:
-        if re.match(r"^\s*```", line):
-            in_fence = not in_fence
-            continue
-        if in_fence:
-            continue
-        normalized.append(line)
-    return "\n".join(normalized).strip()
+    return answer.replace("\r\n", "\n").strip()
 
 
 def _verification_summary(answer: str, chunks: list[RetrievedChunk]) -> dict[str, object]:
@@ -873,21 +918,74 @@ def _verification_summary(answer: str, chunks: list[RetrievedChunk]) -> dict[str
     }
 
 
+def _answer_evaluation_payload(
+    *,
+    answer: str,
+    chunks: list[RetrievedChunk],
+    source_mode: str,
+    answer_mode: str,
+    verification: dict[str, object],
+    retrieval_confidence: float,
+    weak_internal_retrieval: bool,
+    query_classification: str,
+    quality_notes: list[str],
+    retrieval_attempts: Sequence[object],
+) -> dict[str, object]:
+    web_sources = sum(1 for chunk in chunks if _chunk_source_type(chunk) == "web")
+    knowledge_sources = len(chunks) - web_sources
+    grounding_gate_triggered = _grounding_gate_triggered(answer)
+    return {
+        "schema_version": 1,
+        "source_mode": source_mode,
+        "answer_mode": answer_mode,
+        "query_classification": query_classification,
+        "retrieval_confidence": round(float(retrieval_confidence), 4),
+        "source_count": len(chunks),
+        "web_source_count": web_sources,
+        "knowledge_source_count": knowledge_sources,
+        "weak_internal_retrieval": weak_internal_retrieval,
+        "grounded": bool(verification.get("grounded")),
+        "unsupported_claim_rate": float(verification.get("unsupported_claim_rate") or 0.0),
+        "invalid_citations": list(verification.get("invalid_citations") or []),
+        "grounding_gate_triggered": grounding_gate_triggered,
+        "refusal": _is_refusal(answer),
+        "quality_notes": quality_notes[:8],
+        "retrieval_attempts": retrieval_attempts[:5],
+    }
+
+
+def _grounding_gate_triggered(answer: str) -> bool:
+    return "not grounded tightly enough to save as final" in answer.lower()
+
+
 def _remove_invalid_citation_markers(answer: str, source_count: int) -> str:
     invalid = set(_invalid_citation_markers(answer, source_count))
     if not invalid:
         return answer
     pattern = re.compile(r"\[(\d+)\]")
-    return pattern.sub(lambda match: "" if int(match.group(1)) in invalid else match.group(0), answer)
+    lines: list[str] = []
+    in_fence = False
+    for line in answer.splitlines():
+        if re.match(r"^\s*(?:```|~~~)", line):
+            in_fence = not in_fence
+            lines.append(line)
+            continue
+        if not in_fence:
+            line = pattern.sub(
+                lambda match: "" if int(match.group(1)) in invalid else match.group(0),
+                line,
+            )
+        lines.append(line)
+    return "\n".join(lines)
 
 
 def _invalid_citation_markers(answer: str, source_count: int) -> list[int]:
-    markers = [int(value) for value in re.findall(r"\[(\d+)\]", answer)]
+    markers = [int(value) for value in re.findall(r"\[(\d+)\]", _text_outside_code_fences(answer))]
     return sorted({marker for marker in markers if marker < 1 or marker > source_count})
 
 
 def _valid_citation_markers(answer: str, source_count: int) -> list[int]:
-    markers = [int(value) for value in re.findall(r"\[(\d+)\]", answer)]
+    markers = [int(value) for value in re.findall(r"\[(\d+)\]", _text_outside_code_fences(answer))]
     return sorted({marker for marker in markers if 1 <= marker <= source_count})
 
 
@@ -896,7 +994,7 @@ def _unsupported_claim_rate(answer: str, source_count: int) -> float:
         return 0.0
     sentences = [
         sentence.strip()
-        for sentence in re.split(r"(?<=[.!?])\s+", answer)
+        for sentence in re.split(r"(?<=[.!?])\s+", _text_outside_code_fences(answer))
         if len(sentence.split()) >= 7 and not sentence.strip().startswith(("Sources:", "-"))
     ]
     if not sentences:
@@ -909,8 +1007,15 @@ def _compact_answer(answer: str) -> str:
     lines = [line.rstrip() for line in answer.splitlines()]
     compact: list[str] = []
     blank = False
+    in_fence = False
     for line in lines:
-        if re.match(r"^\s*```", line):
+        if re.match(r"^\s*(?:```|~~~)", line):
+            in_fence = not in_fence
+            compact.append(line)
+            blank = False
+            continue
+        if in_fence:
+            compact.append(line)
             continue
         is_blank = not line.strip()
         if is_blank and blank:
@@ -918,6 +1023,18 @@ def _compact_answer(answer: str) -> str:
         compact.append(line)
         blank = is_blank
     return "\n".join(compact).strip()
+
+
+def _text_outside_code_fences(answer: str) -> str:
+    lines: list[str] = []
+    in_fence = False
+    for line in answer.splitlines():
+        if re.match(r"^\s*(?:```|~~~)", line):
+            in_fence = not in_fence
+            continue
+        if not in_fence:
+            lines.append(line)
+    return "\n".join(lines)
 
 
 def _is_refusal(answer: str) -> bool:

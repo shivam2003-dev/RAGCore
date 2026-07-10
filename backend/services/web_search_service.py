@@ -1,8 +1,10 @@
 import hashlib
 import re
+import time
 import uuid
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Any, cast
 from urllib.parse import parse_qs, urljoin, urlparse
 
@@ -100,7 +102,9 @@ class WebSearchService:
         top_k = max(1, min(max_results or self._settings.web_search_top_k, 10))
         results = await self._provider_search(query=query, max_results=top_k)
         if not results:
-            return []
+            raise ProviderError(
+                f"The configured {status.provider} provider returned no usable web results."
+            )
 
         kb = await self._ensure_web_kb(user)
         chunks: list[RetrievedChunk] = []
@@ -110,25 +114,44 @@ class WebSearchService:
         await self._db.flush()
         return chunks
 
+    async def test(self, *, query: str = "CVUM web search health check") -> dict[str, object]:
+        status = self.status()
+        if not status.configured:
+            raise ValidationError(f"Web search is not configured. {status.reason}")
+        started = time.perf_counter()
+        results = await self._provider_search(query=query, max_results=min(status.top_k, 3))
+        if not results:
+            raise ProviderError(
+                f"The configured {status.provider} provider returned no usable web results."
+            )
+        return {
+            "ok": True,
+            "provider": status.provider,
+            "latency_ms": int((time.perf_counter() - started) * 1000),
+            "result_count": len(results),
+            "results": [{"title": item.title, "url": item.url} for item in results],
+        }
+
     async def _provider_search(self, *, query: str, max_results: int) -> list[WebSearchResult]:
         provider = self._settings.web_search_provider.lower()
+        provider_query = _freshness_aware_query(query)
         if provider == "fake":
             return [
                 WebSearchResult(
                     title="CVUM web search result",
                     url="https://example.com/cvum-web-search",
-                    snippet=f"Live web-search style result for query: {query}",
+                    snippet=f"Live web-search style result for query: {provider_query}",
                     score=1.0,
                 )
             ][:max_results]
         if provider == "duckduckgo":
-            return await self._search_duckduckgo(query=query, max_results=max_results)
+            return await self._search_duckduckgo(query=provider_query, max_results=max_results)
         if provider == "brave":
-            return await self._search_brave(query=query, max_results=max_results)
+            return await self._search_brave(query=provider_query, max_results=max_results)
         if provider == "tavily":
-            return await self._search_tavily(query=query, max_results=max_results)
+            return await self._search_tavily(query=provider_query, max_results=max_results)
         if provider == "searxng":
-            return await self._search_searxng(query=query, max_results=max_results)
+            return await self._search_searxng(query=provider_query, max_results=max_results)
         raise ValidationError(f"Unsupported web search provider: {provider}")
 
     async def _search_duckduckgo(self, *, query: str, max_results: int) -> list[WebSearchResult]:
@@ -142,6 +165,11 @@ class WebSearchService:
             },
             params=params,
         )
+        lowered = html.lower()
+        if "challenge-form" in lowered or "unfortunately, bots use duckduckgo too" in lowered:
+            raise ProviderError(
+                "DuckDuckGo returned a bot challenge instead of search results. Configure Tavily, Brave, or SearXNG."
+            )
         soup = BeautifulSoup(html, "html.parser")
         rows: list[dict[str, object]] = []
         collect_limit = max(12, max_results * 3)
@@ -192,7 +220,9 @@ class WebSearchService:
             "max_results": max_results,
             "include_answer": False,
             "include_raw_content": False,
-            "search_depth": "basic",
+            "search_depth": "advanced",
+            "chunks_per_source": 3,
+            "topic": "general",
         }
         payload = await self._post_json(base_url, headers=headers, json=body)
         rows = payload.get("results") if isinstance(payload, dict) else []
@@ -419,6 +449,16 @@ def _score_duckduckgo_result(*, query: str, title: str, snippet: str, rank: int)
     if asks_for_result and any(cue in text for cue in ("who won", "result", "winner")):
         score += 0.1
     return min(score, 1.5)
+
+
+def _freshness_aware_query(query: str) -> str:
+    if not re.search(r"\b(current|currently|latest|today|recent|newest|stable release)\b", query, re.I):
+        return query
+    current_date = datetime.now(UTC).strftime("%B %d, %Y")
+    source_hint = "Prefer official primary sources and the newest dated result."
+    if re.search(r"\b(release|version)\b", query, re.I):
+        source_hint = "Check the official project repository and GitHub Releases page first."
+    return f"{query} As of {current_date}. {source_hint}"
 
 
 def _render_web_result(result: WebSearchResult) -> str:

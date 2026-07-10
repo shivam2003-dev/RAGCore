@@ -1,3 +1,4 @@
+import re
 from collections.abc import AsyncIterator, Iterable
 from dataclasses import dataclass
 
@@ -87,6 +88,34 @@ class ResponseGenerator:
                 usage=delta.usage,
                 model=self._llm.model,
             )
+
+    async def repair_grounding(
+        self,
+        *,
+        draft: str,
+        chunks: list[RetrievedChunk],
+        question: str,
+        assistant_role: str | None = None,
+        assistant_role_prompt: str | None = None,
+    ) -> tuple[str, LLMUsage]:
+        system = (
+            f"{build_system_prompt(chunks, role_name=assistant_role, role_prompt=assistant_role_prompt)}\n\n"
+            "Repair the draft so every factual paragraph and list item has a valid source marker. "
+            "Delete unsupported claims. Return only the revised user-facing answer."
+        )
+        return await _collect_llm_text(
+            self._llm,
+            LLMRequest(
+                system=system,
+                messages=[
+                    ChatMessage(
+                        role="user",
+                        content=f"Question:\n{question}\n\nDraft to repair:\n{draft}",
+                    )
+                ],
+                max_tokens=self._settings.llm_max_output_tokens,
+            ),
+        )
 
     async def _run_council(
         self,
@@ -198,6 +227,29 @@ class ResponseGenerator:
         )
         total_usage.input_tokens += chair_usage.input_tokens
         total_usage.output_tokens += chair_usage.output_tokens
+        if _council_process_leak(answer):
+            repaired, repair_usage = await _collect_llm_text(
+                chair,
+                LLMRequest(
+                    system=(
+                        f"{build_system_prompt(chunks, role_name=assistant_role, role_prompt=assistant_role_prompt)}"
+                        "\n\n"
+                        "Rewrite the draft as the user-facing final answer only. Remove all evaluation, "
+                        "candidate, judging, and council commentary. Keep supported facts and valid citations."
+                    ),
+                    messages=[
+                        ChatMessage(
+                            role="user",
+                            content=f"Question:\n{question}\n\nDraft to repair:\n{answer}",
+                        )
+                    ],
+                    max_tokens=self._settings.llm_max_output_tokens,
+                ),
+            )
+            total_usage.input_tokens += repair_usage.input_tokens
+            total_usage.output_tokens += repair_usage.output_tokens
+            answer = repaired.strip() or answer
+        answer = _strip_council_scaffolding(answer)
         return answer, total_usage, f"llm-council:{chair_model}"
 
 
@@ -210,6 +262,30 @@ def _question_message(*, current_question: str, standalone_question: str) -> str
         "Answer the current user question. Use the standalone retrieval question only to understand "
         "what the retrieved sources are about."
     )
+
+
+def _council_process_leak(answer: str) -> bool:
+    return bool(
+        re.search(
+            r"(?im)^#{0,3}\s*(evaluation|candidate\s+[12]|council|judge(?:ment)?)\b",
+            answer,
+        )
+    )
+
+
+def _strip_council_scaffolding(answer: str) -> str:
+    final_match = re.search(r"(?im)^#{1,3}\s*final answer\s*$", answer)
+    if final_match:
+        answer = answer[final_match.end() :]
+    lines = [
+        line
+        for line in answer.splitlines()
+        if not re.match(
+            r"(?i)^\s*#{0,3}\s*(evaluation|candidate\s+[12]|council|judge(?:ment)?)\b",
+            line,
+        )
+    ]
+    return "\n".join(lines).strip()
 
 
 async def _collect_llm_text(provider: LLMProvider, request: LLMRequest) -> tuple[str, LLMUsage]:
@@ -363,7 +439,11 @@ def _best_chair_model(models: list[str], available_models: list[str]) -> str | N
     candidates = [model for model in available_models if model not in models]
     if not candidates:
         return None
-    for preferred in ("anthropic/claude-haiku-4.5", "anthropic/claude-sonnet-4.5"):
+    for preferred in (
+        "google/gemini-2.5-flash",
+        "openai/gpt-4.1-mini",
+        "anthropic/claude-haiku-4.5",
+    ):
         if preferred in candidates:
             return preferred
     return candidates[0]

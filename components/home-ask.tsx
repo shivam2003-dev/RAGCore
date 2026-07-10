@@ -19,7 +19,7 @@ export function HomeAsk() {
     event?.preventDefault();
     const trimmed = value.trim();
     if (!trimmed) return;
-    router.push(`/ask?q=${encodeURIComponent(trimmed)}`);
+    router.push(`/?q=${encodeURIComponent(trimmed)}`);
   }
 
   return (
@@ -68,7 +68,7 @@ export function HomeAsk() {
               {suggestion}
             </button>
           ))}
-          <CardLink href="/ask">View all suggestions</CardLink>
+          <CardLink href="/">View all suggestions</CardLink>
         </div>
       </div>
     </Card>

@@ -2,7 +2,7 @@ import uuid
 
 from retrieval.context import RetrievedChunk
 from services.chat_service import _source_payload
-from services.web_search_service import _score_duckduckgo_result
+from services.web_search_service import _freshness_aware_query, _score_duckduckgo_result
 
 
 def test_duckduckgo_ranking_boosts_answer_bearing_result_snippets() -> None:
@@ -43,3 +43,11 @@ def test_web_source_payload_uses_display_snippet_not_rendered_chunk() -> None:
 
     assert payload["snippet"] == "Argentina defeated France in the final match."
     assert payload["url"] == "https://example.test"
+
+
+def test_current_web_queries_include_date_and_primary_source_hint() -> None:
+    rewritten = _freshness_aware_query("What is the current stable Argo CD release?")
+
+    assert "2026" in rewritten
+    assert "GitHub Releases" in rewritten
+    assert _freshness_aware_query("Explain Kubernetes RBAC") == "Explain Kubernetes RBAC"

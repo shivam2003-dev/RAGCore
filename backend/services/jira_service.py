@@ -1,31 +1,37 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
+import io
 import re
 import uuid
+import zipfile
 from collections.abc import AsyncIterator
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Self, cast
 from urllib.parse import urlparse
 
 import httpx
+from defusedxml import ElementTree
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.config import Settings
 from core.exceptions import AuthorizationError, NotFoundError, ProviderError, ValidationError
 from embeddings.base import EmbeddingProvider
+from ingestion.chunkers.recursive import RecursiveChunker
 from ingestion.queue import IngestionQueue
 from knowledgebase.source_metadata import normalize_source_metadata
 from models import Document, DocumentStatus, KnowledgeBase, User
 from repositories.audit import AuditLogRepository
 from repositories.knowledge import DocumentRepository, KnowledgeBaseRepository
+from retrieval.context import RetrievedChunk
 from services.document_service import DocumentService
 
 JsonDict = dict[str, object]
-CHUNK_STRATEGY_VERSION = "phase2-structure-v1"
+CHUNK_STRATEGY_VERSION = "jira-relationship-comments-attachments-v5"
 JIRA_FIELDS = (
     "summary,status,issuetype,priority,labels,components,assignee,reporter,"
-    "updated,created,description,project"
+    "updated,created,description,project,parent,subtasks,issuelinks,attachment,comment"
 )
 
 
@@ -35,6 +41,35 @@ class JiraBoard:
     name: str
     type: str
     url: str
+
+
+@dataclass(frozen=True, slots=True)
+class JiraIssueRef:
+    key: str
+    title: str
+    relationship: str
+    status: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class JiraComment:
+    id: str
+    author: str
+    body: str
+    created_at: str | None
+    updated_at: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class JiraAttachment:
+    id: str
+    filename: str
+    mime_type: str | None
+    size_bytes: int | None
+    content_url: str | None
+    created_at: str | None
+    author: str | None
+    extracted_text: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -61,6 +96,12 @@ class JiraIssue:
     description: str
     project_key: str | None
     project_name: str | None
+    parent: JiraIssueRef | None = None
+    related_issues: tuple[JiraIssueRef, ...] = ()
+    child_issues: tuple[JiraIssueRef, ...] = ()
+    comments: tuple[JiraComment, ...] = ()
+    comment_total: int | None = None
+    attachments: tuple[JiraAttachment, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -139,6 +180,22 @@ class JiraClient:
             type=_str(payload.get("type")) or "unknown",
             url=f"{self._base_url}/jira/software/c/projects/{self._settings.jira_project_key}/boards/{board_id_value}",
         )
+
+    async def get_issue(self, issue_key: str) -> JiraIssue:
+        payload = await self._get(
+            f"rest/api/3/issue/{issue_key}",
+            params={"fields": JIRA_FIELDS},
+        )
+        return self._parse_issue(payload)
+
+    async def get_child_issues(self, issue_key: str, *, max_issues: int = 50) -> list[JiraIssue]:
+        params: dict[str, str | int] = {
+            "jql": f'parent = "{issue_key}" ORDER BY updated DESC',
+            "maxResults": min(max_issues, 100),
+            "fields": JIRA_FIELDS,
+        }
+        payload = await self._get("rest/api/3/search/jql", params=params)
+        return [self._parse_issue(row) for row in _list_of_dicts(payload.get("issues"))[:max_issues]]
 
     async def iter_board_issues(self, board_id: int, max_issues: int | None = None) -> AsyncIterator[JiraIssue]:
         limit = max(1, min(self._settings.jira_issue_limit, 100))
@@ -238,6 +295,86 @@ class JiraClient:
                 continue
             return
 
+    async def hydrate_issue(self, issue: JiraIssue) -> JiraIssue:
+        comments = issue.comments
+        if self._settings.jira_include_comments:
+            needs_comment_page = issue.comment_total is None or issue.comment_total > len(comments)
+            if needs_comment_page:
+                try:
+                    comments = tuple(
+                        await self.get_comments(
+                            issue.key,
+                            max_comments=self._settings.jira_max_comments_per_issue,
+                        )
+                    )
+                except (AuthorizationError, NotFoundError, ProviderError):
+                    comments = issue.comments
+
+        attachments: list[JiraAttachment] = []
+        for attachment in issue.attachments[: self._settings.jira_max_attachments_per_issue]:
+            if not self._settings.jira_extract_attachments or not _attachment_is_extractable(attachment):
+                attachments.append(attachment)
+                continue
+            if attachment.size_bytes is not None and attachment.size_bytes > self._settings.jira_attachment_max_bytes:
+                attachments.append(attachment)
+                continue
+            try:
+                payload = await self._get_bytes(attachment.content_url or "")
+                extracted = _extract_attachment_text(attachment.filename, payload)
+            except (
+                AuthorizationError,
+                NotFoundError,
+                ProviderError,
+                ImportError,
+                OSError,
+                RuntimeError,
+                ValueError,
+                zipfile.BadZipFile,
+            ):
+                extracted = ""
+            attachments.append(replace(attachment, extracted_text=extracted))
+        return replace(issue, comments=comments, attachments=tuple(attachments))
+
+    async def get_comments(self, issue_key: str, *, max_comments: int) -> list[JiraComment]:
+        comments: list[JiraComment] = []
+        start_at = 0
+        page_size = min(max(max_comments, 1), 100)
+        while len(comments) < max_comments:
+            payload = await self._get(
+                f"rest/api/3/issue/{issue_key}/comment",
+                params={"startAt": start_at, "maxResults": page_size, "orderBy": "created"},
+            )
+            rows = _list_of_dicts(payload.get("comments"))
+            for row in rows:
+                comment = _parse_comment(row, fallback_id=str(len(comments) + 1))
+                if comment is None:
+                    continue
+                comments.append(comment)
+                if len(comments) >= max_comments:
+                    return comments
+            total = _int(payload.get("total")) or 0
+            start_at += len(rows)
+            if not rows or start_at >= total:
+                return comments
+        return comments
+
+    async def _get_bytes(self, path_or_url: str) -> bytes:
+        if self._client is None:
+            raise RuntimeError("JiraClient must be used as an async context manager")
+        if not path_or_url:
+            raise ValueError("Attachment URL is empty")
+        try:
+            response = await self._client.get(path_or_url)
+        except httpx.HTTPError as exc:
+            raise ProviderError("Jira attachment request failed") from exc
+        if response.status_code == 403:
+            raise AuthorizationError("Jira attachment is not visible to this account")
+        if response.status_code == 404:
+            raise NotFoundError("Jira attachment was not found")
+        if response.status_code >= 400:
+            raise ProviderError(f"Jira attachment request failed with HTTP {response.status_code}")
+        return response.content
+
     async def _get(self, path: str, params: dict[str, str | int] | None = None) -> JsonDict:
         if self._client is None:
             raise RuntimeError("JiraClient must be used as an async context manager")
@@ -270,6 +407,25 @@ class JiraClient:
         components = _list_of_dicts(fields.get("components"))
         assignee = _dict(fields.get("assignee"))
         reporter = _dict(fields.get("reporter"))
+        parent = _parse_issue_ref(fields.get("parent"), relationship="parent")
+        related_issues = _parse_issue_links(fields.get("issuelinks"))
+        subtasks = tuple(
+            ref
+            for item in _list(fields.get("subtasks"))
+            if (ref := _parse_issue_ref(item, relationship="child")) is not None
+        )
+        attachments = tuple(
+            attachment
+            for item in _list(fields.get("attachment"))
+            if (attachment := _parse_attachment(item)) is not None
+        )
+        comment_page = _dict(fields.get("comment"))
+        comments = tuple(
+            comment
+            for index, item in enumerate(_list_of_dicts(comment_page.get("comments")), start=1)
+            if (comment := _parse_comment(item, fallback_id=str(index))) is not None
+        )
+        comment_total = _int(comment_page.get("total")) if comment_page else None
         key = _required_str(row, "key")
         issue_id = _required_str(row, "id")
         return JiraIssue(
@@ -295,6 +451,12 @@ class JiraClient:
             description=adf_to_text(fields.get("description")),
             project_key=_str(project.get("key")),
             project_name=_str(project.get("name")),
+            parent=parent,
+            related_issues=related_issues,
+            child_issues=subtasks,
+            comments=comments,
+            comment_total=comment_total,
+            attachments=attachments,
         )
 
 
@@ -343,9 +505,16 @@ class JiraSyncService:
                     )
                     issues = client.iter_project_issues(self._settings.jira_project_key, max_issues=limit)
 
-                async for issue in issues:
-                    if not _jira_issue_allowed(issue, self._settings):
-                        continue
+                issue_rows = [
+                    issue async for issue in issues if _jira_issue_allowed(issue, self._settings)
+                ]
+                issue_rows = _attach_reverse_children(issue_rows)
+                issue_rows = await _hydrate_issues(
+                    client,
+                    issue_rows,
+                    concurrency=self._settings.jira_hydration_concurrency,
+                )
+                for issue in issue_rows:
                     documents.append(await self._sync_issue(user=user, kb=kb, board=board, issue=issue))
         except Exception as exc:
             await self._db.rollback()
@@ -500,6 +669,147 @@ def jira_config_status(settings: Settings) -> JsonDict:
     }
 
 
+async def retrieve_live_jira_relationships(
+    *,
+    settings: Settings,
+    issue_key: str,
+    query: str,
+    limit: int,
+) -> list[RetrievedChunk]:
+    """Read an exact Jira issue family so epic follow-ups include current comments and files."""
+
+    async with JiraClient(settings) as client:
+        root = await client.get_issue(issue_key)
+        children = await client.get_child_issues(issue_key, max_issues=50)
+        related = _attach_reverse_children([root, *children])
+        hydrated = await _hydrate_issues(
+            client,
+            related,
+            concurrency=settings.jira_hydration_concurrency,
+        )
+
+    board = JiraBoard(
+        id=settings.jira_board_id,
+        name=f"{settings.jira_project_key} live Jira",
+        type="live",
+        url=f"{normalize_jira_base_url(settings.jira_base_url)}/browse/{issue_key}",
+    )
+    chunker = RecursiveChunker()
+    query_terms = _evidence_terms(query)
+    candidates: list[RetrievedChunk] = []
+    for issue in hydrated:
+        rendered = _render_issue_markdown(board=board, issue=issue)
+        metadata = _issue_metadata(board=board, issue=issue)
+        metadata["retrieval_origin"] = "live_jira_relationship"
+        metadata["chunk_profile"] = CHUNK_STRATEGY_VERSION
+        for text_chunk in chunker.chunk(
+            rendered,
+            chunk_size=settings.jira_chunk_size_tokens,
+            overlap=settings.jira_chunk_overlap_tokens,
+        ):
+            content = _live_chunk_content(issue=issue, content=text_chunk.content)
+            chunk_terms = _evidence_terms(content)
+            overlap = len(query_terms & chunk_terms) / max(len(query_terms), 1)
+            is_root = issue.key.upper() == issue_key.upper()
+            score = min(
+                1.0,
+                (0.7 if is_root else 0.62)
+                + (0.38 * overlap)
+                + _evidence_intent_boost(query_terms=query_terms, chunk_terms=chunk_terms),
+            )
+            document_id = uuid.uuid5(uuid.NAMESPACE_URL, issue.url)
+            candidates.append(
+                RetrievedChunk(
+                    chunk_id=uuid.uuid5(
+                        uuid.NAMESPACE_URL,
+                        f"{issue.url}#live-jira-{text_chunk.ordinal}",
+                    ),
+                    document_id=document_id,
+                    document_title=f"{issue.key}: {issue.title}",
+                    content=content,
+                    metadata={**metadata, "chunk_ordinal": text_chunk.ordinal},
+                    sparse_score=score,
+                    score=score,
+                )
+            )
+
+    ranked = sorted(candidates, key=lambda item: item.score, reverse=True)
+    selected: list[RetrievedChunk] = []
+    per_document: dict[uuid.UUID, int] = {}
+    for chunk in ranked:
+        cap = 4 if str(chunk.metadata.get("jira_issue_key", "")).upper() == issue_key.upper() else 2
+        if per_document.get(chunk.document_id, 0) >= cap:
+            continue
+        selected.append(chunk)
+        per_document[chunk.document_id] = per_document.get(chunk.document_id, 0) + 1
+        if len(selected) >= limit:
+            break
+    return selected
+
+
+def _live_chunk_content(*, issue: JiraIssue, content: str) -> str:
+    prefix = ["Source type: jira", f"Title: {issue.key}: {issue.title}"]
+    if issue.parent is not None:
+        prefix.append(f"Parent Jira issue: {issue.parent.key}")
+    if issue.child_issues:
+        prefix.append(
+            "Connected Jira issues: " + ", ".join(item.key for item in issue.child_issues[:50])
+        )
+    return "\n".join([*prefix, "", content.strip()])
+
+
+def _evidence_terms(value: str) -> set[str]:
+    stopwords = {
+        "about",
+        "and",
+        "from",
+        "give",
+        "have",
+        "into",
+        "jira",
+        "that",
+        "the",
+        "this",
+        "what",
+        "where",
+        "which",
+        "with",
+    }
+    return {
+        token.lower()
+        for token in re.findall(r"[A-Za-z][A-Za-z0-9_.-]{2,}", value)
+        if token.lower() not in stopwords
+    }
+
+
+def _evidence_intent_boost(*, query_terms: set[str], chunk_terms: set[str]) -> float:
+    boost = 0.0
+    if query_terms & {"cpu", "ram", "memory", "server", "instance", "shape", "specification"} and chunk_terms & {
+        "cpu",
+        "ocpu",
+        "vcpu",
+        "ram",
+        "memory",
+        "server",
+        "instance",
+        "shape",
+        "compute",
+    }:
+        boost += 0.16
+    if query_terms & {"benchmark", "benchmarking", "load", "performance", "throughput", "latency"} and chunk_terms & {
+        "benchmark",
+        "load",
+        "performance",
+        "throughput",
+        "latency",
+        "meters",
+        "aws",
+        "oci",
+    }:
+        boost += 0.12
+    return boost
+
+
 def _sync_limit(requested: int | None, configured: int) -> int | None:
     if requested is not None:
         return requested
@@ -525,46 +835,394 @@ def jira_email(settings: Settings) -> str:
 
 
 def adf_to_text(value: object) -> str:
+    """Render Jira ADF as retrieval-friendly Markdown without account-id noise."""
+
+    return _clean_jira_description(_render_adf(value)).strip()
+
+
+def _render_adf(value: object, *, list_depth: int = 0, ordered: bool = False) -> str:
     if isinstance(value, str):
         return value
-    if isinstance(value, dict):
-        node_type = value.get("type")
-        if node_type == "text":
-            return _str(value.get("text")) or ""
-        pieces = [adf_to_text(child) for child in _list(value.get("content"))]
-        text = "".join(pieces) if node_type in {"paragraph", "heading"} else "\n".join(p for p in pieces if p)
-        if node_type in {"paragraph", "heading", "listItem"} and text:
-            return f"{text}\n"
-        return text
     if isinstance(value, list):
-        return "\n".join(adf_to_text(item) for item in value)
-    return ""
+        return "".join(_render_adf(item, list_depth=list_depth, ordered=ordered) for item in value)
+    if not isinstance(value, dict):
+        return ""
+
+    node_type = str(value.get("type") or "")
+    attrs = _dict(value.get("attrs"))
+    children = _list(value.get("content"))
+    if node_type == "text":
+        return _str(value.get("text")) or ""
+    if node_type == "hardBreak":
+        return "\n"
+    if node_type == "heading":
+        level = min(max(int(attrs.get("level") or 2), 1), 6)
+        return f"{'#' * level} {_inline_adf(children).strip()}\n\n"
+    if node_type == "paragraph":
+        text = _inline_adf(children).strip()
+        return f"{text}\n\n" if text else ""
+    if node_type in {"bulletList", "orderedList"}:
+        is_ordered = node_type == "orderedList"
+        return "".join(
+            _render_adf(child, list_depth=list_depth, ordered=is_ordered) for child in children
+        ) + "\n"
+    if node_type == "listItem":
+        rendered = "".join(
+            _render_adf(child, list_depth=list_depth + 1, ordered=ordered) for child in children
+        ).strip()
+        prefix = "1." if ordered else "-"
+        indent = "  " * list_depth
+        lines = rendered.splitlines() or [""]
+        continuation = "\n".join(f"{indent}  {line}" for line in lines[1:] if line.strip())
+        return f"{indent}{prefix} {lines[0]}\n{continuation}\n"
+    if node_type == "codeBlock":
+        language = str(attrs.get("language") or "").strip()
+        return f"```{language}\n{_inline_adf(children).strip()}\n```\n\n"
+    if node_type == "blockquote":
+        body = _render_adf(children).strip()
+        return "\n".join(f"> {line}" for line in body.splitlines()) + "\n\n"
+    if node_type == "table":
+        return _render_adf_table(children)
+    if node_type in {"panel", "expand", "nestedExpand", "doc"}:
+        return _render_adf(children, list_depth=list_depth, ordered=ordered)
+    if node_type == "status":
+        return str(attrs.get("text") or "").strip()
+    if node_type == "mention":
+        label = str(attrs.get("text") or attrs.get("displayName") or "user").strip().lstrip("@")
+        return f"@{label}"
+    if node_type == "inlineCard":
+        return str(attrs.get("title") or "linked content").strip()
+    if node_type in {"media", "mediaGroup", "mediaSingle", "rule"}:
+        return "\n"
+    return _render_adf(children, list_depth=list_depth, ordered=ordered)
+
+
+def _inline_adf(children: list[object]) -> str:
+    return "".join(_render_adf(child) for child in children).replace("\n\n", "\n")
+
+
+def _render_adf_table(children: list[object]) -> str:
+    rows: list[list[str]] = []
+    for row in children:
+        row_dict = _dict(row)
+        if row_dict.get("type") != "tableRow":
+            continue
+        cells = [
+            _render_adf(_list(_dict(cell).get("content"))).strip().replace("\n", " ")
+            for cell in _list(row_dict.get("content"))
+        ]
+        if any(cells):
+            rows.append(cells)
+    if not rows:
+        return ""
+    width = max(len(row) for row in rows)
+    normalized = [row + [""] * (width - len(row)) for row in rows]
+    lines = [" | ".join(normalized[0]), " | ".join(["---"] * width)]
+    lines.extend(" | ".join(row) for row in normalized[1:])
+    return "\n".join(lines) + "\n\n"
+
+
+def _clean_jira_description(value: str) -> str:
+    value = value.replace("\u200b", "").replace("\ufeff", "")
+    lines: list[str] = []
+    previous = ""
+    for raw_line in value.splitlines():
+        line = re.sub(r"[ \t]+", " ", raw_line).strip()
+        lowered = line.lower()
+        if not line:
+            if lines and lines[-1]:
+                lines.append("")
+            continue
+        if lowered in {"no description", "no description provided", "n/a", "none"}:
+            continue
+        if any(
+            marker in lowered
+            for marker in (
+                "this issue was automatically generated",
+                "do not edit this issue manually",
+                "sent from jira",
+                "generated by jira automation",
+            )
+        ):
+            continue
+        if line == previous:
+            continue
+        lines.append(line)
+        previous = line
+    return re.sub(r"\n{3,}", "\n\n", "\n".join(lines)).strip()
+
+
+async def _hydrate_issues(
+    client: JiraClient,
+    issues: list[JiraIssue],
+    *,
+    concurrency: int,
+) -> list[JiraIssue]:
+    semaphore = asyncio.Semaphore(max(1, concurrency))
+
+    async def hydrate(issue: JiraIssue) -> JiraIssue:
+        async with semaphore:
+            return await client.hydrate_issue(issue)
+
+    return list(await asyncio.gather(*(hydrate(issue) for issue in issues)))
+
+
+def _attach_reverse_children(issues: list[JiraIssue]) -> list[JiraIssue]:
+    children_by_parent: dict[str, list[JiraIssueRef]] = {}
+    for issue in issues:
+        if issue.parent is None:
+            continue
+        children_by_parent.setdefault(issue.parent.key, []).append(
+            JiraIssueRef(
+                key=issue.key,
+                title=issue.title,
+                relationship="child",
+                status=issue.status,
+            )
+        )
+    enriched: list[JiraIssue] = []
+    for issue in issues:
+        children = [*issue.child_issues, *children_by_parent.get(issue.key, [])]
+        deduped = {(child.key, child.relationship): child for child in children}
+        enriched.append(replace(issue, child_issues=tuple(deduped.values())))
+    return enriched
+
+
+def _parse_issue_ref(value: object, *, relationship: str) -> JiraIssueRef | None:
+    row = _dict(value)
+    key = _str(row.get("key"))
+    if not key:
+        return None
+    fields = _dict(row.get("fields"))
+    status = _dict(fields.get("status"))
+    return JiraIssueRef(
+        key=key,
+        title=_str(fields.get("summary")) or key,
+        relationship=relationship,
+        status=_str(status.get("name")),
+    )
+
+
+def _parse_issue_links(value: object) -> tuple[JiraIssueRef, ...]:
+    refs: list[JiraIssueRef] = []
+    for item in _list(value):
+        link = _dict(item)
+        link_type = _dict(link.get("type"))
+        inward = _parse_issue_ref(
+            link.get("inwardIssue"),
+            relationship=_str(link_type.get("inward")) or "related from",
+        )
+        outward = _parse_issue_ref(
+            link.get("outwardIssue"),
+            relationship=_str(link_type.get("outward")) or "relates to",
+        )
+        if inward is not None:
+            refs.append(inward)
+        if outward is not None:
+            refs.append(outward)
+    return tuple(refs)
+
+
+def _parse_attachment(value: object) -> JiraAttachment | None:
+    row = _dict(value)
+    attachment_id = _str(row.get("id"))
+    filename = _str(row.get("filename"))
+    if not attachment_id or not filename:
+        return None
+    author = _dict(row.get("author"))
+    return JiraAttachment(
+        id=attachment_id,
+        filename=filename,
+        mime_type=_str(row.get("mimeType")),
+        size_bytes=_int(row.get("size")),
+        content_url=_str(row.get("content")),
+        created_at=_str(row.get("created")),
+        author=_str(author.get("displayName")),
+    )
+
+
+def _parse_comment(row: JsonDict, *, fallback_id: str) -> JiraComment | None:
+    body = adf_to_text(row.get("body"))
+    if not body:
+        return None
+    author = _dict(row.get("author"))
+    return JiraComment(
+        id=_str(row.get("id")) or fallback_id,
+        author=_str(author.get("displayName")) or "Unknown author",
+        body=body,
+        created_at=_str(row.get("created")),
+        updated_at=_str(row.get("updated")),
+    )
+
+
+def _attachment_is_extractable(attachment: JiraAttachment) -> bool:
+    filename = attachment.filename.lower()
+    return filename.endswith(
+        (
+            ".xlsx",
+            ".csv",
+            ".docx",
+            ".pdf",
+            ".png",
+            ".jpg",
+            ".jpeg",
+            ".webp",
+            ".txt",
+            ".md",
+            ".json",
+            ".yaml",
+            ".yml",
+            ".log",
+        )
+    )
+
+
+def _extract_attachment_text(filename: str, payload: bytes) -> str:
+    suffix = filename.lower()
+    if suffix.endswith(".xlsx"):
+        return _extract_xlsx_text(payload)
+    if suffix.endswith(".docx"):
+        return _extract_docx_text(payload)
+    if suffix.endswith(".pdf"):
+        return _extract_pdf_text(payload)
+    if suffix.endswith((".png", ".jpg", ".jpeg", ".webp")):
+        return _extract_image_text(payload)
+    return payload.decode("utf-8", errors="replace")[:120_000].strip()
+
+
+def _extract_docx_text(payload: bytes) -> str:
+    from docx import Document as WordDocument
+
+    document = WordDocument(io.BytesIO(payload))
+    sections: list[str] = []
+    sections.extend(paragraph.text.strip() for paragraph in document.paragraphs if paragraph.text.strip())
+    for table_index, table in enumerate(document.tables, start=1):
+        rows = [
+            " | ".join(re.sub(r"\s+", " ", cell.text).strip() for cell in row.cells)
+            for row in table.rows
+        ]
+        rows = [row for row in rows if row.strip(" |")]
+        if rows:
+            sections.extend([f"### Table {table_index}", *rows])
+    return "\n\n".join(sections)[:120_000].strip()
+
+
+def _extract_pdf_text(payload: bytes) -> str:
+    from pypdf import PdfReader
+
+    reader = PdfReader(io.BytesIO(payload))
+    return "\n\n".join((page.extract_text() or "").strip() for page in reader.pages)[:120_000].strip()
+
+
+def _extract_image_text(payload: bytes) -> str:
+    import pytesseract
+    from PIL import Image
+
+    with Image.open(io.BytesIO(payload)) as image:
+        return pytesseract.image_to_string(image).strip()[:120_000]
+
+
+def _extract_xlsx_text(payload: bytes) -> str:
+    with zipfile.ZipFile(io.BytesIO(payload)) as workbook:
+        shared_strings: list[str] = []
+        if "xl/sharedStrings.xml" in workbook.namelist():
+            root = ElementTree.fromstring(workbook.read("xl/sharedStrings.xml"))
+            shared_strings = [
+                "".join(node.text or "" for node in item.iter() if node.tag.endswith("}t"))
+                for item in root
+            ]
+
+        sections: list[str] = []
+        sheet_names = sorted(
+            name
+            for name in workbook.namelist()
+            if re.fullmatch(r"xl/worksheets/sheet\d+\.xml", name)
+        )
+        for sheet_index, sheet_name in enumerate(sheet_names, start=1):
+            root = ElementTree.fromstring(workbook.read(sheet_name))
+            rows: list[str] = []
+            for row in (node for node in root.iter() if node.tag.endswith("}row")):
+                cells: list[str] = []
+                for cell in (node for node in row if node.tag.endswith("}c")):
+                    value_node = next((node for node in cell if node.tag.endswith("}v")), None)
+                    inline_nodes = [node for node in cell.iter() if node.tag.endswith("}t")]
+                    value = "".join(node.text or "" for node in inline_nodes)
+                    if value_node is not None and value_node.text is not None:
+                        value = value_node.text
+                        if cell.attrib.get("t") == "s" and value.isdigit():
+                            index = int(value)
+                            if index < len(shared_strings):
+                                value = shared_strings[index]
+                    cells.append(re.sub(r"\s+", " ", value).strip())
+                if any(cells):
+                    rows.append(" | ".join(cells))
+                if sum(len(item) for item in rows) >= 100_000:
+                    break
+            if rows:
+                sections.append(f"### Worksheet {sheet_index}\n\n" + "\n".join(rows))
+        return "\n\n".join(sections)[:120_000].strip()
 
 
 def _render_issue_markdown(*, board: JiraBoard, issue: JiraIssue) -> str:
+    _ = board
     fields = [
         ("Issue key", issue.key),
-        ("URL", issue.url),
-        ("Board", f"{board.name} ({board.id})"),
-        ("Project", f"{issue.project_name or 'Unknown'} ({issue.project_key or 'unknown'})"),
+        ("Project", issue.project_name or issue.project_key),
         ("Type", issue.issue_type),
         ("Status", issue.status),
-        ("Status category", issue.status_category),
         ("Priority", issue.priority),
         ("Labels", ", ".join(issue.labels) if issue.labels else None),
         ("Components", ", ".join(issue.components) if issue.components else None),
         ("Assignee", issue.assignee),
-        ("Assignee email", issue.assignee_email),
-        ("Assignee account id", issue.assignee_account_id),
-        ("Reporter", issue.reporter),
-        ("Reporter email", issue.reporter_email),
-        ("Created", issue.created_at),
         ("Updated", issue.updated_at),
+        (
+            "Parent epic/issue",
+            f"{issue.parent.key}: {issue.parent.title}" if issue.parent is not None else None,
+        ),
     ]
     lines = [f"# {issue.key}: {issue.title}", ""]
     lines.extend(f"- **{label}:** {value}" for label, value in fields if value)
-    lines.extend(["", "## Description", "", issue.description.strip() or "No description."])
-    return "\n".join(lines).strip() + "\n"
+    description = _clean_jira_description(issue.description)
+    if description:
+        lines.extend(["", "## Description", "", description])
+    relationships = [*issue.child_issues, *issue.related_issues]
+    if relationships:
+        lines.extend(["", "## Connected Jira issues", ""])
+        lines.extend(
+            f"- **{reference.key}: {reference.title}** - {reference.relationship}"
+            + (f" - Status: {reference.status}" if reference.status else "")
+            for reference in relationships
+        )
+    if issue.comments:
+        lines.extend(["", "## Comments", ""])
+        for index, comment in enumerate(issue.comments, start=1):
+            timestamp = comment.updated_at or comment.created_at or "undated"
+            lines.extend(
+                [
+                    f"### Comment {index} by {comment.author} ({timestamp})",
+                    "",
+                    comment.body,
+                    "",
+                ]
+            )
+    if issue.attachments:
+        lines.extend(["", "## Attachments", ""])
+        for attachment in issue.attachments:
+            details = [
+                attachment.mime_type or "unknown type",
+                f"{attachment.size_bytes} bytes" if attachment.size_bytes is not None else "unknown size",
+            ]
+            lines.extend(
+                [
+                    f"### Attachment: {attachment.filename}",
+                    "",
+                    f"- Metadata: {', '.join(details)}",
+                    f"- Download: {attachment.content_url}" if attachment.content_url else "",
+                ]
+            )
+            if attachment.extracted_text:
+                lines.extend(["", "#### Extracted attachment content", "", attachment.extracted_text])
+    return "\n".join(lines).replace("\x00", "").strip() + "\n"
 
 
 def _issue_metadata(*, board: JiraBoard, issue: JiraIssue) -> dict[str, object]:
@@ -594,6 +1252,12 @@ def _issue_metadata(*, board: JiraBoard, issue: JiraIssue) -> dict[str, object]:
         "status": issue.status,
         "labels": issue.labels,
         "components": issue.components,
+        "parent_issue_key": issue.parent.key if issue.parent else None,
+        "child_issue_keys": [item.key for item in issue.child_issues],
+        "related_issue_keys": [item.key for item in issue.related_issues],
+        "comment_count": len(issue.comments),
+        "attachment_names": [item.filename for item in issue.attachments],
+        "extracted_attachment_count": sum(1 for item in issue.attachments if item.extracted_text),
         "owner": owner,
         "acl": "connector-visible",
         "connector": "jira",
@@ -616,6 +1280,11 @@ def _issue_metadata(*, board: JiraBoard, issue: JiraIssue) -> dict[str, object]:
         "jira_issue_type": issue.issue_type,
         "jira_labels": issue.labels,
         "jira_components": issue.components,
+        "jira_parent_issue_key": issue.parent.key if issue.parent else None,
+        "jira_child_issue_keys": [item.key for item in issue.child_issues],
+        "jira_related_issue_keys": [item.key for item in issue.related_issues],
+        "jira_comment_count": len(issue.comments),
+        "jira_attachment_names": [item.filename for item in issue.attachments],
         "jira_assignee": issue.assignee,
         "jira_assignee_email": issue.assignee_email,
         "jira_assignee_account_id": issue.assignee_account_id,
@@ -647,17 +1316,26 @@ def _issue_metadata(*, board: JiraBoard, issue: JiraIssue) -> dict[str, object]:
 def _jira_issue_allowed(issue: JiraIssue, settings: Settings) -> bool:
     status = (issue.status or "").lower()
     labels = {label.lower() for label in issue.labels}
+    issue_type = (issue.issue_type or "").lower()
     include_statuses = _csv_set(settings.jira_include_statuses)
     exclude_statuses = _csv_set(settings.jira_exclude_statuses)
     include_labels = _csv_set(settings.jira_include_labels)
     exclude_labels = _csv_set(settings.jira_exclude_labels)
+    include_issue_types = _csv_set(settings.jira_include_issue_types)
+    exclude_issue_types = _csv_set(settings.jira_exclude_issue_types)
     if include_statuses and status not in include_statuses:
         return False
     if exclude_statuses and status in exclude_statuses:
         return False
     if include_labels and not (labels & include_labels):
         return False
-    return not (exclude_labels and labels & exclude_labels)
+    if exclude_labels and labels & exclude_labels:
+        return False
+    if include_issue_types and issue_type not in include_issue_types:
+        return False
+    if exclude_issue_types and issue_type in exclude_issue_types:
+        return False
+    return not (settings.jira_drop_empty_descriptions and not _clean_jira_description(issue.description))
 
 
 def _csv_set(value: str) -> set[str]:

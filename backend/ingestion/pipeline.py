@@ -7,7 +7,7 @@ executes). Status transitions and per-stage errors land on the document row.
 import uuid
 from pathlib import Path
 
-from core.config import get_settings
+from core.config import Settings, get_settings
 from core.logging import get_logger
 from database.base import utcnow
 from database.session import SessionFactory
@@ -58,10 +58,14 @@ async def ingest_document(
             path = Path(file_path)
             extracted = extract_text(path)
             chunker = select_chunker(path.suffix.lower())
+            chunk_size, chunk_overlap, chunk_profile = _chunking_profile(
+                settings=settings,
+                document_metadata=document_metadata,
+            )
             text_chunks = chunker.chunk(
                 extracted.text,
-                chunk_size=settings.chunk_size_tokens,
-                overlap=settings.chunk_overlap_tokens,
+                chunk_size=chunk_size,
+                overlap=chunk_overlap,
             )
             if not text_chunks:
                 raise ValueError("Document produced no chunks")
@@ -73,6 +77,9 @@ async def ingest_document(
                         chunk_metadata=chunk.metadata,
                         extracted_metadata=extracted.metadata,
                         document_metadata=document_metadata,
+                        chunk_profile=chunk_profile,
+                        chunk_size=chunk_size,
+                        chunk_overlap=chunk_overlap,
                     ),
                 )
                 for chunk in text_chunks
@@ -129,6 +136,9 @@ def _chunk_metadata(
     chunk_metadata: dict,
     extracted_metadata: dict,
     document_metadata: dict,
+    chunk_profile: str = "default-v1",
+    chunk_size: int = 400,
+    chunk_overlap: int = 60,
 ) -> dict:
     merged = dict(document_metadata)
     merged.update(extracted_metadata)
@@ -159,7 +169,36 @@ def _chunk_metadata(
     merged["chunk_source_key"] = str(source_key or "")
     merged["chunk_source_family"] = source_family
     merged["chunk_strategy_version"] = str(merged.get("chunk_strategy_version") or "phase2-structure-v1")
+    merged["chunk_profile"] = chunk_profile
+    merged["chunk_size_tokens"] = chunk_size
+    merged["chunk_overlap_tokens"] = chunk_overlap
     return merged
+
+
+def _chunking_profile(*, settings: Settings, document_metadata: dict) -> tuple[int, int, str]:
+    source_family = str(
+        document_metadata.get("source_type")
+        or document_metadata.get("source_family")
+        or document_metadata.get("source")
+        or "upload"
+    ).lower()
+    if source_family == "jira":
+        return (
+            settings.jira_chunk_size_tokens,
+            settings.jira_chunk_overlap_tokens,
+            "jira-relationship-comments-attachments-v5",
+        )
+    if source_family == "confluence":
+        return (
+            settings.confluence_chunk_size_tokens,
+            settings.confluence_chunk_overlap_tokens,
+            "confluence-heading-context-v2",
+        )
+    return (
+        settings.chunk_size_tokens,
+        settings.chunk_overlap_tokens,
+        "default-v1",
+    )
 
 
 def _contextual_content(content: str, metadata: dict) -> str:
@@ -171,6 +210,13 @@ def _contextual_content(content: str, metadata: dict) -> str:
     headings = str(metadata.get("chunk_heading_path") or "").strip()
     kind = str(metadata.get("chunk_kind") or "").strip()
     parent_context = str(metadata.get("parent_context") or "").strip()
+    parent_issue = str(metadata.get("jira_parent_issue_key") or "").strip()
+    connected_issue_values = metadata.get("jira_child_issue_keys") or metadata.get("jira_related_issue_keys") or []
+    connected_issues = (
+        ", ".join(str(item) for item in connected_issue_values[:20])
+        if isinstance(connected_issue_values, list)
+        else ""
+    )
     prefix_parts = [
         f"Source type: {source}" if source else "",
         f"Title: {title}" if title else "",
@@ -179,6 +225,8 @@ def _contextual_content(content: str, metadata: dict) -> str:
         f"Updated: {updated}" if updated else "",
         f"Section: {headings}" if headings else "",
         f"Chunk kind: {kind}" if kind else "",
+        f"Parent Jira issue: {parent_issue}" if parent_issue else "",
+        f"Connected Jira issues: {connected_issues}" if connected_issues else "",
         f"Parent section context: {parent_context}" if parent_context and parent_context not in content else "",
     ]
     prefix = "\n".join(part for part in prefix_parts if part)

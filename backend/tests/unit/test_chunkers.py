@@ -1,9 +1,10 @@
+from core.config import Settings
 from ingestion.chunkers.base import count_tokens
 from ingestion.chunkers.code import CodeChunker
 from ingestion.chunkers.markdown import MarkdownChunker
 from ingestion.chunkers.recursive import RecursiveChunker
 from ingestion.chunkers.sliding import SlidingWindowChunker
-from ingestion.pipeline import _chunk_metadata, _contextual_content, select_chunker
+from ingestion.pipeline import _chunk_metadata, _chunking_profile, _contextual_content, select_chunker
 
 
 def test_recursive_respects_chunk_size():
@@ -20,6 +21,13 @@ def test_recursive_short_text_single_chunk():
     assert chunks[0].content == "Short text."
 
 
+def test_recursive_hard_splits_unbroken_payloads() -> None:
+    chunks = RecursiveChunker().chunk("x" * 10_000, chunk_size=100, overlap=20)
+
+    assert len(chunks) > 1
+    assert all(chunk.token_count <= 100 for chunk in chunks)
+
+
 def test_markdown_keeps_heading_metadata():
     md = "# Guide\n\nIntro paragraph.\n\n## Setup\n\nInstall the tool.\n\n## Usage\n\nRun it."
     chunks = MarkdownChunker().chunk(md, chunk_size=200, overlap=20)
@@ -32,7 +40,10 @@ def test_markdown_keeps_heading_metadata():
 
 
 def test_markdown_marks_table_and_procedure_sections():
-    md = "# HES Architecture\n\n## Flow\n\n| Step | Owner |\n| Ingest | SRE |\n\n## Runbook\n\n1. Verify alarm.\n2. Restart broker."
+    md = (
+        "# HES Architecture\n\n## Flow\n\n| Step | Owner |\n| Ingest | SRE |"
+        "\n\n## Runbook\n\n1. Verify alarm.\n2. Restart broker."
+    )
     chunks = MarkdownChunker().chunk(md, chunk_size=200, overlap=20)
 
     table = next(c for c in chunks if "Owner" in c.content)
@@ -97,3 +108,18 @@ def test_contextual_content_prepends_source_metadata():
     assert "Section: Architecture > Broker" in content
     assert "Parent section context:" in content
     assert content.endswith("The broker receives meter events.")
+
+
+def test_source_specific_chunk_profiles() -> None:
+    settings = Settings()
+
+    assert _chunking_profile(settings=settings, document_metadata={"source": "jira"}) == (
+        320,
+        40,
+        "jira-relationship-comments-attachments-v5",
+    )
+    assert _chunking_profile(settings=settings, document_metadata={"source": "confluence"}) == (
+        400,
+        60,
+        "confluence-heading-context-v2",
+    )

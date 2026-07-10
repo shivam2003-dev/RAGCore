@@ -8,7 +8,7 @@ import { TopBar } from "@/components/topbar";
 import { ApiError, kimbalApi, type UserOut } from "@/lib/kimbal-api";
 
 const LOGIN_PATH = "/login";
-const ASK_PATH = "/ask";
+const ASK_PATH = "/";
 
 function loginHref(pathname: string) {
   if (pathname === LOGIN_PATH) return LOGIN_PATH;
@@ -22,8 +22,9 @@ export function AuthShell({ children }: { children: ReactNode }) {
   const pathname = currentPathname || ASK_PATH;
 
   const isLogin = pathname === LOGIN_PATH;
+  const isAsk = pathname === ASK_PATH || pathname === "/ask";
   const isAdmin = user?.role === "admin";
-  const userCanViewPath = isAdmin || pathname === ASK_PATH;
+  const userCanViewPath = isAdmin || isAsk;
 
   useEffect(() => {
     let cancelled = false;
@@ -39,7 +40,7 @@ export function AuthShell({ children }: { children: ReactNode }) {
         const currentUser = await kimbalApi.ensureSession();
         if (cancelled) return;
         setUser(currentUser);
-        if (currentUser.role !== "admin" && pathname !== ASK_PATH) {
+        if (currentUser.role !== "admin" && !isAsk) {
           window.location.replace(ASK_PATH);
         }
       } catch (error) {
@@ -57,7 +58,7 @@ export function AuthShell({ children }: { children: ReactNode }) {
     return () => {
       cancelled = true;
     };
-  }, [isLogin, pathname]);
+  }, [isAsk, isLogin, pathname]);
 
   async function logout() {
     await kimbalApi.logout();
@@ -79,13 +80,22 @@ export function AuthShell({ children }: { children: ReactNode }) {
     );
   }
 
+  if (isAsk) {
+    return (
+      <>
+        <AppPreferences />
+        {children}
+      </>
+    );
+  }
+
   return (
     <>
       <AppPreferences />
       <Sidebar user={user} onLogout={() => void logout()} />
-      <div className="kimbal-shell pl-[248px]">
+      <div className="kimbal-shell lg:pl-[248px]">
         <TopBar user={user} onLogout={() => void logout()} />
-        <main className="mx-auto max-w-[1440px] px-8 py-7">{children}</main>
+        <main className="mx-auto max-w-[1440px] px-4 py-5 sm:px-6 lg:px-8 lg:py-7">{children}</main>
       </div>
     </>
   );

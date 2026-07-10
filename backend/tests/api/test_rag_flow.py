@@ -160,7 +160,7 @@ async def test_web_only_ask_streams_and_persists_citations(client, auth_headers)
     sources_payload = json.loads(events[0][1])
     assert sources_payload["source_mode"] == "web"
     assert sources_payload["sources"][0]["source_type"] == "web"
-    assert sources_payload["sources"][0]["url"] == "https://example.com/kimbal-web-search"
+    assert sources_payload["sources"][0]["url"] == "https://example.com/cvum-web-search"
 
     done = json.loads(events[-1][1])
     assert done["source_mode"] == "web"

@@ -16,3 +16,8 @@ async def web_search_status(_user: CurrentUser, web_search: WebSearchDep) -> Web
         top_k=status.top_k,
         reason=status.reason,
     )
+
+
+@router.post("/test")
+async def test_web_search(_user: CurrentUser, web_search: WebSearchDep) -> dict[str, object]:
+    return await web_search.test()

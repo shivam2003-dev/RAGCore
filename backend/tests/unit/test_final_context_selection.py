@@ -1,5 +1,6 @@
 import uuid
 
+from repositories.chunks import _lexical_query_terms
 from retrieval.context import RetrievalContext, RetrievedChunk
 from retrieval.pipeline import retrieval_search_query, select_final_context
 
@@ -42,5 +43,18 @@ def test_final_context_limits_repeated_chunks_from_same_document() -> None:
 
 
 def test_retrieval_search_query_removes_doc_question_noise() -> None:
-    assert retrieval_search_query("What does the Confluence documentation say about HES Architecture?") == "HES Architecture"
+    query = "What does the Confluence documentation say about HES Architecture?"
+    assert retrieval_search_query(query) == "HES Architecture"
     assert retrieval_search_query("Tell me about CVIR-6360") == "CVIR-6360"
+    assert retrieval_search_query("From DEVO-9195 find benchmark CPU RAM and instance type") == (
+        "DEVO-9195 benchmark CPU RAM instance type"
+    )
+
+
+def test_relaxed_sparse_terms_keep_subjects_and_drop_question_filler() -> None:
+    assert _lexical_query_terms("Explain HES architecture and its major components") == [
+        "hes",
+        "architecture",
+        "major",
+        "components",
+    ]

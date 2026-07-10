@@ -13,6 +13,63 @@ from repositories.users import UserRepository
 router = APIRouter(prefix="/admin", tags=["admin"], dependencies=[require_role(Role.ADMIN)])
 
 
+@router.get("/runtime-config")
+async def runtime_config(_admin: CurrentUser, settings: SettingsDep) -> dict[str, object]:
+    """Expose effective non-secret controls so the admin UI never shows placeholder values."""
+
+    council_models = [item.strip() for item in settings.llm_council_models.split(",") if item.strip()]
+    return {
+        "app_env": settings.app_env,
+        "auth_disabled": settings.auth_disabled,
+        "retrieval": {
+            "top_k": settings.retrieval_top_k,
+            "candidate_k": settings.retrieval_candidate_k,
+            "dense_weight": settings.retrieval_dense_weight,
+            "sparse_weight": settings.retrieval_sparse_weight,
+        },
+        "chunking": {
+            "uploads": {
+                "profile": "default-v1",
+                "size_tokens": settings.chunk_size_tokens,
+                "overlap_tokens": settings.chunk_overlap_tokens,
+            },
+            "jira": {
+                "profile": "jira-relationship-comments-attachments-v5",
+                "size_tokens": settings.jira_chunk_size_tokens,
+                "overlap_tokens": settings.jira_chunk_overlap_tokens,
+                "excluded_issue_types": [
+                    item.strip()
+                    for item in settings.jira_exclude_issue_types.split(",")
+                    if item.strip()
+                ],
+                "comments_indexed": settings.jira_include_comments,
+                "attachments_extracted": settings.jira_extract_attachments,
+            },
+            "confluence": {
+                "profile": "confluence-heading-context-v2",
+                "size_tokens": settings.confluence_chunk_size_tokens,
+                "overlap_tokens": settings.confluence_chunk_overlap_tokens,
+            },
+        },
+        "web": {
+            "provider": settings.web_search_provider,
+            "top_k": settings.web_search_top_k,
+            "configured": bool(
+                settings.web_search_provider not in {"", "disabled"}
+                and (
+                    settings.web_search_provider not in {"brave", "tavily"}
+                    or settings.web_search_api_key
+                )
+            ),
+        },
+        "council": {
+            "enabled": settings.llm_council_enabled,
+            "models": council_models,
+            "chair_model": settings.llm_council_chair_model or None,
+        },
+    }
+
+
 @router.get("/users", response_model=list[UserOut])
 async def list_users(user: CurrentUser, db: DbDep, limit: int = 100, offset: int = 0) -> list[UserOut]:
     users = await UserRepository(db).list_by_org(user.organization_id, limit=limit, offset=offset)

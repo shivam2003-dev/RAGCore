@@ -26,6 +26,7 @@ os.environ.update(
     DISCOVER_BASE_URL="",
     LLM_COUNCIL_ENABLED="false",
     LLM_COUNCIL_MODELS="",
+    AUTH_DISABLED="false",
     AUTH_ALLOWED_EMAIL_DOMAIN="kimbal.io",
     AUTH_SUPER_ADMIN_EMAIL="s.kumar@kimbal.io",
     AUTH_DEFAULT_ORG_NAME="Kimbal",
