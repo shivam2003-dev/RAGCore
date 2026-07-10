@@ -6,7 +6,7 @@ import { ArrowRight, LockKeyhole, Mail } from "lucide-react";
 import { CVUMMark } from "@/components/brand-icons";
 import { ApiError, kimbalApi } from "@/lib/kimbal-api";
 
-const ASK_PATH = "/ask";
+const ASK_PATH = "/";
 
 function safeNext(next: string | null, isAdmin: boolean) {
   if (!next || !next.startsWith("/") || next.startsWith("//") || next === "/login") {

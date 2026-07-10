@@ -292,6 +292,29 @@ export type EvalRecentAnswer = {
   citations: number;
   groundedness_score: number | null;
   relevance_score: number | null;
+  unsupported_claim_rate: number | null;
+  source_mode: string;
+  answer_mode: string;
+  verdict: "healthy" | "needs_review" | "failure" | "unknown" | string;
+  issues: string[];
+};
+
+export type EvalMode = {
+  source_mode: string;
+  answer_mode: string;
+  answers: number;
+  avg_latency_ms: number | null;
+  groundedness_score: number | null;
+  unsupported_claim_rate: number | null;
+  failure_rate: number | null;
+};
+
+export type EvalQuality = {
+  evaluated: number;
+  healthy: number;
+  needs_review: number;
+  failures: number;
+  issue_counts: Record<string, number>;
 };
 
 export type EvalBenchmarkComponent = {
@@ -388,6 +411,8 @@ export type EvalOverview = {
   scores: EvalScore[];
   latency: EvalLatency;
   models: EvalModel[];
+  modes: EvalMode[];
+  quality: EvalQuality;
   recent_answers: EvalRecentAnswer[];
   methodology: string[];
 };
@@ -401,6 +426,30 @@ export type WebSearchStatus = {
   default_kb_name: string;
   top_k: number;
   reason: string;
+};
+
+export type WebSearchTest = {
+  ok: boolean;
+  provider: string;
+  latency_ms: number;
+  result_count: number;
+  results: Array<{ title: string; url: string }>;
+};
+
+export type RuntimeConfig = {
+  app_env: string;
+  auth_disabled: boolean;
+  retrieval: { top_k: number; candidate_k: number; dense_weight: number; sparse_weight: number };
+  chunking: Record<string, {
+    profile: string;
+    size_tokens: number;
+    overlap_tokens: number;
+    excluded_issue_types?: string[];
+    comments_indexed?: boolean;
+    attachments_extracted?: boolean;
+  }>;
+  web: { provider: string; top_k: number; configured: boolean };
+  council: { enabled: boolean; models: string[]; chair_model: string | null };
 };
 
 export type DiscoverDepartment = {
@@ -754,6 +803,10 @@ export class CVUMApi {
     return this.request<DocumentLineage>(`/documents/${encodeURIComponent(documentId)}/lineage`);
   }
 
+  async getDocument(documentId: string) {
+    return this.request<DocumentOut>(`/documents/${encodeURIComponent(documentId)}`);
+  }
+
   async uploadDocument(kbId: string, file: File) {
     const form = new FormData();
     form.set("knowledge_base_id", kbId);
@@ -805,6 +858,13 @@ export class CVUMApi {
     return this.request<MessageOut[]>(`/conversations/${encodeURIComponent(conversationId)}/messages`);
   }
 
+  async deleteConversation(conversationId: string) {
+    await this.request<void>(`/conversations/${encodeURIComponent(conversationId)}`, {
+      method: "DELETE",
+    });
+    this.clearLiveCache();
+  }
+
   async clearConversationHistory(conversationId: string) {
     await this.request<void>(`/conversations/${encodeURIComponent(conversationId)}/messages`, {
       method: "DELETE",
@@ -814,6 +874,12 @@ export class CVUMApi {
 
   async listUsers() {
     return this.request<UserOut[]>("/admin/users?limit=200");
+  }
+
+  async runtimeConfig() {
+    return this.cached("runtimeConfig", LIVE_CACHE_MS, () =>
+      this.request<RuntimeConfig>("/admin/runtime-config")
+    );
   }
 
   async createUser(input: UserCreateInput) {
@@ -895,6 +961,12 @@ export class CVUMApi {
 
   async webSearchStatus() {
     return this.cached("webSearchStatus", LIVE_CACHE_MS, () => this.request<WebSearchStatus>("/web-search/status"));
+  }
+
+  async testWebSearch() {
+    const result = await this.request<WebSearchTest>("/web-search/test", { method: "POST" });
+    this.clearLiveCache();
+    return result;
   }
 
   async discoverFeed(department = "for-you") {

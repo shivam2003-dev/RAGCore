@@ -51,4 +51,4 @@ def test_confluence_metadata_includes_canonical_source_fields() -> None:
     assert metadata["source_updated_at"] == "2026-07-04T07:00:00.000Z"
     assert metadata["acl"] == "connector-visible"
     assert metadata["connector_sync_id"] == "confluence:SRE:123:7"
-    assert metadata["chunk_strategy_version"] == "phase2-structure-v1"
+    assert metadata["chunk_strategy_version"] == "confluence-heading-context-v2"

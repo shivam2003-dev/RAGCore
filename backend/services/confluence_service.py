@@ -66,7 +66,7 @@ class ConfluenceSyncResult:
 
 
 JsonDict = dict[str, object]
-CHUNK_STRATEGY_VERSION = "phase2-structure-v1"
+CHUNK_STRATEGY_VERSION = "confluence-heading-context-v2"
 
 
 class ConfluenceClient:
@@ -141,12 +141,26 @@ class ConfluenceClient:
         )
 
     async def iter_pages(self, space: ConfluenceSpace, max_pages: int | None = None) -> AsyncIterator[ConfluencePage]:
+        seen: set[str] = set()
+        yielded = 0
         try:
             async for page in self._iter_pages_v2(space, max_pages=max_pages):
+                if page.id in seen:
+                    continue
+                seen.add(page.id)
                 yield page
+                yielded += 1
+                if max_pages is not None and yielded >= max_pages:
+                    return
         except NotFoundError:
             async for page in self._iter_pages_v1(space, max_pages=max_pages):
+                if page.id in seen:
+                    continue
+                seen.add(page.id)
                 yield page
+                yielded += 1
+                if max_pages is not None and yielded >= max_pages:
+                    return
 
     async def _iter_pages_v2(
         self, space: ConfluenceSpace, max_pages: int | None = None
@@ -499,7 +513,6 @@ def normalize_confluence_wiki_root(raw_url: str) -> str:
 def _render_page_html(*, space: ConfluenceSpace, page: ConfluencePage) -> str:
     title = html.escape(page.title)
     source_url = html.escape(page.url)
-    space_name = html.escape(space.name)
     return (
         "<!doctype html><html><head>"
         f"<meta charset=\"utf-8\"><title>{title}</title>"
@@ -509,7 +522,7 @@ def _render_page_html(*, space: ConfluenceSpace, page: ConfluencePage) -> str:
         "</head><body>"
         f"<h1>{title}</h1>"
         f"<p>Source: <a href=\"{source_url}\">{source_url}</a></p>"
-        f"<p>Confluence space: {space_name} ({html.escape(space.key)})</p>"
+        f"<p>Confluence space: {html.escape(space.name)} ({html.escape(space.key)})</p>"
         f"<main>{page.storage_html}</main>"
         "</body></html>"
     )

@@ -25,3 +25,12 @@ def _encoder():  # type: ignore[no-untyped-def]
 
 def count_tokens(text: str) -> int:
     return len(_encoder().encode(text, disallowed_special=()))
+
+
+def split_token_windows(text: str, max_tokens: int) -> list[str]:
+    encoder = _encoder()
+    token_ids = encoder.encode(text, disallowed_special=())
+    return [
+        encoder.decode(token_ids[index : index + max_tokens])
+        for index in range(0, len(token_ids), max_tokens)
+    ]

@@ -1,14 +1,16 @@
 """Recursive character chunking: split on the strongest separator that keeps
 pieces under the token budget, merging small neighbors back together."""
 
-from ingestion.chunkers.base import TextChunk, count_tokens
+from ingestion.chunkers.base import TextChunk, count_tokens, split_token_windows
 
 _SEPARATORS = ["\n\n", "\n", ". ", " "]
 
 
 def _split(text: str, chunk_size: int, separators: list[str]) -> list[str]:
-    if count_tokens(text) <= chunk_size or not separators:
+    if count_tokens(text) <= chunk_size:
         return [text]
+    if not separators:
+        return split_token_windows(text, chunk_size)
     sep, rest = separators[0], separators[1:]
     parts = [p for p in text.split(sep) if p.strip()]
     if len(parts) == 1:
@@ -32,7 +34,8 @@ def _merge(pieces: list[str], chunk_size: int, overlap: int) -> list[str]:
             # carry tail of previous chunk forward as overlap
             tail_words = current.split()
             carry = " ".join(tail_words[-max(overlap // 4, 1):]) if overlap else ""
-            current = (carry + " " if carry else "") + piece
+            candidate = (carry + " " if carry else "") + piece
+            current = piece if count_tokens(candidate) > chunk_size else candidate
         else:
             current += piece
     if current.strip():

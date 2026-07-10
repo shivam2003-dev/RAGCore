@@ -1,5 +1,7 @@
 import re
 import time
+import uuid
+from collections.abc import Sequence
 
 from core.config import Settings
 from embeddings.base import EmbeddingProvider
@@ -39,14 +41,20 @@ DOC_INTENT_TERMS = {
 }
 QUERY_NOISE_TERMS = {
     "about",
+    "and",
     "confluence",
     "documentation",
     "docs",
     "document",
     "documents",
     "does",
+    "epic",
     "explain",
+    "find",
+    "from",
     "give",
+    "me",
+    "no",
     "say",
     "says",
     "tell",
@@ -81,10 +89,20 @@ class RetrievalPipeline:
     async def run(self, ctx: RetrievalContext) -> RetrievalContext:
         started = time.perf_counter()
         ctx.rewritten_query = await self._rewriter.rewrite(ctx)
+        best_chunks: list[RetrievedChunk] = []
+        best_confidence = -1.0
+        best_query: str | None = None
 
         for _ in range(MAX_ATTEMPTS):
             await self._retrieve_once(ctx)
             ctx.confidence = await self._evaluator.evaluate(ctx)
+            confidence = ctx.confidence or 0.0
+            if confidence > best_confidence or (
+                confidence == best_confidence and len(ctx.chunks) > len(best_chunks)
+            ):
+                best_chunks = list(ctx.chunks)
+                best_confidence = confidence
+                best_query = ctx.effective_query
             ctx.attempts.append(
                 RetrievalAttempt(
                     query=ctx.effective_query,
@@ -102,10 +120,41 @@ class RetrievalPipeline:
                 ctx.rewritten_query = await self._rewriter.rewrite(ctx) or ctx.rewritten_query
             elif decision == PolicyDecision.FALLBACK:
                 ctx.fallback_requested = True
-                break  # future: web/external fallback search
+                break
+
+        if best_chunks:
+            ctx.chunks = best_chunks
+            ctx.confidence = best_confidence
+            ctx.rewritten_query = best_query if best_query and best_query != ctx.query else None
+            if len(ctx.attempts) > 1:
+                ctx.quality_notes.append(
+                    f"selected_best_attempt={best_query[:140] if best_query else ctx.query[:140]}"
+                )
 
         ctx.time_stage("retrieval", started)
         return ctx
+
+    async def jira_relationship_context(
+        self,
+        *,
+        kb_scope: uuid.UUID | Sequence[uuid.UUID],
+        issue_key: str,
+        query: str,
+        limit: int,
+    ) -> list[RetrievedChunk]:
+        hits = await self._search.jira_relationship_search(
+            kb_scope,
+            issue_key=issue_key,
+            query=query,
+            limit=limit,
+        )
+        return fuse(
+            [],
+            hits,
+            dense_weight=0.0,
+            sparse_weight=1.0,
+            top_k=limit,
+        )
 
     async def _retrieve_once(self, ctx: RetrievalContext) -> None:
         retrieval_query = retrieval_search_query(ctx.effective_query)
@@ -123,11 +172,17 @@ class RetrievalPipeline:
         sparse = await self._search.sparse_search(
             kb_scope, retrieval_query, candidates, ctx.collection_id
         )
+        dense_weight = self._settings.retrieval_dense_weight
+        sparse_weight = self._settings.retrieval_sparse_weight
+        if self._embedder.name == "fake":
+            dense_weight, sparse_weight = 0.45, 0.55
+            if "lexical_fusion_for_local_embeddings" not in ctx.quality_notes:
+                ctx.quality_notes.append("lexical_fusion_for_local_embeddings")
         fused = fuse(
             dense,
             sparse,
-            dense_weight=self._settings.retrieval_dense_weight,
-            sparse_weight=self._settings.retrieval_sparse_weight,
+            dense_weight=dense_weight,
+            sparse_weight=sparse_weight,
             top_k=min(candidates, 50),
         )
         reranked = await self._reranker.rerank(ctx, fused)
@@ -146,6 +201,10 @@ def select_final_context(ctx: RetrievalContext, chunks: list[RetrievedChunk], *,
 
     query_tokens = {token.strip(".,:;!?()[]{}").lower() for token in ctx.effective_query.split()}
     doc_intent = bool(query_tokens & DOC_INTENT_TERMS)
+    architecture_intent = bool(
+        query_tokens
+        & {"architecture", "architectural", "components", "design", "diagram", "hld", "lld", "overview", "topology"}
+    )
     confluence_chunks = [chunk for chunk in chunks if _source_family(chunk) == "confluence"]
     selected: list[RetrievedChunk] = []
     seen_chunks: set[object] = set()
@@ -158,7 +217,7 @@ def select_final_context(ctx: RetrievalContext, chunks: list[RetrievedChunk], *,
         source_key = _source_key(chunk)
         if chunk.chunk_id in seen_chunks:
             return False
-        if per_document.get(chunk.document_id, 0) >= 2:
+        if per_document.get(chunk.document_id, 0) >= (1 if architecture_intent else 2):
             return False
         if per_source_key.get(source_key, 0) >= 2:
             return False
@@ -196,7 +255,12 @@ def select_final_context(ctx: RetrievalContext, chunks: list[RetrievedChunk], *,
 def retrieval_search_query(query: str) -> str:
     identifiers = re.findall(r"\b[A-Z][A-Z0-9]{1,9}-\d+\b", query.upper())
     if identifiers:
-        return " ".join(identifiers)
+        meaningful_terms = [
+            token
+            for token in re.findall(r"[A-Za-z][A-Za-z0-9_-]{1,}", query)
+            if token.lower() not in QUERY_NOISE_TERMS and token.upper() not in identifiers
+        ]
+        return " ".join([*identifiers, *meaningful_terms[:8]])
 
     raw_tokens = re.findall(r"[A-Za-z][A-Za-z0-9_-]{1,}", query)
     normalized = [token.lower() for token in raw_tokens]

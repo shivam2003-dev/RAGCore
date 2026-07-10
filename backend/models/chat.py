@@ -50,6 +50,7 @@ class Message(UUIDPKMixin, Base):
     output_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
     latency_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
     timings: Mapped[dict] = mapped_column(JSONB, default=dict)  # retrieval/embed/llm breakdown
+    evaluation: Mapped[dict] = mapped_column(JSONB, default=dict)
     model: Mapped[str | None] = mapped_column(String(100), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 

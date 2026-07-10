@@ -69,6 +69,10 @@ class Settings(BaseSettings):
     # chunking
     chunk_size_tokens: int = 400
     chunk_overlap_tokens: int = 60
+    jira_chunk_size_tokens: int = 320
+    jira_chunk_overlap_tokens: int = 40
+    confluence_chunk_size_tokens: int = 400
+    confluence_chunk_overlap_tokens: int = 60
 
     # limits
     upload_max_bytes: int = 52_428_800
@@ -107,12 +111,21 @@ class Settings(BaseSettings):
     jira_auth_mode: str = "auto"  # auto | basic | bearer
     jira_default_kb_name: str = "Jira"
     jira_issue_limit: int = 100  # API page size, Atlassian Cloud caps this at 100
-    jira_sync_max_issues: int = 0  # 0 means sync every visible issue on the board/project
+    jira_sync_max_issues: int = 500  # bound routine refreshes; 0 opts into every visible issue
     jira_request_timeout_seconds: float = 20.0
     jira_include_statuses: str = ""
     jira_exclude_statuses: str = ""
     jira_include_labels: str = ""
     jira_exclude_labels: str = ""
+    jira_include_issue_types: str = ""
+    jira_exclude_issue_types: str = ""
+    jira_drop_empty_descriptions: bool = False
+    jira_include_comments: bool = True
+    jira_max_comments_per_issue: int = 100
+    jira_extract_attachments: bool = True
+    jira_max_attachments_per_issue: int = 10
+    jira_attachment_max_bytes: int = 5_242_880
+    jira_hydration_concurrency: int = 8
 
     # Optional web search for Ask. Disabled by default so the app never fabricates
     # internet results when no real provider is configured.

@@ -49,6 +49,7 @@ class MemoryManager:
         timings: dict[str, int],
         regenerate: bool,
         model: str | None = None,
+        evaluation: dict[str, object] | None = None,
     ) -> uuid.UUID:
         if not regenerate:
             self._messages.add(
@@ -68,6 +69,7 @@ class MemoryManager:
             output_tokens=usage.output_tokens,
             latency_ms=latency_ms,
             timings=timings,
+            evaluation=evaluation or {},
             model=model or self._default_model,
             created_at=utcnow(),
         )

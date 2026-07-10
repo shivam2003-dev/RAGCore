@@ -63,7 +63,7 @@ async def generate_role_prompt(
     body: RoleGenerateRequest, _user: CurrentUser, llm: LLMDep
 ) -> RoleGenerateResponse:
     system = (
-        "You are the Kimbal role prompt generator. Return valid JSON only with keys "
+        "You are the CVUM role prompt generator. Return valid JSON only with keys "
         '"name" and "prompt". Build a safe background role prompt for an enterprise '
         "RAG assistant. The role may guide persona, source preference, workflow, and "
         "format, but it must never override RBAC, citation, source-grounding, secret "

@@ -13,11 +13,17 @@ from typing import Protocol
 
 from retrieval.context import RetrievalContext, RetrievedChunk
 
-MIN_ACCEPT_CONFIDENCE = 0.22
-MIN_STRONG_CONFIDENCE = 0.34
+MIN_ACCEPT_CONFIDENCE = 0.36
+MIN_STRONG_CONFIDENCE = 0.48
 TOKEN_RE = re.compile(r"[a-zA-Z][a-zA-Z0-9_+-]{2,}")
 IDENTIFIER_RE = re.compile(
-    r"\b(?:[A-Z][A-Z0-9]{1,9}-\d+|[a-zA-Z0-9][a-zA-Z0-9.-]{2,}\.[a-zA-Z]{2,}|[a-zA-Z0-9_-]{3,})\b"
+    r"\b(?:[A-Z][A-Z0-9]{1,9}-\d+|(?:\d{1,3}\.){3}\d{1,3}|"
+    r"[a-zA-Z0-9][a-zA-Z0-9.-]{2,}\.[a-zA-Z]{2,}|[A-Z]{2,10})\b"
+)
+STRONG_IDENTIFIER_RE = re.compile(
+    r"\b(?:[A-Z][A-Z0-9]{1,9}-\d+|(?:\d{1,3}\.){3}\d{1,3}|"
+    r"[a-zA-Z0-9][a-zA-Z0-9.-]{2,}\.[a-zA-Z]{2,})\b",
+    re.IGNORECASE,
 )
 STOPWORDS = {
     "and",
@@ -161,27 +167,33 @@ class HeuristicEvaluator:
             ctx.quality_notes.append("no_chunks")
             return 0.0
 
-        query_tokens = _tokens(ctx.effective_query)
+        query_tokens = _tokens(ctx.query)
         top = ctx.chunks[: min(6, len(ctx.chunks))]
         top_score = _clamp01(max(chunk.score for chunk in top))
         mean_score = _clamp01(sum(_clamp01(chunk.score) for chunk in top) / len(top))
         lexical = _mean([_overlap(query_tokens, _chunk_tokens(chunk)) for chunk in top])
         source_fit = _mean([_source_fit(query_tokens, chunk) for chunk in top])
-        identifier_fit = _mean([_identifier_fit(ctx.effective_query, chunk) for chunk in top])
+        identifier_fit = _mean([_identifier_fit(ctx.query, chunk) for chunk in top])
+        intent_fit = _mean([_intent_fit(query_tokens, chunk) for chunk in top])
         diversity = len({chunk.document_id for chunk in top}) / len(top)
+        coverage_target = 1 if _strong_identifiers(ctx.query) else 3 if _requires_broad_evidence(ctx.query) else 2
+        coverage = min(len({chunk.document_id for chunk in top}) / coverage_target, 1.0)
 
         score = (
-            (0.30 * top_score)
-            + (0.17 * mean_score)
-            + (0.24 * lexical)
-            + (0.13 * source_fit)
+            (0.22 * top_score)
+            + (0.12 * mean_score)
+            + (0.22 * lexical)
+            + (0.10 * source_fit)
             + (0.10 * identifier_fit)
-            + (0.06 * diversity)
+            + (0.10 * intent_fit)
+            + (0.05 * diversity)
+            + (0.09 * coverage)
         )
         confidence = round(_clamp01(score), 4)
         ctx.quality_notes.append(
             f"retrieval_quality={confidence} lexical={round(lexical, 3)} "
-            f"source_fit={round(source_fit, 3)} identifier_fit={round(identifier_fit, 3)}"
+            f"source_fit={round(source_fit, 3)} identifier_fit={round(identifier_fit, 3)} "
+            f"intent_fit={round(intent_fit, 3)} coverage={round(coverage, 3)}"
         )
         return confidence
 
@@ -193,22 +205,24 @@ class HeuristicReranker:
         if not chunks:
             return []
 
-        query_tokens = _tokens(ctx.effective_query)
+        query_tokens = _tokens(ctx.query)
         rescored: list[RetrievedChunk] = []
         for rank, chunk in enumerate(chunks):
             lexical = _overlap(query_tokens, _chunk_tokens(chunk))
             source_fit = _source_fit(query_tokens, chunk)
-            identifier_fit = _identifier_fit(ctx.effective_query, chunk)
+            identifier_fit = _identifier_fit(ctx.query, chunk)
+            intent_fit = _intent_fit(query_tokens, chunk)
             freshness = _freshness(chunk.metadata)
             position = 1 / math.sqrt(rank + 1)
             chunk.score = round(
                 _clamp01(
-                    (0.46 * _clamp01(chunk.score))
-                    + (0.22 * lexical)
-                    + (0.14 * source_fit)
+                    (0.36 * _clamp01(chunk.score))
+                    + (0.20 * lexical)
+                    + (0.12 * source_fit)
                     + (0.12 * identifier_fit)
-                    + (0.04 * freshness)
-                    + (0.02 * position)
+                    + (0.16 * intent_fit)
+                    + (0.03 * freshness)
+                    + (0.01 * position)
                 ),
                 6,
             )
@@ -220,9 +234,14 @@ class ThresholdRetrievalPolicy:
     def decide(self, ctx: RetrievalContext) -> PolicyDecision:
         attempts = len(ctx.attempts)
         confidence = ctx.confidence or 0.0
-        if confidence >= MIN_ACCEPT_CONFIDENCE:
+        unique_documents = len({chunk.document_id for chunk in ctx.chunks})
+        needs_more_evidence = _requires_broad_evidence(ctx.query) and unique_documents < 2
+        if confidence >= MIN_ACCEPT_CONFIDENCE and not needs_more_evidence:
             return PolicyDecision.ACCEPT
         if not ctx.chunks and attempts == 1:
+            return PolicyDecision.WIDEN_K
+        if needs_more_evidence and attempts == 1:
+            ctx.quality_notes.append("insufficient_source_coverage")
             return PolicyDecision.WIDEN_K
         if attempts == 1:
             return PolicyDecision.REWRITE
@@ -230,7 +249,7 @@ class ThresholdRetrievalPolicy:
             return PolicyDecision.WIDEN_K
         ctx.fallback_requested = True
         ctx.quality_notes.append("fallback_requested")
-        return PolicyDecision.ACCEPT
+        return PolicyDecision.FALLBACK
 
 
 class AlwaysAcceptPolicy:
@@ -306,6 +325,33 @@ def _identifiers(text: str) -> set[str]:
     return {identifier for identifier in identifiers if identifier.lower() not in STOPWORDS}
 
 
+def _strong_identifiers(text: str) -> set[str]:
+    return {match.group(0).lower() for match in STRONG_IDENTIFIER_RE.finditer(text)}
+
+
+def _requires_broad_evidence(text: str) -> bool:
+    tokens = _tokens(text)
+    return bool(
+        tokens
+        & {
+            "architecture",
+            "architectural",
+            "compare",
+            "comparison",
+            "components",
+            "design",
+            "diagram",
+            "overview",
+            "process",
+            "procedure",
+            "runbook",
+            "summarize",
+            "summary",
+            "topology",
+        }
+    )
+
+
 def _source_fit(query_tokens: set[str], chunk: RetrievedChunk) -> float:
     if not query_tokens:
         return 0.0
@@ -340,6 +386,45 @@ def _source_fit(query_tokens: set[str], chunk: RetrievedChunk) -> float:
     if ("devops" in query_tokens or "devo" in query_tokens) and ("devo" in title or "devops" in title):
         score += 0.3
     return _clamp01(score)
+
+
+def _intent_fit(query_tokens: set[str], chunk: RetrievedChunk) -> float:
+    title = chunk.document_title.lower()
+    content = chunk.content[:1200].lower()
+    architecture_terms = {
+        "architecture",
+        "architectural",
+        "components",
+        "design",
+        "diagram",
+        "hld",
+        "lld",
+        "overview",
+        "topology",
+    }
+    procedure_terms = {"checklist", "guide", "process", "procedure", "runbook", "sop"}
+    incident_terms = {"failure", "incident", "outage", "rca"}
+
+    if query_tokens & architecture_terms:
+        if any(term in title for term in architecture_terms):
+            return 1.0
+        if any(term in content for term in architecture_terms):
+            return 0.65
+        if any(term in title for term in incident_terms):
+            return 0.0
+        return 0.2
+    if query_tokens & procedure_terms:
+        if any(term in title for term in procedure_terms):
+            return 1.0
+        if any(term in content for term in procedure_terms):
+            return 0.65
+        return 0.2
+    if query_tokens & incident_terms:
+        has_issue_key = re.search(r"\b[A-Z][A-Z0-9]{1,9}-\d+\b", chunk.document_title)
+        if any(term in title for term in incident_terms) or has_issue_key:
+            return 1.0
+        return 0.25
+    return 0.5
 
 
 def _is_confluence_source(source: str, title: str, metadata: dict) -> bool:

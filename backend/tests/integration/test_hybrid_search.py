@@ -71,6 +71,52 @@ async def test_sparse_search_matches_keywords(db, seeded_kb):
     assert "vacation" in hits[0].content
 
 
+async def test_sparse_search_uses_document_titles_for_broad_questions(db, seeded_kb):
+    kb, embedder = seeded_kb
+    doc = Document(
+        knowledge_base_id=kb.id,
+        title="Kubernetes Deployment Architecture",
+        source_type="md",
+        status=DocumentStatus.READY,
+    )
+    db.add(doc)
+    await db.flush()
+    version = DocumentVersion(
+        document_id=doc.id,
+        version=1,
+        file_path="/dev/null",
+        file_sha256="2" * 64,
+        file_size_bytes=1,
+        created_at=utcnow(),
+    )
+    db.add(version)
+    await db.flush()
+    content = "System overview with control plane, worker nodes, and rollout flow."
+    vector = (await embedder.embed([content]))[0]
+    db.add(
+        Chunk(
+            knowledge_base_id=kb.id,
+            document_id=doc.id,
+            document_version_id=version.id,
+            ordinal=0,
+            content=content,
+            token_count=20,
+            embedding=vector,
+            created_at=utcnow(),
+        )
+    )
+    await db.commit()
+
+    hits = await ChunkSearchRepository(db).sparse_search(
+        kb.id,
+        "Explain Kubernetes deployment architecture and components",
+        limit=5,
+    )
+
+    assert hits
+    assert hits[0].document_id == doc.id
+
+
 async def test_pipeline_end_to_end(db, seeded_kb):
     kb, embedder = seeded_kb
     pipeline = RetrievalPipeline(

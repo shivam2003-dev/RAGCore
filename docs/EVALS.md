@@ -6,6 +6,10 @@ the same `CVUM Benchmark` object shown in the UI, for example `50/100`.
 The release-gate dataset inventory is exposed by `GET /api/v1/evals/golden` and loaded from
 `evals/golden/rag.jsonl`. Offline release gates run through `GET /api/v1/evals/offline`.
 
+The browser keeps the last successful overview and offline result in local storage. On revisit it
+shows that cached evidence immediately, labels it with its age, and refreshes live observations and
+the offline gate independently. A refresh error leaves the previous valid result visible.
+
 The current implementation is intentionally deterministic and read-only. It does not invent scores, call a judge model, or require a new provider key. It computes quality and performance signals from data already persisted by the chat pipeline:
 
 - user question

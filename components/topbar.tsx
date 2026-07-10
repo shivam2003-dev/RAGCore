@@ -2,7 +2,7 @@
 
 import { FormEvent, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Bell, CheckCircle2, LogOut, Search, Settings2, X } from "lucide-react";
+import { Bell, CheckCircle2, LogOut, Menu, Search, Settings2, X } from "lucide-react";
 import Link from "next/link";
 import { kimbalApi, type ActivityMetric, type UserOut } from "@/lib/kimbal-api";
 
@@ -33,14 +33,17 @@ export function TopBar({ user, onLogout }: { user: UserOut; onLogout: () => void
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const trimmed = query.trim();
-    if (trimmed) router.push(`/ask?q=${encodeURIComponent(trimmed)}`);
+    if (trimmed) router.push(`/?q=${encodeURIComponent(trimmed)}`);
   }
 
   return (
-    <header className="kimbal-topbar sticky top-0 z-20 flex h-[64px] items-center justify-between border-b border-line bg-canvas/80 px-8 backdrop-blur-xl">
-      <p className="text-[14px] text-ink-500">
+    <header className="kimbal-topbar sticky top-0 z-20 flex h-[64px] items-center justify-between border-b border-line bg-canvas/80 px-4 backdrop-blur-xl sm:px-6 lg:px-8">
+      <div className="flex min-w-0 items-center gap-3">
+        <button type="button" onClick={() => window.dispatchEvent(new Event("cvum:open-navigation"))} aria-label="Open navigation" className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-ink-500 hover:bg-white lg:hidden"><Menu size={19} /></button>
+      <p className="truncate text-[14px] text-ink-500">
         Welcome back, <span className="font-semibold text-ink-900">{firstName(user.full_name)}</span>
       </p>
+      </div>
 
       <div className="relative flex items-center gap-3">
         {user.role === "admin" && (
@@ -62,7 +65,7 @@ export function TopBar({ user, onLogout }: { user: UserOut; onLogout: () => void
 
         <form
           onSubmit={submit}
-          className="flex h-10 w-[300px] cursor-text items-center gap-2.5 rounded-[12px] border border-line bg-white px-3.5 shadow-[var(--shadow-card)] transition focus-within:border-brand-300 focus-within:ring-4 focus-within:ring-brand-50"
+          className="hidden h-10 w-[min(300px,32vw)] cursor-text items-center gap-2.5 rounded-[12px] border border-line bg-white px-3.5 shadow-[var(--shadow-card)] transition focus-within:border-brand-300 focus-within:ring-4 focus-within:ring-brand-50 sm:flex"
         >
           <Search size={16} className="text-ink-400" strokeWidth={2.2} />
           <input

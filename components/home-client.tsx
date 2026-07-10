@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import {
   Activity,
   AlertCircle,
@@ -7,6 +8,8 @@ import {
   Clock3,
   Database,
   FileText,
+  Gauge,
+  Globe2,
   HelpCircle,
   HeartHandshake,
   Loader2,
@@ -20,6 +23,7 @@ import { Badge, Card, CardLink, CardTitle, Donut, ProgressBar } from "@/componen
 import { HomeAsk } from "@/components/home-ask";
 import { useLiveMetrics } from "@/components/use-live-metrics";
 import { aggregateSourceMix } from "@/components/source-metrics";
+import { kimbalApi, type EvalOverview, type WebSearchStatus } from "@/lib/kimbal-api";
 
 function number(value: number) {
   return new Intl.NumberFormat().format(value);
@@ -47,6 +51,19 @@ type HealthRow = {
 
 export function HomeClient() {
   const { metrics, loading, error } = useLiveMetrics();
+  const [evals, setEvals] = useState<EvalOverview | null>(null);
+  const [web, setWeb] = useState<WebSearchStatus | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    void Promise.all([kimbalApi.evalsOverview(), kimbalApi.webSearchStatus()]).then(([nextEvals, nextWeb]) => {
+      if (!cancelled) {
+        setEvals(nextEvals);
+        setWeb(nextWeb);
+      }
+    }).catch(() => undefined);
+    return () => { cancelled = true; };
+  }, []);
   const readyRate = metrics?.documents_total
     ? Math.round((metrics.documents_ready / metrics.documents_total) * 100)
     : null;
@@ -68,7 +85,7 @@ export function HomeClient() {
   return (
     <div className="space-y-6">
       <section className="animate-rise">
-        <h1 className="text-[34px] font-bold tracking-[-0.025em] text-ink-900">
+        <h1 className="text-[28px] font-bold text-ink-900 sm:text-[34px]">
           CVUM Knowledge Hub{" "}
           <Sparkles size={22} className="inline -translate-y-1 text-brand-400" />
         </h1>
@@ -79,6 +96,24 @@ export function HomeClient() {
 
       <HomeAsk />
 
+      <section className="grid grid-cols-1 gap-3 sm:grid-cols-3 animate-rise-1">
+        <Card className="flex items-center gap-3 p-4">
+          <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-sky-50 text-sky-600"><Globe2 size={17} /></span>
+          <div className="min-w-0 flex-1"><p className="text-[11px] font-bold uppercase text-ink-400">Web retrieval</p><p className="truncate text-[13px] font-bold text-ink-900">{web?.configured ? `${web.provider} ready` : "Unavailable"}</p></div>
+          <CardLink href="/settings">Check</CardLink>
+        </Card>
+        <Card className="flex items-center gap-3 p-4">
+          <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-emerald-50 text-emerald-600"><Gauge size={17} /></span>
+          <div className="min-w-0 flex-1"><p className="text-[11px] font-bold uppercase text-ink-400">Observed quality</p><p className="truncate text-[13px] font-bold text-ink-900">{evals?.quality.evaluated ?? 0} evaluated / {evals?.quality.failures ?? 0} failed</p></div>
+          <CardLink href="/evals">Review</CardLink>
+        </Card>
+        <Card className="flex items-center gap-3 p-4">
+          <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-amber-50 text-amber-600"><Clock3 size={17} /></span>
+          <div className="min-w-0 flex-1"><p className="text-[11px] font-bold uppercase text-ink-400">Answer latency</p><p className="truncate text-[13px] font-bold text-ink-900">{evals?.latency.p95_ms ? `${number(evals.latency.p95_ms)} ms p95` : "No sample"}</p></div>
+          <CardLink href="/analytics">Inspect</CardLink>
+        </Card>
+      </section>
+
       {error && (
         <Card className="border-rose-100 bg-rose-50 p-4 text-[13px] font-semibold text-rose-700">
           {error}
@@ -86,7 +121,7 @@ export function HomeClient() {
       )}
 
       <section className="grid grid-cols-12 gap-5 animate-rise-2">
-        <Card className="col-span-3 p-5">
+        <Card className="col-span-12 p-5 md:col-span-6 xl:col-span-3">
           <CardTitle icon={Plug} title="Indexed Sources" tint="bg-brand-50 text-brand-500" />
           <p className="mt-3 text-[26px] font-bold text-ink-900">
             {loading ? <Loader2 size={22} className="animate-spin text-brand-500" /> : number(readySources.length)}
@@ -113,7 +148,7 @@ export function HomeClient() {
           </div>
         </Card>
 
-        <Card className="col-span-2 flex flex-col p-5">
+        <Card className="col-span-12 flex flex-col p-5 sm:col-span-6 xl:col-span-2">
           <CardTitle icon={FileText} title="Documents" tint="bg-sky-50 text-sky-500" />
           <p className="mt-4 text-[30px] font-bold tracking-[-0.02em] text-ink-900">
             {number(metrics?.documents_total ?? 0)}
@@ -127,7 +162,7 @@ export function HomeClient() {
           </div>
         </Card>
 
-        <Card className="col-span-2 flex flex-col p-5">
+        <Card className="col-span-12 flex flex-col p-5 sm:col-span-6 xl:col-span-2">
           <CardTitle icon={MessageCircleQuestion} title="Questions" tint="bg-brand-50 text-brand-500" />
           <p className="mt-4 text-[30px] font-bold tracking-[-0.02em] text-ink-900">
             {number(metrics?.questions_asked ?? 0)}
@@ -138,7 +173,7 @@ export function HomeClient() {
           </div>
         </Card>
 
-        <Card className="col-span-2 flex flex-col p-5">
+        <Card className="col-span-12 flex flex-col p-5 sm:col-span-6 xl:col-span-2">
           <CardTitle icon={Target} title="Feedback" tint="bg-emerald-50 text-emerald-500" />
           <p className="mt-4 text-[30px] font-bold tracking-[-0.02em] text-ink-900">
             {feedbackRate == null ? "N/A" : `${feedbackRate}%`}
@@ -153,7 +188,7 @@ export function HomeClient() {
           </div>
         </Card>
 
-        <Card className="col-span-3 p-5">
+        <Card className="col-span-12 p-5 md:col-span-6 xl:col-span-3">
           <CardTitle icon={Activity} title="Recent Activity" tint="bg-brand-50 text-brand-500" />
           <ul className="mt-3.5 space-y-3.5">
             {metrics?.recent_activity.slice(0, 5).map((activity) => (
@@ -177,7 +212,7 @@ export function HomeClient() {
       </section>
 
       <section className="grid grid-cols-12 gap-5 animate-rise-3">
-        <Card className="col-span-5 p-5">
+        <Card className="col-span-12 p-5 lg:col-span-5">
           <CardTitle icon={HelpCircle} title="Top Questions" tint="bg-brand-50 text-brand-500" />
           <ul className="mt-2 divide-y divide-line">
             {metrics?.top_questions.map((item) => (
@@ -197,7 +232,7 @@ export function HomeClient() {
           </div>
         </Card>
 
-        <Card className="col-span-4 p-5">
+        <Card className="col-span-12 p-5 md:col-span-6 lg:col-span-4">
           <CardTitle icon={Database} title="Source Mix" tint="bg-sky-50 text-sky-500" />
           <div className="mt-5 flex items-center gap-6">
             {donutData.length ? <Donut data={donutData} /> : <div className="h-[128px] w-[128px] rounded-full bg-canvas" />}
@@ -219,7 +254,7 @@ export function HomeClient() {
           </div>
         </Card>
 
-        <Card className="col-span-3 p-5">
+        <Card className="col-span-12 p-5 md:col-span-6 lg:col-span-3">
           <CardTitle icon={HeartHandshake} title="Knowledge Health" tint="bg-rose-50 text-rose-400" />
           <p className="mt-4 text-[12.5px] text-ink-500">Readiness score</p>
           <div className="mt-1 flex items-center justify-between">

@@ -438,4 +438,4 @@ Exit criteria:
 - Make Jira count/stat questions deterministic from metadata.
 - Add reranking and a retrieval-quality evaluator.
 - Add claim-level verification before answer persistence.
-- Keep `/ask` as the main user path, but make admin evals/source pages the control plane for accuracy.
+- Keep `/` as the main Ask path and `/admin` as the control plane for evals and source accuracy.
