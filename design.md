@@ -1437,7 +1437,7 @@ sequenceDiagram
     Conn->>PG: reconcile without duplicate active documents
     Ops->>Ops: record measured RPO / RTO
 
-    Note over Ops,Eval: Initial target: metadata/conversations RPO ≤ 5 min,<br/>RTO ≤ 60 min, ratified against product tier.
+    Note over Ops,Eval: Recovery targets must be ratified for each product tier
 ```
 
 ## CI/CD — Current and phased

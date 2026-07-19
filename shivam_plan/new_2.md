@@ -163,7 +163,7 @@ Acceptance gate:
 Cormack, Clarke, and Büttcher define RRF as the sum of `1 / (k + rank)` across ranked lists and show
 that this simple unsupervised fusion consistently matches or outperforms individual systems and
 other metarankers in their experiments. Their pilot used `k=60`. See [Reciprocal Rank Fusion
-Outperforms Condorcet and Individual Rank Learning Methods](https://cormack.uwaterloo.ca/cormacksigir09-rrf.pdf).
+Outperforms Condorcet and Individual Rank Learning Methods](https://research.google/pubs/reciprocal-rank-fusion-outperforms-condorcet-and-individual-rank-learning-methods/).
 
 Verified current:
 
@@ -382,7 +382,7 @@ Salesforce's overview describes Slack AI at billions-of-message scale. Slack's m
 security architecture states four especially relevant principles: customer data stays in the trust
 boundary, customer data is not used to train the LLM, AI only operates on data the user can already
 see, and derived summaries are invalidated when underlying content is tombstoned. See [How Slack AI
-Processes Billions of Messages](https://careers.salesforce.com/en/salesforce-stories/artificial-intelligence/how-slack-ai-processes-billions-of-messages-to-reduce-information-overload-with-ai-powered-search-and-summarization/)
+Processes Billions of Messages](https://engineering.salesforce.com/how-slack-ai-processes-billions-of-messages-to-reduce-information-overload-with-ai-powered-search-and-summarization/)
 and [How We Built Slack AI to Be Secure and Private](https://slack.engineering/how-we-built-slack-ai-to-be-secure-and-private/).
 
 Verified current:
@@ -813,7 +813,7 @@ and evaluation gates are demonstrably satisfied.
    2024.
 3. Cormack, Gordon V., Clarke, Charles L. A., and Büttcher, Stefan. [Reciprocal Rank Fusion
    Outperforms Condorcet and Individual Rank Learning
-   Methods](https://cormack.uwaterloo.ca/cormacksigir09-rrf.pdf), SIGIR 2009.
+   Methods](https://research.google/pubs/reciprocal-rank-fusion-outperforms-condorcet-and-individual-rank-learning-methods/), SIGIR 2009.
 4. Li, Xiaoxi, et al. [Search-o1: Agentic Search-Enhanced Large Reasoning
    Models](https://arxiv.org/abs/2501.05366), 2025.
 5. Anthropic. [Code Execution with MCP: Building More Efficient
@@ -823,7 +823,7 @@ and evaluation gates are demonstrably satisfied.
 7. Anthropic. [Prompting Best
    Practices](https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/claude-prompting-best-practices).
 8. Salesforce Engineering. [How Slack AI Processes Billions of Messages to Reduce Information
-   Overload](https://careers.salesforce.com/en/salesforce-stories/artificial-intelligence/how-slack-ai-processes-billions-of-messages-to-reduce-information-overload-with-ai-powered-search-and-summarization/),
+   Overload](https://engineering.salesforce.com/how-slack-ai-processes-billions-of-messages-to-reduce-information-overload-with-ai-powered-search-and-summarization/),
    2025.
 9. Slack Engineering. [How We Built Slack AI to Be Secure and
    Private](https://slack.engineering/how-we-built-slack-ai-to-be-secure-and-private/), updated 2025.
