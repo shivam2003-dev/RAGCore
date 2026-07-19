@@ -453,12 +453,18 @@ class GitHubIndexService:
             await self._db.commit()
             return {**counts, "commit_sha": snapshot.commit_sha, "tree_sha": snapshot.tree_sha}
         except asyncio.CancelledError:
-            await self._record_failure(
-                organization_id=organization_id,
-                mapping_id=mapping_id,
-                lease_id=lease_id,
-                error_detail="GitHub repository sync was cancelled",
+            cleanup_task = asyncio.create_task(
+                self._record_failure(
+                    organization_id=organization_id,
+                    mapping_id=mapping_id,
+                    lease_id=lease_id,
+                    error_detail="GitHub repository sync was cancelled",
+                )
             )
+            try:
+                await asyncio.shield(cleanup_task)
+            except asyncio.CancelledError:
+                await cleanup_task
             raise
         except Exception as exc:
             await self._record_failure(
@@ -537,15 +543,20 @@ class GitHubIndexService:
         mapping: GitHubRepositoryMapping,
         lease_id: uuid.UUID,
     ) -> None:
-        renewed = await self._connectors.renew_github_sync(
-            mapping_id=mapping.id,
-            organization_id=mapping.organization_id,
-            lease_id=lease_id,
-            expires_at=self._sync_lease_expiry(),
-        )
-        if not renewed:
-            raise ConflictError("GitHub repository sync lease is no longer owned")
-        await self._db.commit()
+        bind = self._db.bind
+        if bind is None:
+            raise RuntimeError("GitHub sync lease requires a bound database session")
+        async with AsyncSession(bind=bind, expire_on_commit=False) as lease_db:
+            connectors = ConnectorRepository(lease_db)
+            renewed = await connectors.renew_github_sync(
+                mapping_id=mapping.id,
+                organization_id=mapping.organization_id,
+                lease_id=lease_id,
+                expires_at=self._sync_lease_expiry(),
+            )
+            if not renewed:
+                raise ConflictError("GitHub repository sync lease is no longer owned")
+            await lease_db.commit()
 
     async def _record_failure(
         self,
