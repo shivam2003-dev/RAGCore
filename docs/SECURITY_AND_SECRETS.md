@@ -12,6 +12,18 @@ The backend implements:
 
 Sensitive actions are audit logged.
 
+## Project and source authorization
+
+A Project narrows relevance and never grants access. The backend intersects organization ownership,
+restricted-source grants, Project source mappings, and request filters before retrieval. Project
+membership alone cannot reveal a restricted source. Organization admins can configure restricted
+sources but do not implicitly retrieve them without a grant.
+
+The same repository enforces scope for Ask, direct search, exact identifiers, Jira relationships,
+workflow APIs, REST evidence tools, MCP, citations, and authorization-aware cache keys. Cross-org
+identifiers do not leak object existence. Source/membership/grant changes invalidate the relevant
+authorization cache version.
+
 ## Upload Safety
 
 Document uploads are validated before ingestion. Magic-byte checks reject files whose content does not match the expected type. Upload size is controlled by `UPLOAD_MAX_BYTES`.
@@ -19,6 +31,9 @@ Document uploads are validated before ingestion. Magic-byte checks reject files 
 ## Prompt-Injection Defense
 
 Retrieved source text is wrapped in `<source>` tags and the system prompt states that source text is evidence, not instructions. This prevents source documents from overriding system instructions.
+
+Planner output is validated against a bounded schema and an already-authorized Project. Source text
+cannot select tools, inject Project/source IDs, increase deadlines, or change permissions.
 
 ## Logging
 
@@ -34,6 +49,9 @@ Secrets belong in backend environment variables or a production secret manager:
 - `CONFLUENCE_API_TOKEN`
 - `JIRA_API_TOKEN`
 - database and Redis credentials
+- `SLACK_APP_TOKEN` and `SLACK_BOT_TOKEN`
+- `GITHUB_TOKEN`
+- `KIMBAL_API_KEY` for an MCP client process
 
 Do not commit `.env` files or pasted tokens. The repository should contain only `.env.example` placeholders.
 
@@ -50,6 +68,9 @@ The GitHub connector exposes GET-only REST operations and never runs repository 
 Repository, branch, and path policies deny dependency/vendor/generated/build, secret-like, binary,
 and oversized files. GitHub credentials are server-side only, and code/PR retrieval uses the same
 Project and source ACL intersection as Ask.
+
+The evidence REST and MCP surfaces are read-only. MCP calls traverse the authenticated API instead
+of opening the database, and authorization errors are not disguised as empty results.
 
 ## Frontend Settings Boundary
 

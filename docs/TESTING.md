@@ -6,11 +6,15 @@ From `backend/`:
 
 ```bash
 uv run ruff check .
-uv run mypy services/confluence_service.py services/jira_service.py api/routes/confluence.py api/routes/jira.py api/routes/metrics.py
+uv run mypy services/confluence_service.py services/jira_service.py services/evidence_tools.py \
+  services/knowledge_workflows.py api/routes/confluence.py api/routes/jira.py \
+  api/routes/metrics.py api/routes/workflows.py
 uv run pytest -q
 ```
 
-The full repository mypy run currently includes older strictness issues outside the new connector and metrics files. Keep the scoped mypy command green for connector changes unless the broader strictness backlog is being addressed.
+The full strict mypy run includes a pre-existing annotation backlog across tests, generated test
+uploads, legacy routes, and third-party libraries without typing markers. The scoped production-code
+gate above must remain green until that separate backlog is completed.
 
 ## Frontend Commands
 
@@ -18,8 +22,20 @@ From repo root:
 
 ```bash
 npm run lint
-NODE_ENV=production npm run build
+npx tsc --noEmit
+env NODE_ENV=production npm run build
 ```
+
+## Evaluations and migrations
+
+```bash
+cd backend
+.venv/bin/python scripts/run_evals.py
+MIGRATION_TEST_DATABASE_URL=postgresql+asyncpg://.../ragcore_migration_test \
+  .venv/bin/pytest -q tests/integration/test_project_migration.py
+```
+
+The migration target must be explicitly disposable and contain `migration` or `test` in its name.
 
 ## Browser Verification
 
@@ -39,6 +55,13 @@ Minimum browser path:
 9. Click Copy, Helpful, Not Helpful, New Chat, reopen a chat, and open its source drawer.
 10. Open Settings and verify connector tests/sync actions work and non-backed settings stay read-only.
 11. Open Evals twice and verify the prior benchmark renders immediately while background refresh runs.
+12. Switch Projects in Ask, Projects, Incident Copilot, and Content Health.
+13. Run Incident Copilot with a key that lacks Slack/code data and verify it reports missing evidence
+    without inventing history.
+14. Verify Who Knows ranks exact-key ownership above broad topic matches and explains every signal.
+15. Verify What Changed date validation, original links, and empty/success states.
+16. Verify Content Health loading, failure, recovery, full-inventory totals, and bounded findings.
+17. Use Arrow keys/Home/End on workflow tabs and verify focus follows selection.
 
 ## Regression Cases
 
@@ -54,6 +77,11 @@ Keep coverage for:
 - RBAC enforcement
 - connector status endpoints do not expose secrets
 - multi-KB retrieval can find Jira evidence when the conversation was created on another KB
+- cross-organization Project/source IDs are denied
+- restricted sources require explicit user grants even for admins
+- planner scope injection and invalid output fall back safely
+- parallel evidence tools use independent database sessions and return partial timeout results
+- Slack public allowlists reject private channels/DMs and GitHub indexing rejects secret/generated paths
 
 ## Manual Evidence to Capture
 

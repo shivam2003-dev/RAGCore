@@ -30,6 +30,8 @@ The Ask page:
   visible attachment and OCR indexing flow as the paperclip control
 - renders multi-line programs, shell commands, configuration, and queries as fenced code blocks
   with preserved whitespace, a language label, horizontal scrolling, and a copy action
+- selects an authorized Project lens and persists the Project on the conversation
+- shows an admin-only content-free retrieval trace when tracing is available
 
 Ask no longer uploads or queries a sample runbook automatically.
 
@@ -64,6 +66,25 @@ GitHub repository rows show branch, connector status, last indexed commit/time, 
 the incremental sync control remains disabled until a server-side credential is configured.
 
 Manual local documents are managed through `/documents`.
+
+## Project Lens and knowledge workflows
+
+`/projects` presents a three-step choose/default/verify summary plus source and membership
+administration. Project mapping controls relevance; restricted sources still require explicit
+grants.
+
+`/incident-copilot` contains three keyboard-navigable tabs:
+
+- Incident Copilot: cited facts, exact-key timeline, status/owner, checks, inference, and gaps.
+- Who Knows This?: ranked people with visible evidence signals and scores.
+- What Changed?: date-bounded, deduplicated source changes with original links.
+
+Each tab has explicit empty, loading, error, partial, and success behavior. Viewers can use the
+workflow and Project selection but cannot access admin mutations.
+
+`/content-health` is the Knowledge Freshness Center. It loads live Project-authorized freshness and
+connector data, keeps the last good data visible during a recoverable refresh error, and displays a
+bounded top-200 finding list with totals calculated from the full inventory.
 
 ## Documents
 

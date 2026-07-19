@@ -6,8 +6,8 @@ Branch: `agent/cerebras-knowledge-upgrade`
 
 ## Current phase
 
-Phase 4 complete — Read-only incremental GitHub and code intelligence.
-Phase 5 is next — Planner, typed evidence tools, executor, and MCP parity.
+Phase 6 complete — Evidence-backed product workflows and browser-verified UI.
+Phase 7 in progress — final hardening, documentation, migration/container gates, and draft PR.
 
 ## Completed work
 
@@ -166,6 +166,61 @@ The pre-commit full backend suite passed with 128 tests and 1 explicitly gated m
 skipped. The 129-case dataset gate, frontend lint, TypeScript check, and 21-page production build
 also passed.
 
+### Phase 5
+
+- Added a strict typed `Evidence` contract with stable citations, source identity/URL, Project and
+  permission context, retrieval provenance, freshness, and document/chunk identity.
+- Added bounded deterministic/model planning, invalid-output fallback, independent-session parallel
+  execution, per-tool/overall deadlines, timing/failure records, and partial-result synthesis.
+- Added read-only Jira, Confluence, Slack, code, recent-PR, knowledge, and expert tools with the same
+  Project/source ACL intersection as Ask.
+- Added authenticated REST evidence endpoints and an MCP stdio bridge that calls REST instead of
+  opening the database.
+- Added the opt-in Ask planner path while preserving existing citations, grounding checks, weak-
+  evidence refusal, and the default path when the feature flag is off.
+
+### Phase 6
+
+- Added Incident Copilot with exact-key facts/status/owner, incident-only cited timeline, checks,
+  explicitly labeled inference, missing-source reporting, and partial tool failures.
+- Added evidence-backed Who Knows ranking using Jira ownership, public Slack participation,
+  Confluence authorship, GitHub CODEOWNERS, and contributor signals. Exact incident matches outrank
+  broad source volume.
+- Added authorized/deduplicated What Changed summaries with bounded date validation and source links.
+- Rebuilt Content Health as a live Project-scoped Knowledge Freshness Center with stale/failing
+  sources, Slack age, repository lag, replacement lineage, connector health, score, and remediation.
+- Added responsive Project Lens onboarding and accessible keyboard workflow tabs.
+
+## Phase 5 and 6 test evidence
+
+| Check | Result |
+|---|---|
+| Planner/executor/tool/MCP tests | Passed; schema/scope injection, invalid output, auth rejection, citation parity, independent sessions, timeout/partial results, and live local MCP smoke |
+| Workflow API tests | Passed; incident citations/missing sources, exact expert ranking, date validation/deduplication, freshness calculations, and cross-Project denial |
+| Full backend suite | Passed; 139 tests, 1 explicitly gated migration test skipped |
+| Evaluation dataset | Passed; 129 cases; live gate skipped without an API token |
+| Frontend | Lint, TypeScript, and Next.js 16 production build passed; 22 static routes |
+| Browser desktop | Ask planner, Incident Copilot, Who Knows, What Changed, Projects, Integrations, Content Health, keyboard tabs, and empty/success/partial/error/recovery states passed |
+| Browser mobile | Project Lens/Ask passed at 390x844 in Phase 1; Phase 6 uses responsive breakpoints and passed build, but the final browser runtime did not expose a safe viewport resize capability |
+
+## Phase 7 final matrix
+
+| Check | Result |
+|---|---|
+| Backend Ruff | Passed across the entire backend; the six baseline findings were fixed |
+| Scoped strict mypy | Passed across Confluence/Jira, evidence tools/workflows, metrics, and their API routes |
+| Full strict mypy | Audited; 328 pre-existing annotations/stub findings remain across legacy/test/generated-upload scope and are documented separately from this gate |
+| Backend tests | Passed; 139 tests, 1 explicitly gated migration test skipped in the normal suite |
+| Frontend | ESLint, `tsc --noEmit`, and Next.js 16 production build passed; 22 static routes |
+| Evaluations | 129-case dataset gate passed; live API gate intentionally skipped without a dedicated eval token |
+| Alembic | Fresh disposable DB passed `upgrade head` (`0005`), project migration test, `downgrade base`, and re-upgrade to `0005` |
+| Infrastructure | `docker compose config --quiet` passed; `ragcore-backend:phase7` image built; live/ready reported PostgreSQL and Redis healthy |
+| Secret scan | Gitleaks scanned the complete intended diff against `main`; no leaks found |
+| Diff hygiene | `git diff --check` passed; no populated env file or credential is staged |
+
+The three exact disposable migration databases created during Phase 1/final validation were removed
+after the round-trip checks. No application or source-system database was deleted.
+
 ## Files and migrations changed
 
 - `shivam_plan/new.md` — source recommendation plan prepared before the goal began.
@@ -173,17 +228,22 @@ also passed.
 - `shivam_plan/implementation_design.md` — Phase 0 architecture/security/migration contract.
 - `shivam_plan/progress.md` — this running evidence log.
 - `backend/config/alembic/versions/0003_projects_and_source_acl.py` — additive/backfilled Phase 1 schema and reversible downgrade.
+- `backend/config/alembic/versions/0004_connector_state_and_slack.py` — connector state, Slack mappings, and receipts.
+- `backend/config/alembic/versions/0005_github_code_index.py` — repository mappings and incremental file state.
 - `backend/models/project.py`, project repositories/routes/schemas — project and source authorization domain.
 - Chat/search/document/knowledge-base/auth services and routes — project propagation and ACL enforcement.
 - `app/projects/`, `components/projects-client.tsx`, Ask/sidebar/API client changes — project administration and selection UI.
 - Phase 1 API/security and migration tests.
+- Planner/executor/evidence tool/MCP services and tests.
+- Incident, expert, change, and freshness workflow APIs/UI/tests.
+- Project, connector, environment, security, testing, operations, and rollback documentation under `docs/`.
 
 ## Remaining work
 
-- Phase 3: Slack read-only connector with fixture/contract coverage.
-- Phase 5: planner/executor/evidence tools and MCP parity.
-- Phase 6: product workflows and visible desktop/mobile verification.
-- Phase 7: final docs, full matrix, containers/manifests, secret scan, commits, push, and draft PR.
+- Complete the Phase 7 migration/container/secret/full-test matrix.
+- Push the feature branch to `shivam2003-dev/RAGCore` and open a draft PR into `main`.
+- Run the real Slack read-only smoke after dedicated credentials and a public test-channel allowlist
+  are supplied.
 
 ## External input required
 

@@ -113,6 +113,27 @@ The CRAG path includes:
 The pipeline keeps the strongest attempt across retries so a weaker rewrite cannot replace better
 evidence found earlier.
 
+## Project scope and evidence orchestration
+
+Every retrieval request resolves an authorized Project scope before hitting dense, sparse, exact,
+Jira relationship, code, workflow, or MCP paths. Project mapping narrows the candidate knowledge
+bases; it never grants a restricted source.
+
+Optional identifier/rare-token/recency signals, RRF, model reranking, and neighbor expansion are
+independently flagged. The default remains the measured weighted configuration. Model reranking
+falls back to the heuristic ranker on timeout, provider failure, or invalid output. Neighbor chunks
+come only from the winning document version and retain the winning citation identity.
+
+When `KNOWLEDGE_PLANNER_ENABLED=true`, Ask performs bounded plan -> tool execution -> synthesis.
+Planning cannot set authorization IDs. Parallel tools use independent sessions, deadlines, and
+partial-result handling. All results normalize to the shared `Evidence` contract and reuse existing
+grounding, citation validation, and weak-evidence refusal.
+
+The 129-case experiment kept weighted fusion as the default: weighted recall/precision/MRR/top-k
+were 0.8372/0.9298/0.9607/0.9845 at p95 1293 ms; RRF improved recall to 0.8643 but reduced
+precision/MRR to 0.9191/0.9566 and raised p95 to 1473 ms. Exact, rare-token, recency, model reranking,
+and neighbor context remain independent rollout switches.
+
 ## CRAG Status
 
 This application ships a deterministic corrective retrieval grader and retry policy. It does not add

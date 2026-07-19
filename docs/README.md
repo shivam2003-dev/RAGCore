@@ -9,6 +9,11 @@ This folder is the source-safe operator and developer reference for the CVUM Kno
 - [Atlassian Read-Only Sync](./ATLASSIAN_READ_ONLY_SYNC.md) - Confluence and Jira connector behavior.
 - [Slack Knowledge Connector](./SLACK_CONNECTOR.md) - allowlisted Socket Mode thread ingestion and safety boundaries.
 - [GitHub Code Connector](./GITHUB_CONNECTOR.md) - read-only incremental code and pull-request intelligence.
+- [Projects and Authorization](./PROJECTS_AND_AUTHORIZATION.md) - Project Lens onboarding and enforceable source ACLs.
+- [Evidence-backed Workflows](./KNOWLEDGE_WORKFLOWS.md) - Incident Copilot, expert ranking, changes, and freshness.
+- [Environment Variables](./ENVIRONMENT_VARIABLES.md) - runtime flags, connector credentials, and safe defaults.
+- [Migrations and Rollback](./MIGRATIONS_AND_ROLLBACK.md) - revision map, disposable round trips, and rollback order.
+- [MCP Evidence Tools](./MCP_TOOLS.md) - authenticated read-only REST/MCP primitives.
 - [Web Search and Council Mode](./WEB_SEARCH_AND_COUNCIL.md) - optional internet retrieval and multi-model answer synthesis.
 - [Discover](./DISCOVER.md) - live department feeds, alerts, research, and board pulse configuration.
 - [Evals](./EVALS.md) - live RAG answer quality, citation, latency, model, and feedback metrics.
@@ -21,10 +26,13 @@ This folder is the source-safe operator and developer reference for the CVUM Kno
 
 CVUM Knowledge Hub is an enterprise knowledge application backed by FastAPI, Postgres with pgvector, Redis, and a Next.js frontend. The primary user workflows are:
 
-1. Sync read-only Confluence and Jira content into local knowledge bases.
-2. Upload local documents into a separate local uploads knowledge base.
-3. Ask grounded questions across synced knowledge, with streamed answers and citations.
-4. Optionally blend answers with configured web search or use LLM Council mode when configured.
-5. Inspect live metrics, evals, documents, content health, feedback, and access control without fake dashboard numbers.
+1. Organize authorized sources into Project lenses without treating relevance as permission.
+2. Sync read-only Confluence, Jira, public allowlisted Slack, and allowlisted GitHub content into the
+   normalized local document pipeline.
+3. Ask grounded questions with streamed answers, authorization-aware retrieval, and openable citations.
+4. Investigate incident keys, rank evidence-backed experts, review source changes, and monitor
+   knowledge freshness.
+5. Expose the same typed, read-only evidence primitives through REST and a local MCP bridge.
+6. Optionally blend answers with configured web search or use LLM Council mode when configured.
 
 The Atlassian connectors only read from production systems. They write synced copies into the local CVUM database for retrieval.

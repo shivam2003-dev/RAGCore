@@ -44,8 +44,8 @@ __all__ = [
     "ProjectSource",
     "RefreshToken",
     "Role",
-    "SourceAccessGrant",
     "SlackChannelMapping",
     "SlackEventReceipt",
+    "SourceAccessGrant",
     "User",
 ]
