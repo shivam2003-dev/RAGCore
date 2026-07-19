@@ -23,6 +23,7 @@ import {
   ExternalLink,
   FileText,
   Globe2,
+  FolderKanban,
   Image as ImageIcon,
   LayoutDashboard,
   Loader2,
@@ -51,6 +52,7 @@ import {
   type Conversation,
   type CouncilConfig,
   type MessageOut,
+  type Project,
   type RagSource,
   type SourceMode,
   type UserOut,
@@ -416,6 +418,8 @@ export function ChatAskClient() {
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [conversationKbId, setConversationKbId] = useState<string | null>(null);
   const [conversations, setConversations] = useState<Conversation[]>([]);
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
   const [historySearch, setHistorySearch] = useState("");
   const [loadingHistory, setLoadingHistory] = useState(true);
   const [openingConversation, setOpeningConversation] = useState<string | null>(null);
@@ -467,16 +471,22 @@ export function ChatAskClient() {
     async function load() {
       try {
         const currentUser = await kimbalApi.ensureSession();
-        const [history, web, chat] = await Promise.all([
+        const [history, web, chat, availableProjects] = await Promise.all([
           kimbalApi.listConversations(),
           kimbalApi.webSearchStatus(),
           kimbalApi.chatCapabilities(),
+          kimbalApi.listProjects(),
         ]);
         if (cancelled) return;
         setUser(currentUser);
         setConversations(history);
         setWebStatus(web);
         setCapabilities(chat);
+        setProjects(availableProjects);
+        const defaultProject = availableProjects.find(
+          (project) => project.id === currentUser.default_project_id
+        ) ?? availableProjects[0];
+        setActiveProjectId(defaultProject?.id ?? null);
         const available = chat.council_available_models;
         const chair = chat.council_chair_model && available.includes(chat.council_chair_model)
           ? chat.council_chair_model
@@ -531,6 +541,10 @@ export function ChatAskClient() {
   async function askQuestion(question: string) {
     const trimmed = question.trim();
     if (!trimmed || busy) return;
+    if (!activeProjectId) {
+      setError("No authorized project is available. Ask an administrator to add you to a project.");
+      return;
+    }
     if ((sourceMode === "web" || sourceMode === "blended") && webStatus?.configured !== true) {
       setError(webStatus?.reason ?? "Web search is not configured.");
       return;
@@ -577,14 +591,18 @@ export function ChatAskClient() {
       let activeKbId = conversationKbId;
 
       if (attachments.length) {
-        const uploadKb = await kimbalApi.ensureUploadKnowledgeBase();
+        const uploadKb = await kimbalApi.ensureUploadKnowledgeBase(activeProjectId);
         for (const attachment of attachments) {
           const document = await kimbalApi.uploadDocument(uploadKb.id, attachment);
           await waitForDocument(document.id);
         }
         setAttachments([]);
         if (!activeConversationId || activeKbId !== uploadKb.id) {
-          const conversation = await kimbalApi.createConversation(uploadKb.id, trimmed.slice(0, 80));
+          const conversation = await kimbalApi.createConversation(
+            uploadKb.id,
+            trimmed.slice(0, 80),
+            activeProjectId
+          );
           activeConversationId = conversation.id;
           activeKbId = conversation.knowledge_base_id;
           setConversationId(conversation.id);
@@ -593,8 +611,12 @@ export function ChatAskClient() {
       }
 
       if (!activeConversationId) {
-        const kb = await kimbalApi.ensureKnowledgeBase();
-        const conversation = await kimbalApi.createConversation(kb.id, trimmed.slice(0, 80));
+        const kb = await kimbalApi.ensureKnowledgeBase(activeProjectId);
+        const conversation = await kimbalApi.createConversation(
+          kb.id,
+          trimmed.slice(0, 80),
+          activeProjectId
+        );
         activeConversationId = conversation.id;
         activeKbId = conversation.knowledge_base_id;
         setConversationId(conversation.id);
@@ -609,7 +631,8 @@ export function ChatAskClient() {
         sourceMode,
         answerMode,
         requestedCouncil,
-        activeRole()
+        activeRole(),
+        activeProjectId
       )) {
         if (event.type === "sources") {
           const citations = event.data.sources ?? event.data.hits ?? [];
@@ -645,13 +668,13 @@ export function ChatAskClient() {
   }
 
   useEffect(() => {
-    if (!initialQuestion.trim() || autoAsked.current) return;
+    if (!initialQuestion.trim() || autoAsked.current || !activeProjectId) return;
     autoAsked.current = true;
     const timer = window.setTimeout(() => void askQuestion(initialQuestion), 0);
     return () => window.clearTimeout(timer);
-    // Run once for a query-linked first request.
+    // The first linked question intentionally waits for project initialization.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [activeProjectId, initialQuestion]);
 
   async function openConversation(conversation: Conversation) {
     if (busy) return;
@@ -661,6 +684,7 @@ export function ChatAskClient() {
       const loaded = await kimbalApi.listMessages(conversation.id);
       setConversationId(conversation.id);
       setConversationKbId(conversation.knowledge_base_id);
+      if (conversation.project_id) setActiveProjectId(conversation.project_id);
       setMessages(loaded.map(messageFromApi));
       setSidebarOpen(false);
     } catch (cause) {
@@ -682,6 +706,23 @@ export function ChatAskClient() {
     setSourcesOpen(false);
     setSidebarOpen(false);
     textareaRef.current?.focus();
+  }
+
+  async function changeProject(projectId: string) {
+    if (!projectId || projectId === activeProjectId || busy) return;
+    setError("");
+    try {
+      await kimbalApi.setDefaultProject(projectId);
+      setActiveProjectId(projectId);
+      setConversationId(null);
+      setConversationKbId(null);
+      setMessages([]);
+      setActiveSources([]);
+      setSourcesOpen(false);
+      setAttachments([]);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Could not switch projects.");
+    }
   }
 
   async function deleteConversation(conversation: Conversation) {
@@ -999,6 +1040,21 @@ export function ChatAskClient() {
               <input ref={attachmentRef} type="file" accept={ATTACHMENT_ACCEPT} multiple className="hidden" onChange={handleFiles} />
               <div className="flex items-center gap-1 px-1 pb-0.5">
                 <button type="button" onClick={() => attachmentRef.current?.click()} disabled={busy} className="flex h-9 w-9 items-center justify-center rounded-lg text-[#6b7280] hover:bg-[#f7f7f8] disabled:opacity-40" aria-label="Attach documents" title="Attach documents"><Paperclip size={17} /></button>
+                <label className="relative min-w-0">
+                  <span className="sr-only">Active project</span>
+                  <FolderKanban size={14} className="pointer-events-none absolute left-2.5 top-2.5 text-[#6b7280]" />
+                  <select
+                    aria-label="Active project"
+                    value={activeProjectId ?? ""}
+                    onChange={(event) => void changeProject(event.target.value)}
+                    disabled={busy || !projects.length}
+                    className="h-9 max-w-[150px] appearance-none truncate rounded-lg bg-transparent pl-8 pr-7 text-[12px] font-medium text-[#4b5563] outline-none hover:bg-[#f7f7f8] disabled:opacity-40 sm:max-w-[190px]"
+                  >
+                    {!projects.length && <option value="">No project</option>}
+                    {projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}
+                  </select>
+                  <ChevronDown size={12} className="pointer-events-none absolute right-2 top-3 text-[#8e8ea0]" />
+                </label>
                 <label className="relative">
                   <span className="sr-only">Source mode</span>
                   {sourceMode === "knowledge" ? <BookOpen size={14} className="pointer-events-none absolute left-2.5 top-2.5 text-[#6b7280]" /> : <Globe2 size={14} className="pointer-events-none absolute left-2.5 top-2.5 text-[#6b7280]" />}
@@ -1071,6 +1127,23 @@ export function ChatAskClient() {
               <button type="button" onClick={() => setSettingsOpen(false)} className="ml-auto flex h-9 w-9 items-center justify-center rounded-lg text-[#6b7280] hover:bg-[#f7f7f8]" aria-label="Close settings" title="Close settings"><X size={18} /></button>
             </div>
             <div className="space-y-7 p-5">
+              <section>
+                <label className="text-[12px] font-semibold text-[#4b5563]">Project</label>
+                <select
+                  aria-label="Settings project"
+                  value={activeProjectId ?? ""}
+                  onChange={(event) => void changeProject(event.target.value)}
+                  disabled={busy || !projects.length}
+                  className="mt-2 h-11 w-full rounded-lg border border-[#d9dce1] bg-white px-3 text-[13px] outline-none focus:border-[#5b5ceb] disabled:opacity-50"
+                >
+                  {!projects.length && <option value="">No authorized projects</option>}
+                  {projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}
+                </select>
+                <p className="mt-2 text-[11px] leading-5 text-[#8e8ea0]">
+                  Project scope narrows results; source permissions are still enforced separately.
+                </p>
+              </section>
+
               <section>
                 <label className="text-[12px] font-semibold text-[#4b5563]">Assistant role</label>
                 <select value={roleId} onChange={(event) => setRoleId(event.target.value as RoleOption["id"])} className="mt-2 h-11 w-full rounded-lg border border-[#d9dce1] bg-white px-3 text-[13px] outline-none focus:border-[#5b5ceb]">

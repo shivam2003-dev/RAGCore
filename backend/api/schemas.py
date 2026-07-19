@@ -34,6 +34,7 @@ class UserOut(ORMModel):
     full_name: str
     role: str
     is_active: bool
+    default_project_id: uuid.UUID | None
     created_at: datetime
 
 
@@ -66,7 +67,70 @@ class KnowledgeBaseOut(ORMModel):
     name: str
     description: str
     embedding_model: str
+    access_scope: str
     created_at: datetime
+
+
+class ProjectCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=255)
+    slug: str | None = Field(default=None, max_length=100)
+    description: str = Field(default="", max_length=2000)
+
+
+class ProjectUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=255)
+    slug: str | None = Field(default=None, min_length=1, max_length=100)
+    description: str | None = Field(default=None, max_length=2000)
+    is_active: bool | None = None
+
+
+class ProjectOut(ORMModel):
+    id: uuid.UUID
+    name: str
+    slug: str
+    description: str
+    is_active: bool
+    source_ids: list[uuid.UUID] = Field(default_factory=list)
+    authorized_source_ids: list[uuid.UUID] = Field(default_factory=list)
+    member_count: int = 0
+    user_project_role: str | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class ProjectSourceUpdate(BaseModel):
+    knowledge_base_ids: list[uuid.UUID] = Field(max_length=500)
+
+
+class ProjectMemberWrite(BaseModel):
+    user_id: uuid.UUID
+    project_role: str = Field(default="member", pattern="^(member|manager)$")
+
+
+class ProjectMemberUpdate(BaseModel):
+    members: list[ProjectMemberWrite] = Field(max_length=500)
+
+
+class ProjectMemberOut(BaseModel):
+    user_id: uuid.UUID
+    full_name: str
+    email: str
+    project_role: str
+
+
+class DefaultProjectUpdate(BaseModel):
+    project_id: uuid.UUID
+
+
+class SourcePermissionUpdate(BaseModel):
+    access_scope: str = Field(pattern="^(organization|restricted)$")
+    user_ids: list[uuid.UUID] = Field(default_factory=list, max_length=500)
+
+
+class SourcePermissionOut(BaseModel):
+    knowledge_base_id: uuid.UUID
+    access_scope: str
+    user_ids: list[uuid.UUID]
 
 
 class CollectionCreate(BaseModel):
@@ -530,6 +594,7 @@ class RoleGenerateResponse(BaseModel):
 class SearchRequest(BaseModel):
     query: str = Field(min_length=1, max_length=2000)
     knowledge_base_id: uuid.UUID
+    project_id: uuid.UUID | None = None
     collection_id: uuid.UUID | None = None
     top_k: int = Field(default=8, ge=1, le=50)
 
@@ -553,12 +618,14 @@ class SearchResponse(BaseModel):
 # --- chat ---
 class ConversationCreate(BaseModel):
     knowledge_base_id: uuid.UUID
+    project_id: uuid.UUID | None = None
     title: str | None = Field(default=None, max_length=300)
 
 
 class ConversationOut(ORMModel):
     id: uuid.UUID
     knowledge_base_id: uuid.UUID
+    project_id: uuid.UUID | None
     title: str
     created_at: datetime
     updated_at: datetime
@@ -567,6 +634,7 @@ class ConversationOut(ORMModel):
 class AskRequest(BaseModel):
     question: str = Field(min_length=1, max_length=4000)
     regenerate: bool = False
+    project_id: uuid.UUID | None = None
     source_mode: str = Field(default="knowledge", pattern="^(knowledge|web|blended)$")
     answer_mode: str = Field(default="fast", pattern="^(fast|council)$")
     assistant_role: str | None = Field(default=None, max_length=80)

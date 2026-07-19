@@ -129,14 +129,13 @@ class ConversationalRetriever:
         source_mode: str,
         assistant_role: str | None = None,
         assistant_role_prompt: str | None = None,
+        authorized_kb_ids: list[uuid.UUID] | None = None,
     ) -> RetrievalResult:
         query = standalone_question or current_question
         current_issue_keys = JIRA_ISSUE_KEY_RE.findall(current_question)
         if current_issue_keys:
             prior_user_intent = " ".join(
-                message.content[:500]
-                for message in history[-6:]
-                if message.role == "user"
+                message.content[:500] for message in history[-6:] if message.role == "user"
             ).strip()
             if prior_user_intent:
                 query = f"{query}\nPrior user intent: {prior_user_intent[-900:]}"
@@ -156,6 +155,7 @@ class ConversationalRetriever:
                 fallback_kb_id=conversation.knowledge_base_id,
                 question=query,
                 role_context=" ".join(part for part in (assistant_role, assistant_role_prompt) if part),
+                authorized_kb_ids=authorized_kb_ids or [],
             )
             top_k = self._settings.retrieval_top_k
             if _contains_any(query, COUNT_TERMS):
@@ -205,9 +205,7 @@ class ConversationalRetriever:
                 )
                 chunks.extend(relationship_chunks)
                 if relationship_chunks:
-                    quality_notes.append(
-                        f"expanded_jira_relationship={issue_key} chunks={len(relationship_chunks)}"
-                    )
+                    quality_notes.append(f"expanded_jira_relationship={issue_key} chunks={len(relationship_chunks)}")
                 live_started = time.perf_counter()
                 try:
                     live_chunks = await retrieve_live_jira_relationships(
@@ -223,15 +221,11 @@ class ConversationalRetriever:
                 except (AuthorizationError, NotFoundError, ProviderError, ValidationError):
                     live_chunks = []
                     quality_notes.append(f"live_jira_relationship_failed={issue_key}")
-                timings_ms[f"live_jira_{issue_key.lower()}"] = int(
-                    (time.perf_counter() - live_started) * 1000
-                )
+                timings_ms[f"live_jira_{issue_key.lower()}"] = int((time.perf_counter() - live_started) * 1000)
                 chunks.extend(live_chunks)
                 if live_chunks:
                     live_jira_chunks.extend(live_chunks)
-                    quality_notes.append(
-                        f"live_jira_relationship={issue_key} chunks={len(live_chunks)}"
-                    )
+                    quality_notes.append(f"live_jira_relationship={issue_key} chunks={len(live_chunks)}")
 
             if live_jira_chunks:
                 confidence = max(confidence or 0.0, 0.8)
@@ -253,8 +247,7 @@ class ConversationalRetriever:
                 confidence = _confidence_from_chunks(web_chunks)
 
         weak_internal = bool(
-            source_mode != "web"
-            and (confidence is None or confidence < MIN_ACCEPT_CONFIDENCE or fallback_requested)
+            source_mode != "web" and (confidence is None or confidence < MIN_ACCEPT_CONFIDENCE or fallback_requested)
         )
         return RetrievalResult(
             chunks=_dedupe_chunks(chunks, limit=max(self._settings.retrieval_top_k, 20)),
@@ -339,10 +332,11 @@ class ConversationalRetriever:
         fallback_kb_id: uuid.UUID,
         question: str,
         role_context: str = "",
+        authorized_kb_ids: list[uuid.UUID] | None = None,
     ) -> list[uuid.UUID]:
-        kbs = await self._kbs.list_by_org(org_id)
+        kbs = await self._kbs.list_by_ids(org_id, authorized_kb_ids or [])
         if not kbs:
-            return [fallback_kb_id]
+            return []
 
         normalized = question.lower()
         non_web = [kb for kb in kbs if kb.name != self._settings.web_search_default_kb_name]
@@ -376,7 +370,10 @@ class ConversationalRetriever:
             if confluence_kbs:
                 return confluence_kbs
 
-        return [kb.id for kb in candidates]
+        scope = [kb.id for kb in candidates]
+        if not scope and fallback_kb_id in (authorized_kb_ids or []):
+            return [fallback_kb_id]
+        return scope
 
 
 def _named_scope(kbs: list[KnowledgeBase], normalized_question: str) -> list[KnowledgeBase]:
@@ -421,11 +418,7 @@ def _role_scope(kbs: list[KnowledgeBase], role_context: str) -> list[KnowledgeBa
         return _dedupe_kbs([kb for kb in kbs if _kb_name_contains(kb, ("hr", "people"))])
     if "developer" in normalized or "dev space" in normalized:
         return _dedupe_kbs(
-            [
-                kb
-                for kb in kbs
-                if _kb_name_contains(kb, ("developer", "engineering", "confluence dev", "dev docs"))
-            ]
+            [kb for kb in kbs if _kb_name_contains(kb, ("developer", "engineering", "confluence dev", "dev docs"))]
         )
     return []
 
@@ -468,11 +461,7 @@ def _decompose_query(query: str) -> list[str]:
         return [query]
     lower = f" {normalized.lower()} "
     has_multi_signal = (
-        " and " in lower
-        or " also " in lower
-        or " plus " in lower
-        or ";" in normalized
-        or "?" in normalized.rstrip("?")
+        " and " in lower or " also " in lower or " plus " in lower or ";" in normalized or "?" in normalized.rstrip("?")
     )
     if not has_multi_signal:
         return [normalized]
@@ -488,9 +477,7 @@ def _decompose_query(query: str) -> list[str]:
     source_signals = sum(
         1
         for part in parts
-        if _contains_any(part, JIRA_TERMS)
-        or _contains_any(part, CONFLUENCE_TERMS)
-        or _contains_any(part, COUNT_TERMS)
+        if _contains_any(part, JIRA_TERMS) or _contains_any(part, CONFLUENCE_TERMS) or _contains_any(part, COUNT_TERMS)
     )
     if source_signals < 2:
         return [normalized]

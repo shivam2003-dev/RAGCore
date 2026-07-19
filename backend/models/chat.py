@@ -6,13 +6,15 @@ from sqlalchemy import (
     DateTime,
     Float,
     ForeignKey,
+    ForeignKeyConstraint,
     Index,
     Integer,
     SmallInteger,
     String,
     Text,
+    UniqueConstraint,
 )
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from database.base import Base, TimestampMixin, UUIDPKMixin
@@ -21,29 +23,32 @@ from database.base import Base, TimestampMixin, UUIDPKMixin
 class Conversation(UUIDPKMixin, TimestampMixin, Base):
     __tablename__ = "conversations"
 
-    organization_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("organizations.id", ondelete="CASCADE")
-    )
+    organization_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"))
     user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
-    knowledge_base_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("knowledge_bases.id", ondelete="CASCADE")
-    )
+    knowledge_base_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("knowledge_bases.id", ondelete="CASCADE"))
+    project_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     title: Mapped[str] = mapped_column(String(300), default="New conversation")
     is_deleted: Mapped[bool] = mapped_column(Boolean, default=False)
 
-    messages: Mapped[list["Message"]] = relationship(
-        back_populates="conversation", order_by="Message.created_at"
-    )
+    messages: Mapped[list["Message"]] = relationship(back_populates="conversation", order_by="Message.created_at")
 
-    __table_args__ = (Index("ix_conversations_user_id", "user_id"),)
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["organization_id", "project_id"],
+            ["projects.organization_id", "projects.id"],
+            name="fk_conversations_org_project",
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint("organization_id", "id", name="uq_conversations_org_id"),
+        Index("ix_conversations_user_id", "user_id"),
+        Index("ix_conversations_project_id", "project_id"),
+    )
 
 
 class Message(UUIDPKMixin, Base):
     __tablename__ = "messages"
 
-    conversation_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("conversations.id", ondelete="CASCADE")
-    )
+    conversation_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("conversations.id", ondelete="CASCADE"))
     role: Mapped[str] = mapped_column(String(10))  # user | assistant
     content: Mapped[str] = mapped_column(Text)
     input_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)

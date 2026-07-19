@@ -31,19 +31,27 @@ class DocumentStatus(enum.StrEnum):
     FAILED = "failed"
 
 
+class AccessScope(enum.StrEnum):
+    ORGANIZATION = "organization"
+    RESTRICTED = "restricted"
+
+
 class KnowledgeBase(UUIDPKMixin, TimestampMixin, Base):
     __tablename__ = "knowledge_bases"
 
-    organization_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("organizations.id", ondelete="CASCADE")
-    )
+    organization_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"))
     name: Mapped[str] = mapped_column(String(255))
     description: Mapped[str] = mapped_column(Text, default="")
     embedding_model: Mapped[str] = mapped_column(String(100))
     embedding_dimensions: Mapped[int] = mapped_column(Integer, default=EMBEDDING_DIM)
+    access_scope: Mapped[AccessScope] = mapped_column(
+        Enum(AccessScope, name="access_scope", values_callable=lambda values: [item.value for item in values]),
+        default=AccessScope.ORGANIZATION,
+    )
 
     __table_args__ = (
         UniqueConstraint("organization_id", "name", name="uq_kb_org_name"),
+        UniqueConstraint("organization_id", "id", name="uq_kb_org_id"),
         Index("ix_knowledge_bases_organization_id", "organization_id"),
     )
 
@@ -51,9 +59,7 @@ class KnowledgeBase(UUIDPKMixin, TimestampMixin, Base):
 class Collection(UUIDPKMixin, TimestampMixin, Base):
     __tablename__ = "collections"
 
-    knowledge_base_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("knowledge_bases.id", ondelete="CASCADE")
-    )
+    knowledge_base_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("knowledge_bases.id", ondelete="CASCADE"))
     name: Mapped[str] = mapped_column(String(255))
     description: Mapped[str] = mapped_column(Text, default="")
 
@@ -66,15 +72,11 @@ class Collection(UUIDPKMixin, TimestampMixin, Base):
 class Document(UUIDPKMixin, TimestampMixin, Base):
     __tablename__ = "documents"
 
-    knowledge_base_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("knowledge_bases.id", ondelete="CASCADE")
-    )
+    knowledge_base_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("knowledge_bases.id", ondelete="CASCADE"))
     collection_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("collections.id", ondelete="SET NULL"), nullable=True
     )
-    uploaded_by: Mapped[uuid.UUID | None] = mapped_column(
-        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
-    )
+    uploaded_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     title: Mapped[str] = mapped_column(String(500))
     source_type: Mapped[str] = mapped_column(String(20))  # pdf | docx | md | txt | csv | html
     status: Mapped[DocumentStatus] = mapped_column(
@@ -103,32 +105,22 @@ class DocumentVersion(UUIDPKMixin, Base):
 
     document: Mapped[Document] = relationship(back_populates="versions")
 
-    __table_args__ = (
-        UniqueConstraint("document_id", "version", name="uq_docver_doc_version"),
-    )
+    __table_args__ = (UniqueConstraint("document_id", "version", name="uq_docver_doc_version"),)
 
 
 class Chunk(UUIDPKMixin, Base):
     __tablename__ = "chunks"
 
-    knowledge_base_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("knowledge_bases.id", ondelete="CASCADE")
-    )
+    knowledge_base_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("knowledge_bases.id", ondelete="CASCADE"))
     document_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("documents.id", ondelete="CASCADE"))
-    document_version_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("document_versions.id", ondelete="CASCADE")
-    )
-    parent_id: Mapped[uuid.UUID | None] = mapped_column(
-        ForeignKey("chunks.id", ondelete="CASCADE"), nullable=True
-    )
+    document_version_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("document_versions.id", ondelete="CASCADE"))
+    parent_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("chunks.id", ondelete="CASCADE"), nullable=True)
     ordinal: Mapped[int] = mapped_column(Integer)  # position within document
     content: Mapped[str] = mapped_column(Text)
     token_count: Mapped[int] = mapped_column(Integer)
     chunk_metadata: Mapped[dict] = mapped_column(JSONB, default=dict)  # headings, page, language
     embedding: Mapped[list[float] | None] = mapped_column(Vector(EMBEDDING_DIM), nullable=True)
-    tsv: Mapped[str] = mapped_column(
-        TSVECTOR, Computed("to_tsvector('english', content)", persisted=True)
-    )
+    tsv: Mapped[str] = mapped_column(TSVECTOR, Computed("to_tsvector('english', content)", persisted=True))
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)  # false for superseded versions
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 

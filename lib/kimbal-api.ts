@@ -12,6 +12,7 @@ export type UserOut = {
   full_name: string;
   role: string;
   is_active: boolean;
+  default_project_id: string | null;
   created_at: string;
 };
 
@@ -20,7 +21,35 @@ export type KnowledgeBase = {
   name: string;
   description: string;
   embedding_model: string;
+  access_scope: "organization" | "restricted";
   created_at: string;
+};
+
+export type Project = {
+  id: string;
+  name: string;
+  slug: string;
+  description: string;
+  is_active: boolean;
+  source_ids: string[];
+  authorized_source_ids: string[];
+  member_count: number;
+  user_project_role: "member" | "manager" | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ProjectMember = {
+  user_id: string;
+  full_name: string;
+  email: string;
+  project_role: "member" | "manager";
+};
+
+export type SourcePermission = {
+  knowledge_base_id: string;
+  access_scope: "organization" | "restricted";
+  user_ids: string[];
 };
 
 export type DocumentOut = {
@@ -84,6 +113,7 @@ export type SearchResponse = {
 export type Conversation = {
   id: string;
   knowledge_base_id: string;
+  project_id: string | null;
   title: string;
   created_at: string;
   updated_at: string;
@@ -762,10 +792,17 @@ export class CVUMApi {
     return this.request<KnowledgeBase[]>("/knowledge-bases");
   }
 
-  async ensureKnowledgeBase(): Promise<KnowledgeBase> {
+  async ensureKnowledgeBase(projectId?: string): Promise<KnowledgeBase> {
     await this.ensureSession();
-    const existing = await this.listKnowledgeBases();
-    const kb = PREFERRED_KB_NAMES.map((name) => existing.find((item) => item.name === name)).find(Boolean) ?? existing[0];
+    const [existing, projects] = await Promise.all([
+      this.listKnowledgeBases(),
+      projectId ? this.listProjects() : Promise.resolve([]),
+    ]);
+    const project = projects.find((item) => item.id === projectId);
+    const scoped = project
+      ? existing.filter((item) => project.authorized_source_ids.includes(item.id))
+      : existing;
+    const kb = PREFERRED_KB_NAMES.map((name) => scoped.find((item) => item.name === name)).find(Boolean) ?? scoped[0];
     if (kb) return kb;
     return this.request<KnowledgeBase>("/knowledge-bases", {
       method: "POST",
@@ -776,18 +813,26 @@ export class CVUMApi {
     });
   }
 
-  async ensureUploadKnowledgeBase(): Promise<KnowledgeBase> {
+  async ensureUploadKnowledgeBase(projectId?: string): Promise<KnowledgeBase> {
     await this.ensureSession();
     const existing = await this.listKnowledgeBases();
-    const kb = existing.find((item) => item.name === "CVUM Local Uploads");
-    if (kb) return kb;
-    return this.request<KnowledgeBase>("/knowledge-bases", {
-      method: "POST",
-      body: {
-        name: "CVUM Local Uploads",
-        description: "Operator-uploaded documents kept separate from read-only external source syncs.",
-      },
-    });
+    let kb = existing.find((item) => item.name === "CVUM Local Uploads");
+    if (!kb) {
+      kb = await this.request<KnowledgeBase>("/knowledge-bases", {
+        method: "POST",
+        body: {
+          name: "CVUM Local Uploads",
+          description: "Operator-uploaded documents kept separate from read-only external source syncs.",
+        },
+      });
+    }
+    if (projectId) {
+      const project = (await this.listProjects()).find((item) => item.id === projectId);
+      if (project && !project.source_ids.includes(kb.id)) {
+        await this.updateProjectSources(project.id, [...project.source_ids, kb.id]);
+      }
+    }
+    return kb;
   }
 
   async listDocuments(kbId?: string, limit = 50, offset = 0) {
@@ -840,11 +885,102 @@ export class CVUMApi {
     });
   }
 
-  async createConversation(kbId: string, title: string) {
+  async listProjects() {
+    return this.request<Project[]>("/projects");
+  }
+
+  async createProject(input: { name: string; slug?: string; description?: string }) {
+    const project = await this.request<Project>("/projects", {
+      method: "POST",
+      body: input,
+    });
+    this.clearLiveCache();
+    return project;
+  }
+
+  async updateProject(
+    projectId: string,
+    input: Partial<Pick<Project, "name" | "slug" | "description" | "is_active">>
+  ) {
+    const project = await this.request<Project>(`/projects/${encodeURIComponent(projectId)}`, {
+      method: "PATCH",
+      body: input,
+    });
+    this.clearLiveCache();
+    return project;
+  }
+
+  async deleteProject(projectId: string) {
+    await this.request<void>(`/projects/${encodeURIComponent(projectId)}`, { method: "DELETE" });
+    this.clearLiveCache();
+  }
+
+  async updateProjectSources(projectId: string, knowledgeBaseIds: string[]) {
+    const project = await this.request<Project>(`/projects/${encodeURIComponent(projectId)}/sources`, {
+      method: "PUT",
+      body: { knowledge_base_ids: knowledgeBaseIds },
+    });
+    this.clearLiveCache();
+    return project;
+  }
+
+  async listProjectMembers(projectId: string) {
+    return this.request<ProjectMember[]>(`/projects/${encodeURIComponent(projectId)}/members`);
+  }
+
+  async updateProjectMembers(
+    projectId: string,
+    members: Array<{ user_id: string; project_role: "member" | "manager" }>
+  ) {
+    const result = await this.request<ProjectMember[]>(`/projects/${encodeURIComponent(projectId)}/members`, {
+      method: "PUT",
+      body: { members },
+    });
+    this.clearLiveCache();
+    return result;
+  }
+
+  async setDefaultProject(projectId: string) {
+    const project = await this.request<Project>("/users/me/default-project", {
+      method: "PUT",
+      body: { project_id: projectId },
+    });
+    this.sessionUser = this.sessionUser
+      ? { ...this.sessionUser, default_project_id: project.id }
+      : null;
+    this.sessionCheckedAt = Date.now();
+    this.clearLiveCache();
+    return project;
+  }
+
+  async sourcePermissions(knowledgeBaseId: string) {
+    return this.request<SourcePermission>(
+      `/knowledge-bases/${encodeURIComponent(knowledgeBaseId)}/permissions`
+    );
+  }
+
+  async updateSourcePermissions(
+    knowledgeBaseId: string,
+    accessScope: "organization" | "restricted",
+    userIds: string[]
+  ) {
+    const result = await this.request<SourcePermission>(
+      `/knowledge-bases/${encodeURIComponent(knowledgeBaseId)}/permissions`,
+      {
+        method: "PUT",
+        body: { access_scope: accessScope, user_ids: userIds },
+      }
+    );
+    this.clearLiveCache();
+    return result;
+  }
+
+  async createConversation(kbId: string, title: string, projectId?: string) {
     return this.request<Conversation>("/conversations", {
       method: "POST",
       body: {
         knowledge_base_id: kbId,
+        project_id: projectId ?? null,
         title,
       },
     });
@@ -997,7 +1133,8 @@ export class CVUMApi {
     sourceMode: SourceMode = "knowledge",
     answerMode: AnswerMode = "fast",
     council?: CouncilConfig,
-    assistantRole?: AssistantRoleConfig
+    assistantRole?: AssistantRoleConfig,
+    projectId?: string
   ): AsyncGenerator<AskStreamEvent> {
     const body: {
       question: string;
@@ -1007,7 +1144,9 @@ export class CVUMApi {
       assistant_role_prompt?: string;
       council_models?: string[];
       council_chair_model?: string;
+      project_id?: string;
     } = { question, source_mode: sourceMode, answer_mode: answerMode };
+    if (projectId) body.project_id = projectId;
     if (assistantRole?.name && assistantRole.prompt) {
       body.assistant_role = assistantRole.name;
       body.assistant_role_prompt = assistantRole.prompt;

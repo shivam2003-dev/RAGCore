@@ -14,16 +14,27 @@ class ChatSessionManager:
         self._conversations = ConversationRepository(db)
         self._messages = MessageRepository(db)
 
-    async def start_conversation(self, user: User, kb_id: uuid.UUID, title: str | None) -> Conversation:
+    async def start_conversation(
+        self,
+        user: User,
+        kb_id: uuid.UUID,
+        project_id: uuid.UUID,
+        title: str | None,
+    ) -> Conversation:
         conversation = Conversation(
             organization_id=user.organization_id,
             user_id=user.id,
             knowledge_base_id=kb_id,
+            project_id=project_id,
             title=title or "New conversation",
         )
         self._conversations.add(conversation)
         await self._db.commit()
         return conversation
+
+    async def set_project(self, conversation: Conversation, project_id: uuid.UUID) -> None:
+        conversation.project_id = project_id
+        await self._db.commit()
 
     async def get_owned(self, conversation_id: uuid.UUID, user: User) -> Conversation | None:
         return await self._conversations.get_owned(conversation_id, user.id)

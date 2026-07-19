@@ -2,7 +2,17 @@ import enum
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, Index, String, Text
+from sqlalchemy import (
+    Boolean,
+    DateTime,
+    Enum,
+    ForeignKey,
+    ForeignKeyConstraint,
+    Index,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -27,9 +37,7 @@ class Organization(UUIDPKMixin, TimestampMixin, Base):
 class User(UUIDPKMixin, TimestampMixin, Base):
     __tablename__ = "users"
 
-    organization_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("organizations.id", ondelete="CASCADE")
-    )
+    organization_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"))
     email: Mapped[str] = mapped_column(String(320), unique=True)
     password_hash: Mapped[str] = mapped_column(Text)
     full_name: Mapped[str] = mapped_column(String(255))
@@ -38,10 +46,22 @@ class User(UUIDPKMixin, TimestampMixin, Base):
         default=Role.VIEWER,
     )
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    default_project_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
 
     organization: Mapped[Organization] = relationship(back_populates="users")
 
-    __table_args__ = (Index("ix_users_organization_id", "organization_id"),)
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["organization_id", "default_project_id"],
+            ["projects.organization_id", "projects.id"],
+            name="fk_users_org_default_project",
+            ondelete="RESTRICT",
+            use_alter=True,
+        ),
+        UniqueConstraint("organization_id", "id", name="uq_users_org_id"),
+        Index("ix_users_organization_id", "organization_id"),
+        Index("ix_users_default_project_id", "default_project_id"),
+    )
 
 
 class RefreshToken(UUIDPKMixin, Base):
@@ -59,9 +79,7 @@ class RefreshToken(UUIDPKMixin, Base):
 class ApiKey(UUIDPKMixin, TimestampMixin, Base):
     __tablename__ = "api_keys"
 
-    organization_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("organizations.id", ondelete="CASCADE")
-    )
+    organization_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"))
     user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
     name: Mapped[str] = mapped_column(String(255))
     key_hash: Mapped[str] = mapped_column(String(64), unique=True)
@@ -75,9 +93,7 @@ class ApiKey(UUIDPKMixin, TimestampMixin, Base):
 class AuditLog(UUIDPKMixin, Base):
     __tablename__ = "audit_logs"
 
-    organization_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), nullable=True
-    )
+    organization_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     actor_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     action: Mapped[str] = mapped_column(String(100))  # e.g. "document.upload"
     resource_type: Mapped[str] = mapped_column(String(50))
@@ -86,6 +102,4 @@ class AuditLog(UUIDPKMixin, Base):
     ip_address: Mapped[str | None] = mapped_column(String(45), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
-    __table_args__ = (
-        Index("ix_audit_logs_organization_id_created_at", "organization_id", "created_at"),
-    )
+    __table_args__ = (Index("ix_audit_logs_organization_id_created_at", "organization_id", "created_at"),)

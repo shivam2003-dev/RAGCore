@@ -14,8 +14,9 @@ from core.security import (
     verify_password,
 )
 from database.base import utcnow
-from models import ApiKey, Organization, RefreshToken, Role, User
+from models import ApiKey, Organization, ProjectRole, RefreshToken, Role, User
 from repositories.audit import AuditLogRepository
+from repositories.projects import ProjectRepository
 from repositories.users import (
     ApiKeyRepository,
     OrganizationRepository,
@@ -39,6 +40,7 @@ class AuthService:
         self._refresh = RefreshTokenRepository(db)
         self._api_keys = ApiKeyRepository(db)
         self._audit = AuditLogRepository(db)
+        self._projects = ProjectRepository(db)
 
     async def register(
         self,
@@ -65,6 +67,13 @@ class AuthService:
         )
         self._users.add(user)
         await self._db.flush()
+        project = await self._projects.ensure_default(org.id)
+        await self._projects.add_member(
+            project=project,
+            user=user,
+            project_role=ProjectRole.MANAGER if user.role is Role.ADMIN else ProjectRole.MEMBER,
+        )
+        user.default_project_id = project.id
         self._audit.record(
             action="user.register",
             resource_type="user",
@@ -122,6 +131,13 @@ class AuthService:
         )
         self._users.add(user)
         await self._db.flush()
+        project = await self._projects.ensure_default(org.id)
+        await self._projects.add_member(
+            project=project,
+            user=user,
+            project_role=ProjectRole.MANAGER if user.role is Role.ADMIN else ProjectRole.MEMBER,
+        )
+        user.default_project_id = project.id
         self._audit.record(
             action="user.create",
             resource_type="user",
@@ -178,9 +194,7 @@ class AuthService:
         return await self._users.get(key.user_id)
 
     async def _issue_tokens(self, user: User) -> TokenPair:
-        access = create_access_token(
-            user_id=user.id, org_id=user.organization_id, role=user.role.value
-        )
+        access = create_access_token(user_id=user.id, org_id=user.organization_id, role=user.role.value)
         raw_refresh = new_refresh_token()
         self._refresh.add(
             RefreshToken(

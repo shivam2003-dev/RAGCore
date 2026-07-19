@@ -24,26 +24,26 @@ class ConversationRepository:
         )
 
     async def list_for_user(
-        self, user_id: uuid.UUID, limit: int = 50, offset: int = 0
+        self,
+        user_id: uuid.UUID,
+        limit: int = 50,
+        offset: int = 0,
+        project_ids: set[uuid.UUID] | None = None,
     ) -> list[Conversation]:
-        rows = await self.db.scalars(
-            select(Conversation)
-            .where(Conversation.user_id == user_id, Conversation.is_deleted.is_(False))
-            .order_by(Conversation.updated_at.desc())
-            .limit(limit)
-            .offset(offset)
+        stmt = select(Conversation).where(
+            Conversation.user_id == user_id,
+            Conversation.is_deleted.is_(False),
         )
+        if project_ids is not None:
+            stmt = stmt.where(Conversation.project_id.in_(project_ids))
+        rows = await self.db.scalars(stmt.order_by(Conversation.updated_at.desc()).limit(limit).offset(offset))
         return list(rows)
 
     async def soft_delete(self, conv_id: uuid.UUID) -> None:
-        await self.db.execute(
-            update(Conversation).where(Conversation.id == conv_id).values(is_deleted=True)
-        )
+        await self.db.execute(update(Conversation).where(Conversation.id == conv_id).values(is_deleted=True))
 
     async def set_title(self, conv_id: uuid.UUID, title: str) -> None:
-        await self.db.execute(
-            update(Conversation).where(Conversation.id == conv_id).values(title=title)
-        )
+        await self.db.execute(update(Conversation).where(Conversation.id == conv_id).values(title=title))
 
 
 class MessageRepository:
@@ -58,14 +58,10 @@ class MessageRepository:
 
     async def get(self, message_id: uuid.UUID) -> Message | None:
         return await self.db.scalar(
-            select(Message)
-            .where(Message.id == message_id)
-            .options(selectinload(Message.citations))
+            select(Message).where(Message.id == message_id).options(selectinload(Message.citations))
         )
 
-    async def list_for_conversation(
-        self, conv_id: uuid.UUID, limit: int = 100
-    ) -> list[Message]:
+    async def list_for_conversation(self, conv_id: uuid.UUID, limit: int = 100) -> list[Message]:
         rows = await self.db.scalars(
             select(Message)
             .where(Message.conversation_id == conv_id)
@@ -77,10 +73,7 @@ class MessageRepository:
 
     async def recent_turns(self, conv_id: uuid.UUID, limit: int = 10) -> list[Message]:
         rows = await self.db.scalars(
-            select(Message)
-            .where(Message.conversation_id == conv_id)
-            .order_by(Message.created_at.desc())
-            .limit(limit)
+            select(Message).where(Message.conversation_id == conv_id).order_by(Message.created_at.desc()).limit(limit)
         )
         return list(reversed(list(rows)))
 

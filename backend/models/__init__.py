@@ -1,6 +1,7 @@
 from database.base import Base
 from models.chat import Citation, Conversation, Feedback, Message
 from models.knowledge import (
+    AccessScope,
     Chunk,
     Collection,
     Document,
@@ -8,9 +9,11 @@ from models.knowledge import (
     DocumentVersion,
     KnowledgeBase,
 )
+from models.project import Project, ProjectMember, ProjectRole, ProjectSource, SourceAccessGrant
 from models.user import ApiKey, AuditLog, Organization, RefreshToken, Role, User
 
 __all__ = [
+    "AccessScope",
     "ApiKey",
     "AuditLog",
     "Base",
@@ -25,7 +28,12 @@ __all__ = [
     "KnowledgeBase",
     "Message",
     "Organization",
+    "Project",
+    "ProjectMember",
+    "ProjectRole",
+    "ProjectSource",
     "RefreshToken",
     "Role",
+    "SourceAccessGrant",
     "User",
 ]

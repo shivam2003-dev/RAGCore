@@ -6,7 +6,8 @@ Branch: `agent/cerebras-knowledge-upgrade`
 
 ## Current phase
 
-Phase 0 — Baseline and architecture contract.
+Phase 1 complete — Projects, default scope, and enforceable source ACLs.
+Phase 2 is next — Retrieval ranking experiment.
 
 ## Completed work
 
@@ -17,6 +18,17 @@ Phase 0 — Baseline and architecture contract.
 - Created the dedicated branch `agent/cerebras-knowledge-upgrade`.
 - Confirmed GitHub CLI is authenticated through the OS keyring; the separately pasted PAT is not needed and has not been written to the repository.
 - Established that Jira and Confluence connector work for this goal is fixture/read-only only. No production mutations are permitted.
+
+### Phase 1
+
+- Added organization-scoped projects, project-source mappings, project membership/manager roles, user defaults, conversation project scope, source access modes, and explicit user source grants.
+- Added migration `0003_projects_and_source_acl.py`, including backfill to an `All Knowledge` project, upgrade/downgrade support, and compatibility guards for the repository's historical metadata-driven initial migration.
+- Added project CRUD, source mapping, membership, default selection, source-permission, and audit APIs.
+- Enforced active-project and explicit source authorization before database retrieval, deterministic Jira counts, live Jira evidence mapping, citation reads, direct knowledge-base metadata reads, collection reads, and document reads.
+- Added authorization context to retrieval cache keys so user, project, role, and effective source scope cannot share cached results.
+- Added the `/projects` management interface and project selectors in the Ask composer and settings surface.
+- New organizations/users receive a usable default project; new knowledge bases are mapped into the default project.
+- Revoked citations now redact the stored assistant answer instead of returning previously derived restricted content.
 
 ## Baseline test results
 
@@ -32,18 +44,38 @@ Phase 0 — Baseline and architecture contract.
 
 The Ruff and mypy failures existed before application changes on this branch. They will be fixed and re-run before final completion.
 
+## Phase 1 test evidence
+
+| Check | Result |
+|---|---|
+| Backend suite | Passed; 101 tests, 1 migration test skipped without its explicit disposable-DB variable |
+| Phase 1 ACL/API tests | Passed; project role matrix, CRUD, membership, default persistence, cross-project/cross-org denial, restricted grants/revocation, direct-read denial, cache isolation, and conversation scope |
+| Migration round trip | Passed against explicit disposable clone DB; downgrade to `0002` preserved organization/user/KB/conversation rows and upgrade to `0003` restored/backfilled project schema |
+| Fresh migration chain | Passed upgrade to head, downgrade to base, and upgrade to head against an explicit disposable database |
+| Golden dataset gate | Passed; 129 cases; live gate intentionally skipped because no API base/token was supplied |
+| Frontend lint and TypeScript | Passed |
+| Next production build | Passed; 21 static pages, including `/projects` |
+| Changed Python files Ruff | Passed |
+| Browser desktop | Passed in Chrome against `localhost:3100`; create, source-map, default, switch, reload persistence, and safe deactivation verified |
+| Browser mobile | Passed at 390x844 for `/projects` and Ask project selection |
+| Browser console | No errors during the Phase 1 path |
+
+The temporary browser-test project was safely deactivated after verification. Its source was not deleted. The local All Knowledge project remains the default.
+
 ## Files and migrations changed
 
 - `shivam_plan/new.md` — source recommendation plan prepared before the goal began.
 - `shivam_plan/goal.md` — complete phase-by-phase goal and acceptance criteria.
 - `shivam_plan/implementation_design.md` — Phase 0 architecture/security/migration contract.
 - `shivam_plan/progress.md` — this running evidence log.
-- No database migration has been added yet.
+- `backend/config/alembic/versions/0003_projects_and_source_acl.py` — additive/backfilled Phase 1 schema and reversible downgrade.
+- `backend/models/project.py`, project repositories/routes/schemas — project and source authorization domain.
+- Chat/search/document/knowledge-base/auth services and routes — project propagation and ACL enforcement.
+- `app/projects/`, `components/projects-client.tsx`, Ask/sidebar/API client changes — project administration and selection UI.
+- Phase 1 API/security and migration tests.
 
 ## Remaining work
 
-- Complete Phase 0 review and commit.
-- Phase 1: project/default scope/source ACL schema, migration, API, UI, audit, and negative security tests.
 - Phase 2: retrieval arms, RRF experiment, trace, scoring, reranker fallback, neighbors, and evaluation comparison.
 - Phase 3: Slack read-only connector with fixture/contract coverage.
 - Phase 4: GitHub read-only incremental indexing and code intelligence.

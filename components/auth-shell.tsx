@@ -23,8 +23,9 @@ export function AuthShell({ children }: { children: ReactNode }) {
 
   const isLogin = pathname === LOGIN_PATH;
   const isAsk = pathname === ASK_PATH || pathname === "/ask";
+  const isProjectAdmin = pathname === "/projects" && user?.role === "editor";
   const isAdmin = user?.role === "admin";
-  const userCanViewPath = isAdmin || isAsk;
+  const userCanViewPath = isAdmin || isAsk || isProjectAdmin;
 
   useEffect(() => {
     let cancelled = false;
@@ -40,7 +41,7 @@ export function AuthShell({ children }: { children: ReactNode }) {
         const currentUser = await kimbalApi.ensureSession();
         if (cancelled) return;
         setUser(currentUser);
-        if (currentUser.role !== "admin" && !isAsk) {
+        if (currentUser.role !== "admin" && !isAsk && !(pathname === "/projects" && currentUser.role === "editor")) {
           window.location.replace(ASK_PATH);
         }
       } catch (error) {

@@ -18,6 +18,7 @@ import {
   Users,
   Settings,
   Workflow,
+  FolderKanban,
   LogOut,
   PanelLeftClose,
   PanelLeftOpen,
@@ -60,6 +61,7 @@ const groups: Array<{ label?: string; items: Item[] }> = [
     items: [
       { label: "Data Sources", href: "/data-sources", icon: Server },
       { label: "Access Control", href: "/access-control", icon: Users },
+      { label: "Projects", href: "/projects", icon: FolderKanban },
       { label: "Settings", href: "/settings", icon: Settings },
       { label: "Integrations", href: "/integrations", icon: Workflow },
     ],
@@ -83,10 +85,14 @@ export function Sidebar({ user, onLogout }: { user: UserOut; onLogout: () => voi
     if (typeof window === "undefined") return false;
     return window.localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === "true";
   });
-  const visibleGroups =
-    user.role === "admin"
-      ? groups
-      : [{ items: [{ label: "Ask CVUM", href: "/", icon: MessageSquare }] }];
+  const visibleGroups = user.role === "admin"
+    ? groups
+    : [{
+        items: [
+          { label: "Ask CVUM", href: "/", icon: MessageSquare },
+          ...(user.role === "editor" ? [{ label: "Projects", href: "/projects", icon: FolderKanban }] : []),
+        ],
+      }];
 
   useEffect(() => {
     document.body.classList.toggle("sidebar-collapsed", collapsed);

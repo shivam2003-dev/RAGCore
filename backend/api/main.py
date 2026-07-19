@@ -18,6 +18,7 @@ from api.routes import (
     health,
     jira,
     knowledge_bases,
+    projects,
     search,
     web_search,
 )
@@ -98,6 +99,7 @@ def create_app() -> FastAPI:
     app.include_router(health.router)
     app.include_router(auth.router, prefix=api)
     app.include_router(knowledge_bases.router, prefix=api)
+    app.include_router(projects.router, prefix=api)
     app.include_router(documents.router, prefix=api)
     app.include_router(confluence.router, prefix=api)
     app.include_router(discover.router, prefix=api)
