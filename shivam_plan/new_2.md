@@ -1,8 +1,8 @@
 # RAGCore Enterprise Knowledge Base — Retrieval and AI Improvement Blueprint
 
-Status: proposed roadmap grounded in the current repository and the cited primary sources  
-Product name: CVUM  
-Repository: RAGCore  
+Status: proposed roadmap grounded in the current repository and the cited primary sources
+Product name: CVUM
+Repository: RAGCore
 Date: 2026-07-20
 
 ## 1. Executive decision
