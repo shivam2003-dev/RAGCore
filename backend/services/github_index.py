@@ -1,3 +1,4 @@
+import asyncio
 import fnmatch
 import hashlib
 import re
@@ -7,7 +8,7 @@ from datetime import datetime, timedelta
 from pathlib import PurePosixPath
 from urllib.parse import quote
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.config import Settings
@@ -71,6 +72,7 @@ _TEXT_SUFFIXES = _CODE_SUFFIXES | {
 _SPECIAL_TEXT_FILES = {"codeowners", "dockerfile", "makefile"}
 _UPLOADED_REINDEX_AFTER = timedelta(seconds=30)
 _PROCESSING_REINDEX_AFTER = timedelta(minutes=15)
+_SYNC_HEARTBEAT_FILE_INTERVAL = 25
 
 
 @dataclass(slots=True, frozen=True)
@@ -193,11 +195,7 @@ class GitHubIndexService:
         await self._projects.add_source(project=project, knowledge_base_id=mapping.knowledge_base_id)
         state.status = "configured"
         await self._db.flush()
-        state.config = {
-            "repository_count": len(
-                await self._connectors.list_github_mappings(user.organization_id)
-            )
-        }
+        state.config = {"repository_count": len(await self._connectors.list_github_mappings(user.organization_id))}
         self._audit.record(
             action="github.configure",
             resource_type="connector",
@@ -231,9 +229,13 @@ class GitHubIndexService:
         state = await self._connectors.get_state(organization_id, "github")
         if state is None:
             raise ValidationError("GitHub connector is not configured")
+        lease_id = uuid.uuid4()
         acquired = await self._connectors.acquire_github_sync(
             mapping_id=mapping_id,
             organization_id=organization_id,
+            lease_id=lease_id,
+            now=utcnow(),
+            expires_at=self._sync_lease_expiry(),
         )
         if not acquired:
             raise ConflictError("GitHub repository sync is already running")
@@ -257,28 +259,25 @@ class GitHubIndexService:
             _validate_sha(snapshot.commit_sha)
             _validate_sha(snapshot.tree_sha)
             states = await self._connectors.github_file_states(mapping.id)
-            tracked_states = [
-                item
-                for item in states
-                if item.status == "active" and item.document_id is not None
-            ]
+            tracked_states = [item for item in states if item.status == "active" and item.document_id is not None]
             tracked_document_ids = [
-                document_id
-                for item in tracked_states
-                if (document_id := item.document_id) is not None
+                document_id for item in tracked_states if (document_id := item.document_id) is not None
             ]
-            await self._document_rows.soft_delete_metadata_orphans(
-                kb_id=mapping.knowledge_base_id,
-                key="github_path",
-                tracked_values=[item.path for item in tracked_states],
-                tracked_document_ids=tracked_document_ids,
+            tracked_document_id_set = set(tracked_document_ids)
+            source_documents = await self._document_rows.list_active_by_metadata_key(
+                mapping.knowledge_base_id,
+                "github_path",
             )
-            documents = {
-                document.id: document
-                for document in await self._db.scalars(
-                    select(Document).where(Document.id.in_(tracked_document_ids))
-                )
-            }
+            documents = {document.id: document for document in source_documents}
+            source_paths: set[str] = set()
+            orphan_by_path: dict[str, Document] = {}
+            for source_document in source_documents:
+                path = source_document.doc_metadata.get("github_path")
+                if not isinstance(path, str) or not path:
+                    continue
+                source_paths.add(path)
+                if source_document.id not in tracked_document_id_set:
+                    orphan_by_path.setdefault(path, source_document)
             if mapping.head_tree_sha == snapshot.tree_sha and all(
                 item.document_id is not None
                 and (document := documents.get(item.document_id)) is not None
@@ -288,7 +287,19 @@ class GitHubIndexService:
                 if item.status == "active"
             ):
                 counts["skipped"] = sum(item.status == "active" for item in states)
-                await self._record_success(state, mapping, snapshot.commit_sha, snapshot.tree_sha)
+                await self._document_rows.soft_delete_metadata_orphans(
+                    kb_id=mapping.knowledge_base_id,
+                    key="github_path",
+                    tracked_values=list(source_paths),
+                    tracked_document_ids=tracked_document_ids,
+                )
+                await self._record_success(
+                    state,
+                    mapping,
+                    lease_id,
+                    snapshot.commit_sha,
+                    snapshot.tree_sha,
+                )
                 await self._db.commit()
                 return {**counts, "commit_sha": snapshot.commit_sha, "tree_sha": snapshot.tree_sha}
 
@@ -324,12 +335,16 @@ class GitHubIndexService:
             missing_states = [item for item in states if item.status == "active" and item.path not in allowed_paths]
             missing_by_blob = {item.blob_sha: item for item in missing_states}
             now = utcnow()
+            kept_document_ids: set[uuid.UUID] = set()
 
-            for entry in allowed_entries:
+            for index, entry in enumerate(allowed_entries):
+                if index and index % _SYNC_HEARTBEAT_FILE_INTERVAL == 0:
+                    await self._renew_sync_lease(mapping, lease_id)
                 current = active_by_path.get(entry.path)
                 if current is not None and current.blob_sha == entry.blob_sha:
                     document = documents.get(current.document_id) if current.document_id else None
                     if document is not None and not document.is_deleted:
+                        kept_document_ids.add(document.id)
                         if document.status == DocumentStatus.READY or _document_job_is_recent(
                             document,
                             now=now,
@@ -356,13 +371,11 @@ class GitHubIndexService:
                         file_state.last_commit_sha = snapshot.commit_sha
                         counts["deleted"] += 1
                     continue
-                existing_document_id = file_state.document_id if file_state else None
+                existing_document_id = (
+                    file_state.document_id if file_state is not None and file_state.document_id in documents else None
+                )
                 if existing_document_id is None:
-                    orphan = await self._document_rows.get_by_metadata_value(
-                        mapping.knowledge_base_id,
-                        "github_path",
-                        entry.path,
-                    )
+                    orphan = orphan_by_path.pop(entry.path, None)
                     if orphan is not None:
                         existing_document_id = orphan.id
                 metadata = github_file_metadata(
@@ -384,12 +397,8 @@ class GitHubIndexService:
                     metadata=metadata,
                     audit_action="github.file.ingest",
                 )
-                await self._document_rows.soft_delete_metadata_duplicates(
-                    mapping.knowledge_base_id,
-                    "github_path",
-                    entry.path,
-                    document.id,
-                )
+                documents[document.id] = document
+                kept_document_ids.add(document.id)
                 if file_state is None:
                     file_state = GitHubFileState(
                         repository_mapping_id=mapping.id,
@@ -420,7 +429,19 @@ class GitHubIndexService:
                 file_state.last_commit_sha = snapshot.commit_sha
                 counts["deleted"] += 1
 
-            await self._record_success(state, mapping, snapshot.commit_sha, snapshot.tree_sha)
+            await self._document_rows.soft_delete_metadata_orphans(
+                kb_id=mapping.knowledge_base_id,
+                key="github_path",
+                tracked_values=list(source_paths | allowed_paths),
+                tracked_document_ids=list(kept_document_ids),
+            )
+            await self._record_success(
+                state,
+                mapping,
+                lease_id,
+                snapshot.commit_sha,
+                snapshot.tree_sha,
+            )
             self._audit.record(
                 action="github.sync",
                 resource_type="connector",
@@ -431,20 +452,21 @@ class GitHubIndexService:
             )
             await self._db.commit()
             return {**counts, "commit_sha": snapshot.commit_sha, "tree_sha": snapshot.tree_sha}
-        except Exception as exc:
-            await self._db.rollback()
-            state = await self._connectors.get_state(organization_id, "github")
-            mapping = await self._connectors.get_github_mapping(
-                mapping_id=mapping_id,
+        except asyncio.CancelledError:
+            await self._record_failure(
                 organization_id=organization_id,
+                mapping_id=mapping_id,
+                lease_id=lease_id,
+                error_detail="GitHub repository sync was cancelled",
             )
-            if state is not None:
-                self._connectors.record_connector_failure(state, str(exc))
-            if mapping is not None:
-                mapping.status = "failed"
-                mapping.last_error_at = utcnow()
-                mapping.error_detail = str(exc)[:1000]
-            await self._db.commit()
+            raise
+        except Exception as exc:
+            await self._record_failure(
+                organization_id=organization_id,
+                mapping_id=mapping_id,
+                lease_id=lease_id,
+                error_detail=str(exc),
+            )
             raise
 
     async def recent_pull_requests(
@@ -494,16 +516,63 @@ class GitHubIndexService:
         self,
         state: ConnectorState,
         mapping: GitHubRepositoryMapping,
+        lease_id: uuid.UUID,
         commit_sha: str,
         tree_sha: str,
     ) -> None:
-        mapping.head_commit_sha = commit_sha
-        mapping.head_tree_sha = tree_sha
-        mapping.status = "connected"
-        mapping.last_indexed_at = utcnow()
-        mapping.last_error_at = None
-        mapping.error_detail = None
+        completed = await self._connectors.complete_github_sync(
+            mapping_id=mapping.id,
+            organization_id=mapping.organization_id,
+            lease_id=lease_id,
+            commit_sha=commit_sha,
+            tree_sha=tree_sha,
+            indexed_at=utcnow(),
+        )
+        if not completed:
+            raise ConflictError("GitHub repository sync lease is no longer owned")
         await self._connectors.record_connector_success(state, source_activity_at=utcnow())
+
+    async def _renew_sync_lease(
+        self,
+        mapping: GitHubRepositoryMapping,
+        lease_id: uuid.UUID,
+    ) -> None:
+        renewed = await self._connectors.renew_github_sync(
+            mapping_id=mapping.id,
+            organization_id=mapping.organization_id,
+            lease_id=lease_id,
+            expires_at=self._sync_lease_expiry(),
+        )
+        if not renewed:
+            raise ConflictError("GitHub repository sync lease is no longer owned")
+        await self._db.commit()
+
+    async def _record_failure(
+        self,
+        *,
+        organization_id: uuid.UUID,
+        mapping_id: uuid.UUID,
+        lease_id: uuid.UUID,
+        error_detail: str,
+    ) -> None:
+        await self._db.rollback()
+        failed = await self._connectors.fail_github_sync(
+            mapping_id=mapping_id,
+            organization_id=organization_id,
+            lease_id=lease_id,
+            failed_at=utcnow(),
+            error_detail=error_detail,
+        )
+        if failed:
+            state = await self._connectors.get_state(organization_id, "github")
+            if state is not None:
+                self._connectors.record_connector_failure(state, error_detail)
+            await self._db.commit()
+        else:
+            await self._db.rollback()
+
+    def _sync_lease_expiry(self) -> datetime:
+        return utcnow() + timedelta(seconds=max(1, self._settings.github_sync_lease_seconds))
 
     @staticmethod
     def _mapping_out(mapping: GitHubRepositoryMapping) -> dict[str, object]:
@@ -717,8 +786,4 @@ def _validate_sha(value: str) -> None:
 
 def _ingestion_filename(path: str) -> str:
     suffix = PurePosixPath(path).suffix.lower()
-    return (
-        PurePosixPath(path).name
-        if suffix in SUPPORTED_SUFFIXES
-        else f"{PurePosixPath(path).name}.txt"
-    )
+    return PurePosixPath(path).name if suffix in SUPPORTED_SUFFIXES else f"{PurePosixPath(path).name}.txt"
