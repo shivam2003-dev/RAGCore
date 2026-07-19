@@ -5,13 +5,12 @@ import { Badge, Card, PageHeader } from "@/components/ui";
 import { useLiveMetrics } from "@/components/use-live-metrics";
 
 const planned = [
-  { name: "Slack", desc: "No Slack connector is implemented in this build.", icon: Bot },
   { name: "Google Drive", desc: "No Drive connector is implemented in this build.", icon: FileUp },
   { name: "Webhooks", desc: "No outbound webhook delivery is implemented yet.", icon: Webhook },
 ];
 
 export function IntegrationsClient() {
-  const { confluence, jira, metrics } = useLiveMetrics();
+  const { confluence, jira, slack, metrics } = useLiveMetrics();
   const live = [
     {
       name: "Confluence",
@@ -30,6 +29,15 @@ export function IntegrationsClient() {
       icon: SquareKanban,
       tone: jira?.configured ? "green" as const : "amber" as const,
       status: jira?.configured ? "Configured" : "Needs config",
+    },
+    {
+      name: "Slack",
+      desc: slack?.allowlisted_channels
+        ? `Socket Mode indexing is allowlisted to ${slack.allowlisted_channels} public channel${slack.allowlisted_channels === 1 ? "" : "s"}.`
+        : "Read-only Socket Mode indexing is available after credentials and a public-channel allowlist are configured.",
+      icon: Bot,
+      tone: slack?.configured ? "green" as const : "amber" as const,
+      status: slack?.configured ? "Configured" : "Needs config",
     },
     {
       name: "CVUM API",

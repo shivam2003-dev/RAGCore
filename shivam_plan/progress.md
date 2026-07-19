@@ -6,8 +6,8 @@ Branch: `agent/cerebras-knowledge-upgrade`
 
 ## Current phase
 
-Phase 2 complete — Retrieval ranking experiment and observable admin trace.
-Phase 3 is next — Read-only, allowlisted Slack knowledge ingestion.
+Phase 3 fixture implementation complete — Read-only, allowlisted Slack knowledge ingestion.
+Real Slack smoke is credential-gated. Phase 4 is next — GitHub and code intelligence.
 
 ## Completed work
 
@@ -45,6 +45,24 @@ Phase 3 is next — Read-only, allowlisted Slack knowledge ingestion.
 - Added an admin-only, content-free retrieval trace to search/chat and the Ask source drawer.
 - Added a read-only weighted/RRF comparison script and recorded the evidence in
   `shivam_plan/retrieval_experiment.md`.
+
+### Phase 3
+
+- Added additive connector-state, Slack channel/project mapping, and stable event-receipt tables in
+  migration `0004_connector_state_and_slack.py`.
+- Added a real Socket Mode worker that opens runtime WebSocket URLs, acknowledges envelopes before
+  database work, reconnects on refresh/disconnect, and never invokes Slack mutation methods.
+- Added a GET-only Slack Web API client with cursor pagination, complete-thread refetch,
+  `Retry-After` handling, bounded retries, and permalink retrieval.
+- Added database event-ID deduplication and refresh behavior for new messages, replies, edits, and
+  deletions. Unchanged normalized content does not create another version or embedding job.
+- Added one normalized thread document containing question, summary, resolution, systems,
+  code/config references, participants, channel, permalink, timestamps, high-signal bursts, and raw
+  thread text. Summary failure falls back deterministically.
+- Mapped each allowlisted public channel to a dedicated knowledge base and Project. DMs, group DMs,
+  private-channel IDs, non-allowlisted channels, and unsupported event subtypes are denied.
+- Added admin status/configuration/manual-sync APIs and visible Slack health/sync cards on
+  Integrations and Knowledge Sources.
 
 ## Baseline test results
 
@@ -94,6 +112,22 @@ The temporary browser-test project was safely deactivated after verification. It
 The pre-commit full backend suite passed with 113 tests and 1 explicitly gated migration test
 skipped. The 129-case dataset gate, frontend lint, TypeScript check, 21-page production build,
 changed-file Ruff check, and `git diff --check` also passed. These checks run again in Phase 7.
+
+## Phase 3 test evidence
+
+| Check | Result |
+|---|---|
+| Slack fixture/contract tests | Passed; 7 tests covering acknowledgement order, dedupe, thread normalization/fallback, bursts, retry/rate limit, full refresh, idempotency, edit, delete, denial, project mapping, and metadata |
+| Migration `0004` | Passed upgrade to head, downgrade to `0003`, and re-upgrade on the explicit disposable migration database; local development DB upgraded to head |
+| Changed Python files Ruff | Passed |
+| Frontend lint and TypeScript | Passed |
+| Browser desktop | Passed in Chrome; Integrations reports Slack honestly as needing config and Knowledge Sources shows disabled read-only/public-allowlist sync controls without runtime errors |
+
+The real Slack smoke gate is pending because no Slack app credentials or dedicated allowlisted test
+channel were supplied. No Slack network call or message mutation was made during implementation.
+The pre-commit full backend suite passed with 120 tests and 1 explicitly gated migration test
+skipped. The 129-case dataset gate, frontend lint, TypeScript check, and 21-page production build
+also passed.
 
 ## Files and migrations changed
 

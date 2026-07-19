@@ -57,7 +57,9 @@ failure state.
 
 ## Knowledge Sources
 
-Confluence and Jira cards show live configuration status. Sync buttons call backend sync endpoints and remain disabled when the connector is not configured.
+Confluence, Jira, and Slack cards show live configuration status. Sync buttons call backend sync
+endpoints and remain disabled when the connector is not configured. Slack also shows the public
+channel allowlist count, connector health, freshness lag, last success, and failures when available.
 
 Manual local documents are managed through `/documents`.
 

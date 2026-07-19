@@ -41,6 +41,11 @@ Do not commit `.env` files or pasted tokens. The repository should contain only 
 
 Atlassian connectors use GET-only API calls. Production Confluence and Jira are never modified by CVUM sync jobs.
 
+The Slack connector uses Socket Mode and GET-only Web API methods. It accepts only explicitly
+allowlisted public channel IDs, rejects private channels and direct messages, and does not require
+`chat:write`, `groups:history`, `im:history`, or `mpim:history`. Slack tokens remain environment or
+secret-manager values and are never persisted in connector state.
+
 ## Frontend Settings Boundary
 
 The Settings page separates local UI preferences from backend-managed runtime controls. Runtime controls such as auth TTLs, RAG weights, provider keys, and connector scopes are shown as server-managed instead of editable browser toggles.

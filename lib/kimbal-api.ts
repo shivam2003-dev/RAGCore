@@ -217,6 +217,43 @@ export type JiraSyncResponse = {
   documents: JiraSyncedDocument[];
 };
 
+export type SlackChannel = {
+  id: string;
+  workspace_id: string;
+  channel_id: string;
+  channel_name: string;
+  visibility: "public";
+  is_enabled: boolean;
+  project_id: string;
+  knowledge_base_id: string;
+  last_thread_ts: string | null;
+};
+
+export type SlackStatus = {
+  configured: boolean;
+  credentials_configured: boolean;
+  socket_mode_configured: boolean;
+  read_only: boolean;
+  workspace_id: string | null;
+  status: string;
+  allowlisted_channels: number;
+  last_event_at: string | null;
+  last_success_at: string | null;
+  last_error_at: string | null;
+  lag_seconds: number | null;
+  failure_count: number;
+  error_detail: string | null;
+  channels: SlackChannel[];
+};
+
+export type SlackSyncResponse = {
+  created: number;
+  updated: number;
+  skipped: number;
+  deleted: number;
+  failed: number;
+};
+
 export type SourceMetric = {
   knowledge_base_id: string | null;
   name: string;
@@ -1108,6 +1145,31 @@ export class CVUMApi {
     const result = await this.request<JiraSyncResponse>("/jira/sync", {
       method: "POST",
       body,
+    });
+    this.clearLiveCache();
+    return result;
+  }
+
+  async slackStatus() {
+    return this.cached("slackStatus", LIVE_CACHE_MS, () => this.request<SlackStatus>("/slack/status"));
+  }
+
+  async configureSlack(input: {
+    workspace_id: string;
+    channels: Array<{ channel_id: string; channel_name: string; project_id: string; visibility?: "public" }>;
+  }) {
+    const result = await this.request<SlackStatus>("/slack/configuration", {
+      method: "PUT",
+      body: input,
+    });
+    this.clearLiveCache();
+    return result;
+  }
+
+  async syncSlack(channelId?: string) {
+    const result = await this.request<SlackSyncResponse>("/slack/sync", {
+      method: "POST",
+      body: { channel_id: channelId ?? null },
     });
     this.clearLiveCache();
     return result;

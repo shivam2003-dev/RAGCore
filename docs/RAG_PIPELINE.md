@@ -12,6 +12,8 @@ Documents enter the system from manual uploads or read-only source syncs.
 6. Chunks are stored in Postgres with pgvector embeddings and a generated full-text `tsv` column.
 
 Manual uploads go into `CVUM Local Uploads`. Confluence and Jira write into dedicated source knowledge bases.
+Each allowlisted Slack public channel writes into its own project-mapped knowledge base so channel
+scope is enforced before retrieval.
 
 ## Chunking
 
@@ -33,6 +35,11 @@ Source profiles are intentionally different:
 Jira preprocessing removes empty/automation boilerplate but preserves headings, tables, lists,
 code, user-visible mentions, and comments. Attachment extraction is size/count bounded and the
 connector remains read-only.
+
+Slack stores one normalized, versioned document per thread. The document preserves the searchable
+question, summary, resolution, systems, code/config references, participants, permalink, timestamps,
+selected high-signal message bursts, and raw thread text. Embedding input includes the normalized
+thread context; raw text remains available to Postgres full-text retrieval.
 
 ## Retrieval
 

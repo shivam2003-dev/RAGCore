@@ -69,6 +69,7 @@ class DocumentService:
         title: str | None = None,
         metadata: dict[str, object] | None = None,
         audit_action: str = "document.upload",
+        embedding_text: str | None = None,
     ) -> Document:
         kb = await self._kbs.get(kb_id, user.organization_id)
         if kb is None:
@@ -92,7 +93,11 @@ class DocumentService:
             filename=filename,
             file_type=suffix.lstrip(".") or "unknown",
             connector=str((metadata or {}).get("connector") or (metadata or {}).get("source") or "upload"),
-            connector_scope=str((metadata or {}).get("connector_scope") or (metadata or {}).get("source_space") or "uploads"),
+            connector_scope=str(
+                (metadata or {}).get("connector_scope")
+                or (metadata or {}).get("source_space")
+                or "uploads"
+            ),
             acl=str((metadata or {}).get("acl") or "user-upload"),
         )
 
@@ -147,6 +152,7 @@ class DocumentService:
             kb_id=kb_id,
             file_path=str(stored_path),
             embedder=self._embedder,
+            embedding_text=embedding_text,
         )
         return doc
 

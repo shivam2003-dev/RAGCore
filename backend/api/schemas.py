@@ -266,6 +266,60 @@ class JiraIssueSyncOut(BaseModel):
     action: str
 
 
+# --- Slack ---
+class SlackChannelConfigIn(BaseModel):
+    channel_id: str = Field(min_length=3, max_length=64)
+    channel_name: str = Field(min_length=1, max_length=255)
+    project_id: uuid.UUID
+    visibility: str = Field(default="public", pattern="^public$")
+
+
+class SlackConfigurationIn(BaseModel):
+    workspace_id: str = Field(min_length=1, max_length=64)
+    channels: list[SlackChannelConfigIn] = Field(default_factory=list, max_length=100)
+
+
+class SlackChannelOut(BaseModel):
+    id: uuid.UUID
+    workspace_id: str
+    channel_id: str
+    channel_name: str
+    visibility: str
+    is_enabled: bool
+    project_id: uuid.UUID
+    knowledge_base_id: uuid.UUID
+    last_thread_ts: str | None
+
+
+class SlackStatusOut(BaseModel):
+    configured: bool
+    credentials_configured: bool
+    socket_mode_configured: bool
+    read_only: bool = True
+    workspace_id: str | None
+    status: str
+    allowlisted_channels: int
+    last_event_at: datetime | None
+    last_success_at: datetime | None
+    last_error_at: datetime | None
+    lag_seconds: int | None
+    failure_count: int
+    error_detail: str | None
+    channels: list[SlackChannelOut]
+
+
+class SlackSyncRequest(BaseModel):
+    channel_id: str | None = Field(default=None, min_length=3, max_length=64)
+
+
+class SlackSyncOut(BaseModel):
+    created: int
+    updated: int
+    skipped: int
+    deleted: int
+    failed: int
+
+
 class JiraSyncResponse(BaseModel):
     knowledge_base_id: uuid.UUID
     knowledge_base_name: str

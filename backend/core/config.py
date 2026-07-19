@@ -143,6 +143,20 @@ class Settings(BaseSettings):
     jira_attachment_max_bytes: int = 5_242_880
     jira_hydration_concurrency: int = 8
 
+    # Slack Socket Mode connector. Tokens are server-side environment values;
+    # database configuration contains only non-secret channel/project mappings.
+    slack_app_token: str = ""
+    slack_bot_token: str = ""
+    slack_workspace_id: str = ""
+    slack_default_kb_name_prefix: str = "Slack"
+    slack_request_timeout_seconds: float = 20.0
+    slack_api_max_retries: int = 3
+    slack_history_limit: int = 15
+    slack_burst_min_messages: int = 2
+    slack_burst_rare_token_threshold: int = 2
+    slack_burst_reaction_threshold: int = 2
+    slack_summary_max_chars: int = 1800
+
     # Optional web search for Ask. Disabled by default so the app never fabricates
     # internet results when no real provider is configured.
     web_search_provider: str = "disabled"  # disabled | duckduckgo | brave | tavily | searxng | fake

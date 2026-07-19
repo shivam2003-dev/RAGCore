@@ -2,9 +2,9 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Cloud, Clock, Database, FileText, Loader2, Plus, RefreshCw, ShieldCheck, SquareKanban } from "lucide-react";
+import { Cloud, Clock, Database, FileText, Loader2, MessageSquare, Plus, RefreshCw, ShieldCheck, SquareKanban } from "lucide-react";
 import { Badge, Card, CardLink, GhostButton, PageHeader, PrimaryButton } from "@/components/ui";
-import { kimbalApi, type ConfluenceStatus, type JiraStatus, type KnowledgeBase } from "@/lib/kimbal-api";
+import { kimbalApi, type ConfluenceStatus, type JiraStatus, type KnowledgeBase, type SlackStatus } from "@/lib/kimbal-api";
 
 type SourceRow = {
   kb: KnowledgeBase;
@@ -17,19 +17,22 @@ export function KnowledgeSourcesClient() {
   const [sources, setSources] = useState<SourceRow[]>([]);
   const [confluence, setConfluence] = useState<ConfluenceStatus | null>(null);
   const [jira, setJira] = useState<JiraStatus | null>(null);
+  const [slack, setSlack] = useState<SlackStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [syncingConfluence, setSyncingConfluence] = useState(false);
   const [syncingJira, setSyncingJira] = useState(false);
+  const [syncingSlack, setSyncingSlack] = useState(false);
   const [status, setStatus] = useState("Loading live sources");
 
   async function refresh() {
     setLoading(true);
     try {
       await kimbalApi.ensureSession();
-      const [kbs, confluenceStatus, jiraStatus] = await Promise.all([
+      const [kbs, confluenceStatus, jiraStatus, slackStatus] = await Promise.all([
         kimbalApi.listKnowledgeBases(),
         kimbalApi.confluenceStatus().catch(() => null),
         kimbalApi.jiraStatus().catch(() => null),
+        kimbalApi.slackStatus().catch(() => null),
       ]);
       const rows = await Promise.all(
         kbs.map(async (kb) => {
@@ -41,6 +44,7 @@ export function KnowledgeSourcesClient() {
       setSources(visibleRows);
       setConfluence(confluenceStatus);
       setJira(jiraStatus);
+      setSlack(slackStatus);
       setStatus(`${visibleRows.length} knowledge bases loaded`);
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "Failed to load sources");
@@ -83,6 +87,23 @@ export function KnowledgeSourcesClient() {
     }
   }
 
+  async function syncSlack() {
+    setSyncingSlack(true);
+    setStatus("Syncing allowlisted Slack channels");
+    try {
+      await kimbalApi.ensureSession();
+      const result = await kimbalApi.syncSlack();
+      setStatus(
+        `Slack sync queued: ${result.created} created, ${result.updated} updated, ${result.skipped} unchanged, ${result.deleted} deleted`
+      );
+      await refresh();
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Slack sync failed");
+    } finally {
+      setSyncingSlack(false);
+    }
+  }
+
   useEffect(() => {
     const timer = window.setTimeout(() => {
       void refresh();
@@ -117,6 +138,10 @@ export function KnowledgeSourcesClient() {
             >
               {syncingJira ? <Loader2 size={15} className="animate-spin" /> : <SquareKanban size={15} />}
               Sync Jira
+            </GhostButton>
+            <GhostButton onClick={() => void syncSlack()} disabled={syncingSlack || slack?.configured !== true}>
+              {syncingSlack ? <Loader2 size={15} className="animate-spin" /> : <MessageSquare size={15} />}
+              Sync Slack
             </GhostButton>
             <Link
               href="/documents"
@@ -159,6 +184,43 @@ export function KnowledgeSourcesClient() {
             disabled={syncingConfluence || confluence?.configured === false}
           >
             {syncingConfluence ? <Loader2 size={15} className="animate-spin" /> : <RefreshCw size={15} />}
+            Sync
+          </PrimaryButton>
+        </div>
+      </Card>
+
+      <Card className="mb-5 flex items-center justify-between gap-4 p-5 animate-rise-1">
+        <div className="flex min-w-0 items-start gap-3">
+          <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-[13px] border border-line bg-white text-fuchsia-600 shadow-[var(--shadow-card)]">
+            <MessageSquare size={21} />
+          </span>
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <p className="text-[15px] font-bold text-ink-900">Slack Knowledge</p>
+              <Badge tone={slack?.configured ? "green" : "amber"}>
+                {slack?.configured ? "Configured" : "Needs config"}
+              </Badge>
+              <Badge tone="blue">Read only</Badge>
+            </div>
+            <p className="mt-1 text-[12.5px] text-ink-500">
+              {slack?.allowlisted_channels
+                ? `${slack.allowlisted_channels} public channel${slack.allowlisted_channels === 1 ? "" : "s"} mapped to projects · ${slack.status}`
+                : "Set server-side Socket Mode credentials, then allowlist public channels through the Slack configuration API."}
+            </p>
+            {slack?.last_success_at ? (
+              <p className="mt-1 text-[11.5px] text-ink-400">
+                Last success {new Date(slack.last_success_at).toLocaleString()} · lag {slack.lag_seconds ?? 0}s · {slack.failure_count} failures
+              </p>
+            ) : null}
+          </div>
+        </div>
+        <div className="flex shrink-0 items-center gap-2">
+          <span className="inline-flex items-center gap-1.5 rounded-full bg-canvas px-3 py-1.5 text-[12px] font-semibold text-ink-600">
+            <ShieldCheck size={13} className="text-emerald-500" />
+            Public allowlist only
+          </span>
+          <PrimaryButton onClick={() => void syncSlack()} disabled={syncingSlack || slack?.configured !== true}>
+            {syncingSlack ? <Loader2 size={15} className="animate-spin" /> : <RefreshCw size={15} />}
             Sync
           </PrimaryButton>
         </div>
