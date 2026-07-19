@@ -1,10 +1,10 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: kimbal-api
-  namespace: kimbal
+  name: cvum-api
+  namespace: cvum
   labels:
-    app: kimbal-api
+    app: cvum-api
 spec:
   replicas: 3
   strategy:
@@ -13,11 +13,11 @@ spec:
       maxSurge: 1
   selector:
     matchLabels:
-      app: kimbal-api
+      app: cvum-api
   template:
     metadata:
       labels:
-        app: kimbal-api
+        app: cvum-api
       annotations:
         prometheus.io/scrape: "true"
         prometheus.io/port: "8000"
@@ -27,14 +27,14 @@ spec:
         runAsNonRoot: true
       containers:
         - name: api
-          image: ghcr.io/kimbal/kimbal-api:latest
+          image: ghcr.io/shivam2003-dev/ragcore-api:latest
           ports:
             - containerPort: 8000
           envFrom:
             - configMapRef:
-                name: kimbal-api-config
+                name: cvum-api-config
             - secretRef:
-                name: kimbal-api-secrets
+                name: cvum-api-secrets
           resources:
             requests:
               cpu: 250m
@@ -61,8 +61,8 @@ spec:
             readOnlyRootFilesystem: false  # uploads dir; move to object storage to enable
       initContainers:
         - name: migrate
-          image: ghcr.io/kimbal/kimbal-api:latest
+          image: ghcr.io/shivam2003-dev/ragcore-api:latest
           command: ["alembic", "upgrade", "head"]
           envFrom:
             - secretRef:
-                name: kimbal-api-secrets
+                name: cvum-api-secrets

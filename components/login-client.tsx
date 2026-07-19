@@ -4,7 +4,7 @@ import { FormEvent, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ArrowRight, LockKeyhole, Mail } from "lucide-react";
 import { CVUMMark } from "@/components/brand-icons";
-import { ApiError, kimbalApi } from "@/lib/kimbal-api";
+import { ApiError, cvumApi } from "@/lib/cvum-api";
 
 const ASK_PATH = "/";
 
@@ -27,10 +27,10 @@ export function LoginClient() {
     let cancelled = false;
     async function redirectIfLoggedIn() {
       try {
-        const user = await kimbalApi.ensureSession();
+        const user = await cvumApi.ensureSession();
         if (!cancelled) router.replace(safeNext(searchParams.get("next"), user.role === "admin"));
       } catch {
-        kimbalApi.clearSession();
+        cvumApi.clearSession();
       }
     }
     void redirectIfLoggedIn();
@@ -49,7 +49,7 @@ export function LoginClient() {
     }
     setSubmitting(true);
     try {
-      const user = await kimbalApi.login(normalizedEmail, password);
+      const user = await cvumApi.login(normalizedEmail, password);
       router.replace(safeNext(searchParams.get("next"), user.role === "admin"));
     } catch (cause) {
       if (cause instanceof ApiError) {

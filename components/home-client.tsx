@@ -23,7 +23,7 @@ import { Badge, Card, CardLink, CardTitle, Donut, ProgressBar } from "@/componen
 import { HomeAsk } from "@/components/home-ask";
 import { useLiveMetrics } from "@/components/use-live-metrics";
 import { aggregateSourceMix } from "@/components/source-metrics";
-import { kimbalApi, type EvalOverview, type WebSearchStatus } from "@/lib/kimbal-api";
+import { cvumApi, type EvalOverview, type WebSearchStatus } from "@/lib/cvum-api";
 
 function number(value: number) {
   return new Intl.NumberFormat().format(value);
@@ -56,7 +56,7 @@ export function HomeClient() {
 
   useEffect(() => {
     let cancelled = false;
-    void Promise.all([kimbalApi.evalsOverview(), kimbalApi.webSearchStatus()]).then(([nextEvals, nextWeb]) => {
+    void Promise.all([cvumApi.evalsOverview(), cvumApi.webSearchStatus()]).then(([nextEvals, nextWeb]) => {
       if (!cancelled) {
         setEvals(nextEvals);
         setWeb(nextWeb);

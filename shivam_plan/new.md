@@ -1,10 +1,10 @@
-# KimbalGPT Improvements Inspired by Cerebras Knowledge
+# CVUM Improvements Inspired by Cerebras Knowledge
 
-Yes—KimbalGPT can gain several valuable Cerebras-style capabilities without rewriting its RAG foundation. Its retrieval core is already strong; the main opportunities are better source ingestion, project-level scoping, learned ranking, and agent/tool access.
+Yes—CVUM can gain several valuable Cerebras-style capabilities without rewriting its RAG foundation. Its retrieval core is already strong; the main opportunities are better source ingestion, project-level scoping, learned ranking, and agent/tool access.
 
 The [Cerebras article](https://www.cerebras.ai/blog/how-we-built-our-knowledge-base) centers on normalized multi-source ingestion, Slack conversation distillation, incremental code indexing, hybrid scoring, planner/executor/synthesis orchestration, project-scoped search, and MCP tools.
 
-## What KimbalGPT already does well
+## What CVUM already does well
 
 - It has a unified enterprise metadata contract for Jira, Confluence, uploads, freshness, source identity and lineage in [`backend/knowledgebase/source_metadata.py`](../backend/knowledgebase/source_metadata.py).
 - The relational `KnowledgeBase -> Document -> Version -> Chunk` design in [`backend/models/knowledge.py`](../backend/models/knowledge.py) is better for versioning and citations than copying Cerebras's literal single-table design.
@@ -17,7 +17,7 @@ Therefore, the current storage and safety architecture should be retained.
 
 ## Main gaps compared with Cerebras
 
-| Cerebras capability | KimbalGPT today | Recommendation |
+| Cerebras capability | CVUM today | Recommendation |
 |---|---|---|
 | Slack thread ingestion | Explicitly not implemented in [`components/integrations-client.tsx`](../components/integrations-client.tsx) | High-value addition |
 | Incremental repository indexing | Code chunker exists, but only through file ingestion in [`backend/ingestion/chunkers/code.py`](../backend/ingestion/chunkers/code.py) | Add GitHub/Git connector |
@@ -27,7 +27,7 @@ Therefore, the current storage and safety architecture should be retained.
 | Post-ranking context expansion | Parent context is embedded, but adjacent winning sections are not fetched | Add neighbor expansion after ranking |
 | Planner and parallel tool fan-out | Current routing is heuristic and subqueries run sequentially in [`backend/services/conversational_retriever.py`](../backend/services/conversational_retriever.py) | Add after more connectors exist |
 | MCP retrieval primitives | Not implemented | Expose stable search tools |
-| `who_knows` and recent PRs | Not implemented | Useful Kimbal-specific features |
+| `who_knows` and recent PRs | Not implemented | Useful CVUM-specific features |
 | Connector plugin SDK | Jira and Confluence are dedicated services | Introduce a normalized connector interface |
 
 ## Recommended implementation order
@@ -104,7 +104,7 @@ Reuse the existing code chunker, but add:
 - `recent_prs` retrieval.
 - CODEOWNERS and contributor metadata.
 
-KimbalGPT does not need to adopt CocoIndex immediately; the existing ingestion pipeline can support incremental indexing using Git blob hashes.
+CVUM does not need to adopt CocoIndex immediately; the existing ingestion pipeline can support incremental indexing using Git blob hashes.
 
 Estimated effort: **2–3 weeks**.
 
@@ -122,7 +122,7 @@ Once Slack and GitHub exist, introduce typed retrieval tools:
 
 A lightweight planner selects tools using the active project. The executor runs independent tools concurrently using separate database sessions/connections, and the existing answer generator performs synthesis.
 
-Expose the same primitives through MCP so IDE agents can retrieve raw evidence without forcing KimbalGPT to generate the final answer.
+Expose the same primitives through MCP so IDE agents can retrieve raw evidence without forcing CVUM to generate the final answer.
 
 Estimated effort: **1–2 weeks**.
 
@@ -150,7 +150,7 @@ New users choose DevOps, SRE, HES, CVIR or another project and immediately recei
 
 ## Final recommendation
 
-Build **Projects and ACL enforcement first**, run the **RRF/reranker experiment second**, and then build **Slack plus the Incident Copilot**. That combination would provide the clearest improvement for KimbalGPT's SRE/DevOps use case.
+Build **Projects and ACL enforcement first**, run the **RRF/reranker experiment second**, and then build **Slack plus the Incident Copilot**. That combination would provide the clearest improvement for CVUM's SRE/DevOps use case.
 
 ## Validation baseline
 

@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { ArrowUpDown, Eye, FileText, Loader2, MoreHorizontal, RefreshCw, Search, Trash2, Upload, X } from "lucide-react";
 import { Card, PageHeader, PrimaryButton, GhostButton, Badge } from "@/components/ui";
-import { kimbalApi, type DocumentLineage, type DocumentOut, type KnowledgeBase } from "@/lib/kimbal-api";
+import { cvumApi, type DocumentLineage, type DocumentOut, type KnowledgeBase } from "@/lib/cvum-api";
 
 const freshTone = { ready: "green", processing: "amber", uploaded: "amber", failed: "red", deleted: "gray" } as const;
 const LEGACY_SEED_KB_NAME = "CVUM Local Runbook";
@@ -30,14 +30,14 @@ export function DocumentsClient() {
   async function refresh(pageOverride = page) {
     setBusy(true);
     try {
-      await kimbalApi.ensureSession();
-      let kbs = await kimbalApi.listKnowledgeBases();
+      await cvumApi.ensureSession();
+      let kbs = await cvumApi.listKnowledgeBases();
       if (!kbs.length) {
-        kbs = [await kimbalApi.ensureUploadKnowledgeBase()];
+        kbs = [await cvumApi.ensureUploadKnowledgeBase()];
       }
       let visibleKbs = kbs.filter((item) => item.name !== LEGACY_SEED_KB_NAME);
       if (!visibleKbs.length) {
-        visibleKbs = [await kimbalApi.ensureUploadKnowledgeBase()];
+        visibleKbs = [await cvumApi.ensureUploadKnowledgeBase()];
       }
       setKnowledgeBases(visibleKbs);
       setKb(visibleKbs.find((item) => item.name === "CVUM Local Uploads") ?? visibleKbs[0]);
@@ -46,7 +46,7 @@ export function DocumentsClient() {
         ? visibleKbs.find((item) => item.name.toLowerCase() === sourceFilter.toLowerCase())
         : undefined;
       const selectedKbId = kbFilter || sourceKb?.id;
-      const list = await kimbalApi.listDocuments(selectedKbId || undefined, PAGE_SIZE, pageOverride * PAGE_SIZE);
+      const list = await cvumApi.listDocuments(selectedKbId || undefined, PAGE_SIZE, pageOverride * PAGE_SIZE);
       const pageDocs = list.items.map((doc) => ({
         ...doc,
         knowledge_base_name: doc.knowledge_base_name ?? kbById.get(doc.knowledge_base_id) ?? "Unknown source",
@@ -69,9 +69,9 @@ export function DocumentsClient() {
     const fileNames = files.map((file) => file.name).join(", ");
     setStatus(`Uploading ${files.length} file${files.length === 1 ? "" : "s"}: ${fileNames}`);
     try {
-      const nextKb = kb?.name === "CVUM Local Uploads" ? kb : await kimbalApi.ensureUploadKnowledgeBase();
+      const nextKb = kb?.name === "CVUM Local Uploads" ? kb : await cvumApi.ensureUploadKnowledgeBase();
       for (const file of files) {
-        await kimbalApi.uploadDocument(nextKb.id, file);
+        await cvumApi.uploadDocument(nextKb.id, file);
       }
       event.target.value = "";
       await refresh(0);
@@ -83,13 +83,13 @@ export function DocumentsClient() {
 
   async function reindex(doc: DocumentOut) {
     setStatus(`Re-indexing ${doc.title}`);
-    await kimbalApi.reindexDocument(doc.id);
+    await cvumApi.reindexDocument(doc.id);
     await refresh(page);
   }
 
   async function remove(doc: DocumentOut) {
     setStatus(`Deleting ${doc.title}`);
-    await kimbalApi.deleteDocument(doc.id);
+    await cvumApi.deleteDocument(doc.id);
     await refresh(page);
   }
 
@@ -97,7 +97,7 @@ export function DocumentsClient() {
     setLineageLoading(true);
     setStatus(`Loading lineage for ${doc.title}`);
     try {
-      setLineage(await kimbalApi.documentLineage(doc.id));
+      setLineage(await cvumApi.documentLineage(doc.id));
       setStatus(`Lineage loaded for ${doc.title}`);
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "Failed to load lineage");

@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { Database, ExternalLink, FileWarning, HeartPulse, History, Loader2, RefreshCw } from "lucide-react";
 import { Badge, Card, CardLink, CardTitle, GhostButton, PageHeader, ProgressBar } from "@/components/ui";
 import { useLiveMetrics } from "@/components/use-live-metrics";
-import { kimbalApi, type FreshnessResponse, type Project } from "@/lib/kimbal-api";
+import { cvumApi, type FreshnessResponse, type Project } from "@/lib/cvum-api";
 
 function number(value: number) {
   return new Intl.NumberFormat().format(value);
@@ -31,7 +31,7 @@ export function ContentHealthClient() {
     setLoadingFreshness(true);
     setFreshnessError("");
     try {
-      setFreshness(await kimbalApi.freshness(targetProjectId));
+      setFreshness(await cvumApi.freshness(targetProjectId));
     } catch (cause) {
       setFreshnessError(cause instanceof Error ? cause.message : "Could not load freshness data");
     } finally {
@@ -43,7 +43,7 @@ export function ContentHealthClient() {
     let cancelled = false;
     async function loadProjects() {
       try {
-        const [rows, user] = await Promise.all([kimbalApi.listProjects(), kimbalApi.ensureSession()]);
+        const [rows, user] = await Promise.all([cvumApi.listProjects(), cvumApi.ensureSession()]);
         if (cancelled) return;
         const selected = rows.find((item) => item.id === user.default_project_id)?.id ?? rows[0]?.id ?? "";
         setProjects(rows);

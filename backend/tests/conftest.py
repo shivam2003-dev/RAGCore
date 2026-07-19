@@ -1,10 +1,10 @@
-"""Test bootstrap: point the app at kimbal_test + fake providers BEFORE any
+"""Test bootstrap: point the app at cvum_test + fake providers BEFORE any
 app module import creates engines or caches settings."""
 
 import os
 
 os.environ.update(
-    DATABASE_URL="postgresql+asyncpg://kimbal:kimbal_dev_password@localhost:5433/kimbal_test",
+    DATABASE_URL="postgresql+asyncpg://cvum:cvum_dev_password@localhost:5433/cvum_test",
     REDIS_URL="redis://localhost:6379/1",
     LLM_PROVIDER="fake",
     EMBEDDING_PROVIDER="fake",
@@ -27,9 +27,9 @@ os.environ.update(
     LLM_COUNCIL_ENABLED="false",
     LLM_COUNCIL_MODELS="",
     AUTH_DISABLED="false",
-    AUTH_ALLOWED_EMAIL_DOMAIN="kimbal.io",
-    AUTH_SUPER_ADMIN_EMAIL="s.kumar@kimbal.io",
-    AUTH_DEFAULT_ORG_NAME="Kimbal",
+    AUTH_ALLOWED_EMAIL_DOMAIN="cvum.io",
+    AUTH_SUPER_ADMIN_EMAIL="s.kumar@cvum.io",
+    AUTH_DEFAULT_ORG_NAME="CVUM",
 )
 
 import pytest
@@ -78,7 +78,7 @@ async def client():
 
 @pytest_asyncio.fixture
 async def auth_headers(client: AsyncClient) -> dict[str, str]:
-    email = "s.kumar@kimbal.io"
+    email = "s.kumar@cvum.io"
     password = "SuperSecret123!"
     resp = await client.post(
         "/api/v1/auth/register",
@@ -86,7 +86,7 @@ async def auth_headers(client: AsyncClient) -> dict[str, str]:
             "email": email,
             "password": password,
             "full_name": "Shivam Kumar",
-            "organization_name": "Kimbal",
+            "organization_name": "CVUM",
         },
     )
     if resp.status_code == 409:

@@ -171,7 +171,7 @@ async def test_pipeline_can_search_across_multiple_knowledge_bases(db, seeded_kb
     )
     db.add(version)
     await db.flush()
-    content = "Issue key: DEVO-10555\nStatus: To Do\nAssignee email: s.kumar@kimbal.io"
+    content = "Issue key: DEVO-10555\nStatus: To Do\nAssignee email: s.kumar@cvum.io"
     vector = (await embedder.embed([content]))[0]
     db.add(
         Chunk(
@@ -192,7 +192,7 @@ async def test_pipeline_can_search_across_multiple_knowledge_bases(db, seeded_kb
         RetrievalContext(
             kb_id=kb.id,
             kb_ids=[kb.id, jira_kb.id],
-            query="open issue assigned to s.kumar@kimbal.io from DEVO board",
+            query="open issue assigned to s.kumar@cvum.io from DEVO board",
             top_k=3,
         )
     )

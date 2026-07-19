@@ -14,12 +14,12 @@ import {
 } from "lucide-react";
 import { Badge, Card, GhostButton, PageHeader, PrimaryButton, cx } from "@/components/ui";
 import {
-  kimbalApi,
+  cvumApi,
   type KnowledgeBase,
   type Project,
   type ProjectMember,
   type UserOut,
-} from "@/lib/kimbal-api";
+} from "@/lib/cvum-api";
 
 export function ProjectsClient() {
   const [user, setUser] = useState<UserOut | null>(null);
@@ -48,13 +48,13 @@ export function ProjectsClient() {
 
   async function refresh(preferredId?: string) {
     const [currentUser, projectRows, sourceRows] = await Promise.all([
-      kimbalApi.ensureSession(),
-      kimbalApi.listProjects(),
-      kimbalApi.listKnowledgeBases(),
+      cvumApi.ensureSession(),
+      cvumApi.listProjects(),
+      cvumApi.listKnowledgeBases(),
     ]);
     let userRows: UserOut[] = [];
     if (currentUser.role === "admin") {
-      userRows = await kimbalApi.listUsers();
+      userRows = await cvumApi.listUsers();
     }
     setUser(currentUser);
     setProjects(projectRows);
@@ -96,7 +96,7 @@ export function ProjectsClient() {
       setName(selectedProject.name);
       setDescription(selectedProject.description);
       setSelectedSources(selectedProject.source_ids);
-      void kimbalApi.listProjectMembers(selectedProject.id)
+      void cvumApi.listProjectMembers(selectedProject.id)
         .then((rows) => {
           if (cancelled) return;
           setMembers(rows);
@@ -123,7 +123,7 @@ export function ProjectsClient() {
     setSaving(true);
     setStatus("Creating project...");
     try {
-      const created = await kimbalApi.createProject({
+      const created = await cvumApi.createProject({
         name: newName.trim(),
         description: newDescription.trim(),
       });
@@ -143,7 +143,7 @@ export function ProjectsClient() {
     setSaving(true);
     setStatus(`Saving ${selectedProject.name}...`);
     try {
-      const updated = await kimbalApi.updateProject(selectedProject.id, {
+      const updated = await cvumApi.updateProject(selectedProject.id, {
         name: name.trim(),
         description: description.trim(),
       });
@@ -161,7 +161,7 @@ export function ProjectsClient() {
     setSaving(true);
     setStatus(`Updating sources for ${selectedProject.name}...`);
     try {
-      const updated = await kimbalApi.updateProjectSources(selectedProject.id, selectedSources);
+      const updated = await cvumApi.updateProjectSources(selectedProject.id, selectedSources);
       await refresh(updated.id);
       setStatus(`${updated.source_ids.length} sources mapped to ${updated.name}`);
     } catch (error) {
@@ -176,7 +176,7 @@ export function ProjectsClient() {
     setSaving(true);
     setStatus(`Updating members for ${selectedProject.name}...`);
     try {
-      const rows = await kimbalApi.updateProjectMembers(
+      const rows = await cvumApi.updateProjectMembers(
         selectedProject.id,
         Object.entries(selectedMembers).map(([user_id, project_role]) => ({ user_id, project_role }))
       );
@@ -194,7 +194,7 @@ export function ProjectsClient() {
     if (!selectedProject || saving) return;
     setSaving(true);
     try {
-      await kimbalApi.setDefaultProject(selectedProject.id);
+      await cvumApi.setDefaultProject(selectedProject.id);
       setUser((current) => current ? { ...current, default_project_id: selectedProject.id } : current);
       setStatus(`${selectedProject.name} is now your default project`);
     } catch (error) {
@@ -208,7 +208,7 @@ export function ProjectsClient() {
     if (!selectedProject || !canManage || selectedProject.slug === "all-knowledge" || saving) return;
     setSaving(true);
     try {
-      await kimbalApi.deleteProject(selectedProject.id);
+      await cvumApi.deleteProject(selectedProject.id);
       await refresh();
       setStatus(`${selectedProject.name} deactivated; its sources were not deleted`);
     } catch (error) {

@@ -1,7 +1,7 @@
-"""Run Kimbal golden eval release gates.
+"""Run CVUM golden eval release gates.
 
 Default mode validates the checked-in golden dataset. To enforce a live gate,
-pass --api-base and --token, or set KIMBAL_EVALS_API_BASE and KIMBAL_EVALS_TOKEN.
+pass --api-base and --token, or set CVUM_EVALS_API_BASE and CVUM_EVALS_TOKEN.
 """
 
 from __future__ import annotations
@@ -23,12 +23,12 @@ REQUIRED_SOURCE_TYPES = {"jira", "confluence", "upload", "web"}
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Run Kimbal RAG eval release gates")
+    parser = argparse.ArgumentParser(description="Run CVUM RAG eval release gates")
     parser.add_argument("--dataset", default=str(DATASET), help="Golden JSONL dataset path")
-    parser.add_argument("--api-base", default=os.getenv("KIMBAL_EVALS_API_BASE", ""))
-    parser.add_argument("--token", default=os.getenv("KIMBAL_EVALS_TOKEN", ""))
-    parser.add_argument("--min-cases", type=int, default=int(os.getenv("KIMBAL_EVALS_MIN_CASES", MIN_GOLDEN_CASES)))
-    parser.add_argument("--strict-api", action="store_true", default=os.getenv("KIMBAL_EVALS_STRICT_API") == "1")
+    parser.add_argument("--api-base", default=os.getenv("CVUM_EVALS_API_BASE", ""))
+    parser.add_argument("--token", default=os.getenv("CVUM_EVALS_TOKEN", ""))
+    parser.add_argument("--min-cases", type=int, default=int(os.getenv("CVUM_EVALS_MIN_CASES", MIN_GOLDEN_CASES)))
+    parser.add_argument("--strict-api", action="store_true", default=os.getenv("CVUM_EVALS_STRICT_API") == "1")
     args = parser.parse_args()
 
     cases = _load_dataset(Path(args.dataset))
@@ -39,7 +39,7 @@ def main() -> int:
         return _run_api_gate(args.api_base.rstrip("/"), args.token)
 
     if args.strict_api:
-        print("KIMBAL_EVALS_STRICT_API is set but no API credentials were supplied.", file=sys.stderr)
+        print("CVUM_EVALS_STRICT_API is set but no API credentials were supplied.", file=sys.stderr)
         return 2
 
     categories = sorted({case["category"] for case in cases})

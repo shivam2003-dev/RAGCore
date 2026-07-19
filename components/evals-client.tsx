@@ -16,7 +16,7 @@ import {
   Timer,
 } from "lucide-react";
 import { Badge, Card, CardTitle, GhostButton, PageHeader, ProgressBar, cx } from "@/components/ui";
-import { EvalGateRun, EvalOverview, EvalScore, kimbalApi } from "@/lib/kimbal-api";
+import { EvalGateRun, EvalOverview, EvalScore, cvumApi } from "@/lib/cvum-api";
 
 const OVERVIEW_CACHE_KEY = "cvum.evals.overview.v2";
 const GATE_CACHE_KEY = "cvum.evals.offline-gate.v2";
@@ -106,15 +106,15 @@ export function EvalsClient() {
     setRefreshing(true);
     setError("");
     try {
-      if (force) kimbalApi.refreshLiveData();
-      await kimbalApi.ensureSession();
-      const overviewRequest = kimbalApi.evalsOverview().then((liveOverview) => {
+      if (force) cvumApi.refreshLiveData();
+      await cvumApi.ensureSession();
+      const overviewRequest = cvumApi.evalsOverview().then((liveOverview) => {
         setOverview(liveOverview);
         setCachedAt(new Date().toISOString());
         writeCache(OVERVIEW_CACHE_KEY, liveOverview);
         setLoading(false);
       });
-      const gateRequest = kimbalApi.evalsOfflineGate().then((gate) => {
+      const gateRequest = cvumApi.evalsOfflineGate().then((gate) => {
         setOfflineGate(gate);
         writeCache(GATE_CACHE_KEY, gate);
       });

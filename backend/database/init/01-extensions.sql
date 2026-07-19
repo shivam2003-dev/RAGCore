@@ -7,8 +7,8 @@ CREATE EXTENSION IF NOT EXISTS pg_trgm;      -- trigram similarity for fuzzy key
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";  -- server-side UUID generation fallback
 
 -- Dedicated database for pytest runs (kept isolated from dev data).
-CREATE DATABASE kimbal_test OWNER kimbal;
-\connect kimbal_test
+CREATE DATABASE cvum_test OWNER cvum;
+\connect cvum_test
 CREATE EXTENSION IF NOT EXISTS vector;
 CREATE EXTENSION IF NOT EXISTS pg_trgm;
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";

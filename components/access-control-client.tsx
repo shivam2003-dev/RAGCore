@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Check, KeyRound, Minus, Search, Shield, UserPlus, Users } from "lucide-react";
 import { Badge, Card, CardTitle, GhostButton, PageHeader, PrimaryButton } from "@/components/ui";
-import { kimbalApi, type UserOut } from "@/lib/kimbal-api";
+import { cvumApi, type UserOut } from "@/lib/cvum-api";
 
 const matrix = [
   { perm: "Ask CVUM & search", admin: true, editor: true, viewer: true },
@@ -50,8 +50,8 @@ export function AccessControlClient() {
   async function refresh() {
     setLoading(true);
     try {
-      await kimbalApi.ensureSession();
-      const rows = await kimbalApi.listUsers();
+      await cvumApi.ensureSession();
+      const rows = await cvumApi.listUsers();
       setUsers(rows);
       setStatus(`${rows.length} users loaded`);
     } catch (error) {
@@ -83,7 +83,7 @@ export function AccessControlClient() {
     if (user.role === role) return;
     setStatus(`Updating ${user.full_name}`);
     try {
-      const updated = await kimbalApi.updateUserRole(user.id, role);
+      const updated = await cvumApi.updateUserRole(user.id, role);
       setUsers((current) => current.map((item) => (item.id === updated.id ? updated : item)));
       setStatus(`${updated.full_name} is now ${updated.role}`);
     } catch (error) {
@@ -104,7 +104,7 @@ export function AccessControlClient() {
     setCreating(true);
     setStatus(`Creating ${email}`);
     try {
-      const created = await kimbalApi.createUser({
+      const created = await cvumApi.createUser({
         email,
         password: newPassword,
         full_name: newName.trim(),

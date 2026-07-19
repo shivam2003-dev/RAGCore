@@ -46,5 +46,5 @@ non-secret allowlists and status.
 
 ## MCP client process
 
-`KIMBAL_API_BASE_URL` and `KIMBAL_API_KEY` configure the local stdio MCP bridge. The API key should
+`CVUM_API_BASE_URL` and `CVUM_API_KEY` configure the local stdio MCP bridge. The API key should
 be injected from the client secret store or OS keychain, not from a committed MCP config.

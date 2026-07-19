@@ -45,7 +45,7 @@ import {
 import { CVUMMark } from "@/components/brand-icons";
 import { cx } from "@/components/ui";
 import {
-  kimbalApi,
+  cvumApi,
   type AnswerMode,
   type AssistantRoleConfig,
   type ChatCapabilities,
@@ -58,7 +58,7 @@ import {
   type SourceMode,
   type UserOut,
   type WebSearchStatus,
-} from "@/lib/kimbal-api";
+} from "@/lib/cvum-api";
 
 type ChatPhase = "idle" | "uploading" | "searching" | "answering";
 
@@ -202,7 +202,7 @@ function phaseLabel(phase: ChatPhase) {
 
 async function waitForDocument(documentId: string) {
   for (let attempt = 0; attempt < 60; attempt += 1) {
-    const document = await kimbalApi.getDocument(documentId);
+    const document = await cvumApi.getDocument(documentId);
     if (document.status === "ready") return;
     if (document.status === "failed") {
       throw new Error(document.error || `Could not index ${document.title}.`);
@@ -461,7 +461,7 @@ export function ChatAskClient() {
   const loadConversations = useCallback(async () => {
     try {
       setLoadingHistory(true);
-      setConversations(await kimbalApi.listConversations());
+      setConversations(await cvumApi.listConversations());
     } catch {
       setConversations([]);
     } finally {
@@ -473,12 +473,12 @@ export function ChatAskClient() {
     let cancelled = false;
     async function load() {
       try {
-        const currentUser = await kimbalApi.ensureSession();
+        const currentUser = await cvumApi.ensureSession();
         const [history, web, chat, availableProjects] = await Promise.all([
-          kimbalApi.listConversations(),
-          kimbalApi.webSearchStatus(),
-          kimbalApi.chatCapabilities(),
-          kimbalApi.listProjects(),
+          cvumApi.listConversations(),
+          cvumApi.webSearchStatus(),
+          cvumApi.chatCapabilities(),
+          cvumApi.listProjects(),
         ]);
         if (cancelled) return;
         setUser(currentUser);
@@ -589,19 +589,19 @@ export function ChatAskClient() {
     setMessages((current) => [...current, userMessage, assistantMessage]);
 
     try {
-      await kimbalApi.ensureSession();
+      await cvumApi.ensureSession();
       let activeConversationId = conversationId;
       let activeKbId = conversationKbId;
 
       if (attachments.length) {
-        const uploadKb = await kimbalApi.ensureUploadKnowledgeBase(activeProjectId);
+        const uploadKb = await cvumApi.ensureUploadKnowledgeBase(activeProjectId);
         for (const attachment of attachments) {
-          const document = await kimbalApi.uploadDocument(uploadKb.id, attachment);
+          const document = await cvumApi.uploadDocument(uploadKb.id, attachment);
           await waitForDocument(document.id);
         }
         setAttachments([]);
         if (!activeConversationId || activeKbId !== uploadKb.id) {
-          const conversation = await kimbalApi.createConversation(
+          const conversation = await cvumApi.createConversation(
             uploadKb.id,
             trimmed.slice(0, 80),
             activeProjectId
@@ -614,8 +614,8 @@ export function ChatAskClient() {
       }
 
       if (!activeConversationId) {
-        const kb = await kimbalApi.ensureKnowledgeBase(activeProjectId);
-        const conversation = await kimbalApi.createConversation(
+        const kb = await cvumApi.ensureKnowledgeBase(activeProjectId);
+        const conversation = await cvumApi.createConversation(
           kb.id,
           trimmed.slice(0, 80),
           activeProjectId
@@ -628,7 +628,7 @@ export function ChatAskClient() {
       if (!activeKbId) setConversationKbId(conversationKbId);
 
       setPhase("searching");
-      for await (const event of kimbalApi.ask(
+      for await (const event of cvumApi.ask(
         activeConversationId,
         trimmed,
         sourceMode,
@@ -690,7 +690,7 @@ export function ChatAskClient() {
     setOpeningConversation(conversation.id);
     setError("");
     try {
-      const loaded = await kimbalApi.listMessages(conversation.id);
+      const loaded = await cvumApi.listMessages(conversation.id);
       setConversationId(conversation.id);
       setConversationKbId(conversation.knowledge_base_id);
       if (conversation.project_id) setActiveProjectId(conversation.project_id);
@@ -725,7 +725,7 @@ export function ChatAskClient() {
     if (!projectId || projectId === activeProjectId || busy) return;
     setError("");
     try {
-      await kimbalApi.setDefaultProject(projectId);
+      await cvumApi.setDefaultProject(projectId);
       setActiveProjectId(projectId);
       setConversationId(null);
       setConversationKbId(null);
@@ -742,7 +742,7 @@ export function ChatAskClient() {
   async function deleteConversation(conversation: Conversation) {
     if (busy) return;
     try {
-      await kimbalApi.deleteConversation(conversation.id);
+      await cvumApi.deleteConversation(conversation.id);
       if (conversationId === conversation.id) newChat();
       await loadConversations();
     } catch (cause) {
@@ -765,7 +765,7 @@ export function ChatAskClient() {
     const id = message.messageId ?? message.id;
     if (!id || message.pending) return;
     try {
-      await kimbalApi.submitFeedback(id, rating);
+      await cvumApi.submitFeedback(id, rating);
       setFeedback((current) => ({ ...current, [id]: rating === 1 ? "up" : "down" }));
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Could not save feedback.");
@@ -786,7 +786,7 @@ export function ChatAskClient() {
     setGeneratingRole(true);
     setError("");
     try {
-      const role = await kimbalApi.generateRolePrompt({
+      const role = await cvumApi.generateRolePrompt({
         name: customName,
         goal: customGoal,
         sourceFocus: customSources,
@@ -855,7 +855,7 @@ export function ChatAskClient() {
   }
 
   async function logout() {
-    await kimbalApi.logout();
+    await cvumApi.logout();
     window.location.replace("/login");
   }
 

@@ -25,7 +25,7 @@ async def _default_project(client, headers) -> dict:
 
 async def _isolated_headers(client, db) -> tuple[dict[str, str], uuid.UUID]:
     suffix = uuid.uuid4().hex[:10]
-    email = f"workflow-{suffix}@kimbal.io"
+    email = f"workflow-{suffix}@cvum.io"
     password = "WorkflowTest123!"
     response = await client.post(
         "/api/v1/auth/register",

@@ -4,7 +4,7 @@ import { useState } from "react";
 import { CheckCircle2, Cloud, Database, History, Loader2, Plus, RefreshCw, SquareKanban } from "lucide-react";
 import { Badge, Card, CardTitle, GhostButton, PageHeader, PrimaryButton, cx } from "@/components/ui";
 import { useLiveMetrics } from "@/components/use-live-metrics";
-import { kimbalApi } from "@/lib/kimbal-api";
+import { cvumApi } from "@/lib/cvum-api";
 import { sourceFamily } from "@/components/source-metrics";
 
 function number(value: number) {
@@ -82,7 +82,7 @@ export function DataSourcesClient() {
     setSyncing(true);
     setStatus("Syncing Confluence");
     try {
-      const result = await kimbalApi.syncConfluence();
+      const result = await cvumApi.syncConfluence();
       setStatus(`${number(result.total_pages)} Confluence pages queued`);
       await refreshAfterSync("Confluence pages", result.total_pages, result.created + result.updated);
     } catch (cause) {
@@ -96,7 +96,7 @@ export function DataSourcesClient() {
     setSyncingJira(true);
     setStatus("Syncing Jira");
     try {
-      const result = await kimbalApi.syncJira();
+      const result = await cvumApi.syncJira();
       setStatus(`${number(result.total_issues)} Jira issues queued`);
       await refreshAfterSync("Jira issues", result.total_issues, result.created + result.updated);
     } catch (cause) {

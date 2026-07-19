@@ -1,20 +1,20 @@
-name: kimbal
+name: cvum
 
 services:
   postgres:
     image: pgvector/pgvector:pg17
-    container_name: kimbal-postgres
+    container_name: cvum-postgres
     environment:
-      POSTGRES_USER: kimbal
-      POSTGRES_PASSWORD: kimbal_dev_password
-      POSTGRES_DB: kimbal
+      POSTGRES_USER: cvum
+      POSTGRES_PASSWORD: cvum_dev_password
+      POSTGRES_DB: cvum
     ports:
       - "127.0.0.1:5433:5432"
     volumes:
-      - kimbal_pgdata:/var/lib/postgresql/data
+      - cvum_pgdata:/var/lib/postgresql/data
       - ./backend/database/init:/docker-entrypoint-initdb.d:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U kimbal -d kimbal"]
+      test: ["CMD-SHELL", "pg_isready -U cvum -d cvum"]
       interval: 5s
       timeout: 3s
       retries: 10
@@ -22,12 +22,12 @@ services:
 
   redis:
     image: redis:7-alpine
-    container_name: kimbal-redis
+    container_name: cvum-redis
     command: ["redis-server", "--maxmemory", "256mb", "--maxmemory-policy", "allkeys-lru"]
     ports:
       - "127.0.0.1:6379:6379"
     volumes:
-      - kimbal_redis:/data
+      - cvum_redis:/data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -37,10 +37,10 @@ services:
 
   api:
     build: ./backend
-    container_name: kimbal-api
+    container_name: cvum-api
     profiles: ["full"]  # opt-in: `docker compose --profile full up` (local dev runs uvicorn directly)
     environment:
-      DATABASE_URL: postgresql+asyncpg://kimbal:kimbal_dev_password@postgres:5432/kimbal
+      DATABASE_URL: postgresql+asyncpg://cvum:cvum_dev_password@postgres:5432/cvum
       REDIS_URL: redis://redis:6379/0
       APP_ENV: production
     ports:
@@ -53,5 +53,5 @@ services:
     restart: unless-stopped
 
 volumes:
-  kimbal_pgdata:
-  kimbal_redis:
+  cvum_pgdata:
+  cvum_redis:

@@ -13,12 +13,12 @@ import {
 } from "lucide-react";
 import { Badge, Card, CardTitle, PageHeader, PrimaryButton, cx } from "@/components/ui";
 import {
-  kimbalApi,
+  cvumApi,
   type ChangeResponse,
   type ExpertResponse,
   type IncidentCopilot,
   type Project,
-} from "@/lib/kimbal-api";
+} from "@/lib/cvum-api";
 
 type WorkflowTab = "incident" | "experts" | "changes";
 
@@ -64,7 +64,7 @@ export function KnowledgeWorkflowsClient() {
     let cancelled = false;
     async function load() {
       try {
-        const [rows, user] = await Promise.all([kimbalApi.listProjects(), kimbalApi.ensureSession()]);
+        const [rows, user] = await Promise.all([cvumApi.listProjects(), cvumApi.ensureSession()]);
         if (cancelled) return;
         setProjects(rows);
         setProjectId(rows.find((item) => item.id === user.default_project_id)?.id ?? rows[0]?.id ?? "");
@@ -85,7 +85,7 @@ export function KnowledgeWorkflowsClient() {
     setError("");
     setIncident(null);
     try {
-      setIncident(await kimbalApi.incidentCopilot(projectId, issueKey.trim()));
+      setIncident(await cvumApi.incidentCopilot(projectId, issueKey.trim()));
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Incident analysis failed");
     } finally {
@@ -100,7 +100,7 @@ export function KnowledgeWorkflowsClient() {
     setError("");
     setExperts(null);
     try {
-      setExperts(await kimbalApi.findExperts(projectId, expertQuery.trim()));
+      setExperts(await cvumApi.findExperts(projectId, expertQuery.trim()));
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Expert search failed");
     } finally {
@@ -115,7 +115,7 @@ export function KnowledgeWorkflowsClient() {
     setError("");
     setChanges(null);
     try {
-      setChanges(await kimbalApi.whatChanged(projectId, startDate, endDate));
+      setChanges(await cvumApi.whatChanged(projectId, startDate, endDate));
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Change summary failed");
     } finally {

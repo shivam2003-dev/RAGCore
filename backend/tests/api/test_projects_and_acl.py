@@ -3,7 +3,7 @@ import uuid
 
 
 async def _create_user(client, headers, *, role: str) -> tuple[dict, str]:
-    email = f"project-{role}-{uuid.uuid4().hex[:8]}@kimbal.io"
+    email = f"project-{role}-{uuid.uuid4().hex[:8]}@cvum.io"
     password = "SuperSecret123!"
     created = await client.post(
         "/api/v1/admin/users",
@@ -315,7 +315,7 @@ async def test_cross_organization_project_is_not_discoverable(client, auth_heade
     await db.flush()
     other_user = User(
         organization_id=other_org.id,
-        email=f"other-{uuid.uuid4().hex[:8]}@kimbal.io",
+        email=f"other-{uuid.uuid4().hex[:8]}@cvum.io",
         password_hash=hash_password("SuperSecret123!"),
         full_name="Other Admin",
         role=Role.ADMIN,

@@ -21,7 +21,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { Badge, Card, GhostButton, cx } from "@/components/ui";
-import { DiscoverArticle, DiscoverFeed, kimbalApi } from "@/lib/kimbal-api";
+import { DiscoverArticle, DiscoverFeed, cvumApi } from "@/lib/cvum-api";
 
 const departmentIcons: Record<string, LucideIcon> = {
   "for-you": Sparkles,
@@ -70,14 +70,14 @@ export function DiscoverClient({ surface = "page" }: { surface?: "page" | "ask" 
   async function load(nextDepartment = department, force = false) {
     setError(null);
     if (force) {
-      kimbalApi.refreshLiveData();
+      cvumApi.refreshLiveData();
       setRefreshing(true);
     } else {
       setLoading(true);
     }
     try {
-      await kimbalApi.ensureSession();
-      const nextFeed = await kimbalApi.discoverFeed(nextDepartment);
+      await cvumApi.ensureSession();
+      const nextFeed = await cvumApi.discoverFeed(nextDepartment);
       setFeed(nextFeed);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unable to load Discover feed");

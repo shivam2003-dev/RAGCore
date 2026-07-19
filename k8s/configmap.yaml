@@ -1,8 +1,8 @@
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: kimbal-api-config
-  namespace: kimbal
+  name: cvum-api-config
+  namespace: cvum
 data:
   APP_ENV: "production"
   APP_DEBUG: "false"

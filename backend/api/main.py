@@ -60,7 +60,7 @@ def _init_otel(app: FastAPI, endpoint: str) -> None:
     from opentelemetry.sdk.resources import Resource
     from opentelemetry.sdk.trace import TracerProvider
 
-    provider = TracerProvider(resource=Resource.create({"service.name": "kimbal-backend"}))
+    provider = TracerProvider(resource=Resource.create({"service.name": "cvum-backend"}))
     trace.set_tracer_provider(provider)
     FastAPIInstrumentor.instrument_app(app)
 
@@ -68,7 +68,7 @@ def _init_otel(app: FastAPI, endpoint: str) -> None:
 def create_app() -> FastAPI:
     settings = get_settings()
     app = FastAPI(
-        title="Kimbal Knowledge Hub API",
+        title="CVUM Knowledge Hub API",
         version="0.1.0",
         description="Enterprise RAG platform: hybrid retrieval, grounded answers, citations.",
         lifespan=lifespan,

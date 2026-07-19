@@ -105,22 +105,22 @@ html[data-theme="dark"] .text-ink-500 {
   * { transition-duration: 0.01ms !important; }
 }
 
-body.ask-focus-mode .kimbal-sidebar,
-body.ask-focus-mode .kimbal-topbar {
+body.ask-focus-mode .cvum-sidebar,
+body.ask-focus-mode .cvum-topbar {
   display: none;
 }
 
-body.ask-focus-mode .kimbal-shell {
+body.ask-focus-mode .cvum-shell {
   padding-left: 0;
 }
 
 @media (min-width: 64rem) {
-  body.sidebar-collapsed .kimbal-shell {
+  body.sidebar-collapsed .cvum-shell {
     padding-left: 72px;
   }
 }
 
-body.ask-focus-mode .kimbal-shell > main {
+body.ask-focus-mode .cvum-shell > main {
   max-width: none;
   min-height: 100vh;
   padding: 0;

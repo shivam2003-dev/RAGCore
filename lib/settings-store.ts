@@ -52,8 +52,8 @@ export const defaultSettings: SettingsState = {
   securityAlerts: true,
 };
 
-const SETTINGS_KEY = "kimbal.settings.v1";
-export const SETTINGS_EVENT = "kimbal:settings-changed";
+const SETTINGS_KEY = "cvum.settings.v1";
+export const SETTINGS_EVENT = "cvum:settings-changed";
 
 export function loadSettings(): SettingsState {
   if (typeof window === "undefined") return defaultSettings;

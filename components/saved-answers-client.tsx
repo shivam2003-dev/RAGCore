@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Bookmark, Search, Share2, Sparkles, Trash2 } from "lucide-react";
 import { Badge, Card, PageHeader } from "@/components/ui";
-import type { RagSource } from "@/lib/kimbal-api";
+import type { RagSource } from "@/lib/cvum-api";
 
 type SavedAnswer = {
   id?: string;
@@ -13,7 +13,7 @@ type SavedAnswer = {
   savedAt?: string;
 };
 
-const STORAGE_KEY = "kimbal.saved.answers.v1";
+const STORAGE_KEY = "cvum.saved.answers.v1";
 
 function loadSavedAnswers(): SavedAnswer[] {
   try {

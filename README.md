@@ -1,6 +1,6 @@
 # RAGCore
 
-RAGCore is the repository for the CVUM/Kimbal enterprise knowledge hub: a Next.js 16 frontend and
+RAGCore is the repository for the CVUM enterprise knowledge hub: a Next.js 16 frontend and
 FastAPI backend backed by PostgreSQL/pgvector and Redis. It provides Project-scoped, permission-aware
 RAG across local documents and read-only Confluence, Jira, public Slack, and GitHub sources.
 

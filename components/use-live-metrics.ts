@@ -2,13 +2,13 @@
 
 import { useEffect, useState } from "react";
 import {
-  kimbalApi,
+  cvumApi,
   type ConfluenceStatus,
   type JiraStatus,
   type GitHubStatus,
   type MetricsOverview,
   type SlackStatus,
-} from "@/lib/kimbal-api";
+} from "@/lib/cvum-api";
 
 export type LiveMetricsState = {
   metrics: MetricsOverview | null;
@@ -35,15 +35,15 @@ export function useLiveMetrics(): LiveMetricsState {
     setError("");
     try {
       if (options.force) {
-        kimbalApi.refreshLiveData();
+        cvumApi.refreshLiveData();
       }
-      await kimbalApi.ensureSession();
+      await cvumApi.ensureSession();
       const [overview, confluenceStatus, jiraStatus, slackStatus, githubStatus] = await Promise.all([
-        kimbalApi.metricsOverview(),
-        kimbalApi.confluenceStatus().catch(() => null),
-        kimbalApi.jiraStatus().catch(() => null),
-        kimbalApi.slackStatus().catch(() => null),
-        kimbalApi.githubStatus().catch(() => null),
+        cvumApi.metricsOverview(),
+        cvumApi.confluenceStatus().catch(() => null),
+        cvumApi.jiraStatus().catch(() => null),
+        cvumApi.slackStatus().catch(() => null),
+        cvumApi.githubStatus().catch(() => null),
       ]);
       setMetrics(overview);
       setConfluence(confluenceStatus);

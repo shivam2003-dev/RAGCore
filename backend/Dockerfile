@@ -20,15 +20,15 @@ RUN apt-get update \
         tesseract-ocr \
     && rm -rf /var/lib/apt/lists/*
 
-RUN groupadd -r kimbal && useradd -r -g kimbal kimbal
+RUN groupadd -r cvum && useradd -r -g cvum cvum
 WORKDIR /app
 ENV PATH="/venv/bin:$PATH" PYTHONUNBUFFERED=1 APP_ENV=production
 
 COPY --from=build /venv /venv
 COPY --from=build /app /app
-RUN mkdir -p /app/var/uploads && chown -R kimbal:kimbal /app/var
+RUN mkdir -p /app/var/uploads && chown -R cvum:cvum /app/var
 
-USER kimbal
+USER cvum
 EXPOSE 8000
 
 HEALTHCHECK --interval=15s --timeout=3s --retries=5 \

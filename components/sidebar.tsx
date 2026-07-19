@@ -28,11 +28,11 @@ import {
 } from "lucide-react";
 import { CVUMMark } from "./brand-icons";
 import { cx } from "./ui";
-import type { UserOut } from "@/lib/kimbal-api";
+import type { UserOut } from "@/lib/cvum-api";
 
 type Item = { label: string; href: string; icon: LucideIcon };
 
-const SIDEBAR_COLLAPSED_KEY = "kimbal.sidebar.collapsed.v1";
+const SIDEBAR_COLLAPSED_KEY = "cvum.sidebar.collapsed.v1";
 
 const groups: Array<{ label?: string; items: Item[] }> = [
   {
@@ -116,7 +116,7 @@ export function Sidebar({ user, onLogout }: { user: UserOut; onLogout: () => voi
       {mobileOpen && <button type="button" aria-label="Close navigation" onClick={() => setMobileOpen(false)} className="fixed inset-0 z-30 bg-ink-900/30 backdrop-blur-[1px] lg:hidden" />}
       <aside
       className={cx(
-        "kimbal-sidebar fixed inset-y-0 left-0 z-40 flex w-[280px] flex-col border-r border-line bg-white/95 backdrop-blur-xl transition-[width,transform] lg:translate-x-0 lg:bg-white/70",
+        "cvum-sidebar fixed inset-y-0 left-0 z-40 flex w-[280px] flex-col border-r border-line bg-white/95 backdrop-blur-xl transition-[width,transform] lg:translate-x-0 lg:bg-white/70",
         mobileOpen ? "translate-x-0" : "-translate-x-full",
         collapsed ? "lg:w-[72px]" : "lg:w-[248px]"
       )}

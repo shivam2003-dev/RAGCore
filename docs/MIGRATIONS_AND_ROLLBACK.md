@@ -67,6 +67,6 @@ depends on the removed tables/columns:
 .venv/bin/alembic downgrade 0002  # remove Project/ACL schema
 ```
 
-Downgrade removes KimbalGPT-owned connector/project schema. It does not delete or update source
+Downgrade removes CVUM-owned connector/project schema. It does not delete or update source
 systems. Restore the database backup if a downgrade is interrupted or application data validation
 fails.

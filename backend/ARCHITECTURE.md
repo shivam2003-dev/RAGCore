@@ -1,6 +1,6 @@
-# Kimbal Knowledge Hub — Backend Architecture
+# CVUM Knowledge Hub — Backend Architecture
 
-Production backend for the Kimbal enterprise RAG platform. Python 3.13, FastAPI, PostgreSQL + pgvector, Redis.
+Production backend for the CVUM enterprise RAG platform. Python 3.13, FastAPI, PostgreSQL + pgvector, Redis.
 
 ## 1. System overview
 
@@ -108,7 +108,7 @@ audit logs, and refresh tokens.
 | Caching | Redis: embedding cache (hash of text+model), response cache (hash of query+kb+filters, short TTL), rate-limit counters, session/refresh state |
 | Observability | structlog JSON logs w/ request-id; Prometheus `/metrics`; OpenTelemetry traces spanning retrieve→embed→llm; per-request timing breakdown returned in response metadata |
 | Security | Pydantic validation everywhere, file magic-byte checks, prompt-injection guards (source-tagging + instruction hierarchy in prompt builder), PII redaction hook in logging pipeline, secrets via env only |
-| Testing | pytest + pytest-asyncio; unit (engines, pure logic), integration (repos against dockerized pg w/ `kimbal_test` db), API (httpx ASGI client) |
+| Testing | pytest + pytest-asyncio; unit (engines, pure logic), integration (repos against dockerized pg w/ `cvum_test` db), API (httpx ASGI client) |
 
 ## 7. Module build order
 
