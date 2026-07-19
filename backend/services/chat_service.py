@@ -28,7 +28,8 @@ from retrieval.context import RetrievedChunk
 from retrieval.pipeline import RetrievalPipeline
 from services.chat_memory import MemoryManager
 from services.chat_sessions import ChatSessionManager
-from services.conversational_retriever import ConversationalRetriever
+from services.conversational_retriever import ConversationalRetriever, RetrievalResult
+from services.evidence_orchestrator import EvidenceOrchestrator
 from services.question_rewriter import QuestionRewriter
 from services.response_generator import ResponseGenerator
 from services.web_search_service import WebSearchService
@@ -110,6 +111,7 @@ class ChatService:
         llm: LLMProvider,
         web_search: WebSearchService,
         settings: Settings,
+        evidence_orchestrator: EvidenceOrchestrator | None = None,
     ) -> None:
         self._db = db
         self._conversations = ConversationRepository(db)
@@ -119,6 +121,7 @@ class ChatService:
         self._llm = llm
         self._web_search = web_search
         self._settings = settings
+        self._evidence_orchestrator = evidence_orchestrator
         self._authorization = ProjectAuthorizationRepository(db)
         self._sessions = ChatSessionManager(db)
         self._memory = MemoryManager(db, default_model=llm.model)
@@ -216,17 +219,86 @@ class ChatService:
                     yield event
                 return
 
-        retrieval = await self._conversation_retriever.retrieve(
-            user=user,
-            conversation=conversation,
-            current_question=question,
-            standalone_question=standalone_question,
-            history=history,
-            source_mode=source_mode,
-            assistant_role=assistant_role,
-            assistant_role_prompt=assistant_role_prompt,
-            authorized_kb_ids=scope.knowledge_base_ids,
-        )
+        if (
+            self._settings.knowledge_planner_enabled
+            and source_mode != "web"
+            and self._evidence_orchestrator is not None
+        ):
+            orchestration = await self._evidence_orchestrator.retrieve(
+                question=standalone_question or question,
+                project_id=scope.project.id,
+                user=user,
+            )
+            planned_chunks = orchestration.chunks
+            planner_timings = {
+                f"tool_{item.tool.value}": item.latency_ms
+                for item in orchestration.execution.executions
+            }
+            quality_notes = [
+                f"{item.tool.value}_failed={item.failure}"
+                for item in orchestration.execution.executions
+                if item.failure
+            ]
+            if source_mode == "blended":
+                web_started = time.perf_counter()
+                planned_chunks.extend(
+                    await self._web_search.search(
+                        user=user,
+                        query=standalone_question or question,
+                        max_results=self._settings.web_search_top_k,
+                    )
+                )
+                planner_timings["web_search"] = int((time.perf_counter() - web_started) * 1000)
+            chunks_by_identity: dict[tuple[uuid.UUID, uuid.UUID], RetrievedChunk] = {}
+            for chunk in planned_chunks:
+                chunks_by_identity.setdefault((chunk.document_id, chunk.chunk_id), chunk)
+            planned_chunks = list(chunks_by_identity.values())[: max(self._settings.retrieval_top_k, 20)]
+            retrieval = RetrievalResult(
+                chunks=planned_chunks,
+                timings_ms={
+                    "evidence_executor": orchestration.execution.total_latency_ms,
+                    **planner_timings,
+                },
+                confidence=0.8 if planned_chunks else 0.0,
+                query_classification="planned_evidence",
+                subqueries=list(dict.fromkeys(item.query for item in orchestration.plan.selections)),
+                attempts=[],
+                quality_notes=quality_notes,
+                weak_internal_retrieval=not planned_chunks,
+                fallback_requested=not planned_chunks,
+                trace={
+                    "planner": {
+                        "strategy": orchestration.plan.strategy,
+                        "fallback_reason": orchestration.plan.fallback_reason,
+                        "selected_tools": [item.tool.value for item in orchestration.plan.selections],
+                        "tool_count": len(orchestration.plan.selections),
+                        "partial": orchestration.execution.partial,
+                        "total_latency_ms": orchestration.execution.total_latency_ms,
+                        "executions": [
+                            {
+                                "tool": item.tool.value,
+                                "latency_ms": item.latency_ms,
+                                "result_count": len(item.evidence),
+                                "failure": item.failure,
+                                "timed_out": item.timed_out,
+                            }
+                            for item in orchestration.execution.executions
+                        ],
+                    }
+                },
+            )
+        else:
+            retrieval = await self._conversation_retriever.retrieve(
+                user=user,
+                conversation=conversation,
+                current_question=question,
+                standalone_question=standalone_question,
+                history=history,
+                source_mode=source_mode,
+                assistant_role=assistant_role,
+                assistant_role_prompt=assistant_role_prompt,
+                authorized_kb_ids=scope.knowledge_base_ids,
+            )
         chunks = retrieval.chunks
         timings_ms = {"question_rewrite": rewrite_ms, **retrieval.timings_ms}
         confidence = retrieval.confidence

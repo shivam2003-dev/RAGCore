@@ -82,6 +82,14 @@ class Settings(BaseSettings):
     retrieval_neighbor_token_budget: int = 1200
     retrieval_neighbor_max_chunks: int = 8
 
+    # Optional planner -> tools -> synthesis path. It is conservative/off by
+    # default; deterministic planning remains available without an LLM.
+    knowledge_planner_enabled: bool = False
+    knowledge_planner_model_enabled: bool = False
+    knowledge_planner_max_tools: int = 5
+    knowledge_planner_per_tool_timeout_seconds: float = 4.0
+    knowledge_planner_overall_timeout_seconds: float = 8.0
+
     # chunking
     chunk_size_tokens: int = 400
     chunk_overlap_tokens: int = 60
