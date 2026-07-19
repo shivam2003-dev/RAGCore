@@ -4,7 +4,10 @@ from pathlib import Path
 from typing import Any
 
 from core.exceptions import IngestionError
+from core.logging import get_logger
 from ingestion.extractors.base import ExtractedDocument
+
+log = get_logger(__name__)
 
 
 def _pdf_reader(path: Path):
@@ -122,6 +125,43 @@ class PlainTextExtractor:
         return ExtractedDocument(text=path.read_text(encoding="utf-8", errors="replace"))
 
 
+class CodeExtractor:
+    suffixes = (
+        ".c",
+        ".cc",
+        ".cpp",
+        ".cs",
+        ".go",
+        ".graphql",
+        ".h",
+        ".hpp",
+        ".java",
+        ".js",
+        ".jsx",
+        ".kt",
+        ".php",
+        ".proto",
+        ".py",
+        ".rb",
+        ".rs",
+        ".sh",
+        ".sql",
+        ".swift",
+        ".toml",
+        ".ts",
+        ".tsx",
+        ".xml",
+        ".yaml",
+        ".yml",
+    )
+
+    def extract(self, path: Path) -> ExtractedDocument:
+        return ExtractedDocument(
+            text=path.read_text(encoding="utf-8", errors="strict"),
+            metadata={"format": "code", "language": path.suffix.lower().lstrip(".")},
+        )
+
+
 class CsvExtractor:
     suffixes = (".csv",)
 
@@ -194,6 +234,7 @@ _EXTRACTORS = [
     DocxExtractor(),
     MarkdownExtractor(),
     PlainTextExtractor(),
+    CodeExtractor(),
     CsvExtractor(),
     HtmlExtractor(),
 ]
@@ -224,7 +265,8 @@ def _extract_pdf_via_ocr(path: Path, page_count: int) -> str:
     for index, image in enumerate(images, start=1):
         try:
             text = _ocr_image(image)
-        except Exception:
+        except Exception as exc:
+            log.warning("pdf_ocr_page_failed", page=index, error=str(exc)[:500])
             continue
         if text:
             chunks.append(f"Page {index}: {text.strip()}")

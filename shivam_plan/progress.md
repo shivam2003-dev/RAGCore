@@ -6,8 +6,8 @@ Branch: `agent/cerebras-knowledge-upgrade`
 
 ## Current phase
 
-Phase 3 fixture implementation complete — Read-only, allowlisted Slack knowledge ingestion.
-Real Slack smoke is credential-gated. Phase 4 is next — GitHub and code intelligence.
+Phase 4 complete — Read-only incremental GitHub and code intelligence.
+Phase 5 is next — Planner, typed evidence tools, executor, and MCP parity.
 
 ## Completed work
 
@@ -63,6 +63,25 @@ Real Slack smoke is credential-gated. Phase 4 is next — GitHub and code intell
   private-channel IDs, non-allowlisted channels, and unsupported event subtypes are denied.
 - Added admin status/configuration/manual-sync APIs and visible Slack health/sync cards on
   Integrations and Knowledge Sources.
+
+### Phase 4
+
+- Added migration `0005_github_code_index.py` for repository/branch mappings and per-path blob/document
+  state while reusing the generic connector health record.
+- Added a GET-only GitHub REST client for branch/tree/blob/contributor/recent-PR reads with bounded
+  rate-limit and transient-error retries. Production guidance prefers a GitHub App.
+- Added repository, branch, path allow/deny configuration; conservative dependency, vendor,
+  generated, build, secret-like, binary, file-count, and size controls; and one project-scoped
+  knowledge base per repository branch.
+- Added tree/blob SHA incremental indexing with an unchanged-tree short circuit, no unchanged-blob
+  embeddings, document lineage across renames, and soft-deletion/chunk deactivation for removed or
+  newly denied paths.
+- Added code/config extractors and symbol-aware chunks for supported languages, preserving symbol
+  kind/name and line boundaries with bounded oversized-symbol fallback.
+- Added parameterized literal exact code search, normal hybrid semantic code retrieval, normalized
+  recent pull requests, CODEOWNERS precedence, contributor metadata, and commit-pinned citations.
+- Added GitHub status/configuration/sync/PR/code-search APIs and visible repository status, commit,
+  error, and incremental-index controls on Integrations and Knowledge Sources.
 
 ## Baseline test results
 
@@ -129,6 +148,24 @@ The pre-commit full backend suite passed with 120 tests and 1 explicitly gated m
 skipped. The 129-case dataset gate, frontend lint, TypeScript check, and 21-page production build
 also passed.
 
+## Phase 4 test evidence
+
+| Check | Result |
+|---|---|
+| GitHub fixture/code tests | Passed; 8 focused tests covering initial/incremental indexing, unchanged blobs, changes, rename, delete, policy denial, symbols, oversized fallback, exact-search safety, PRs, CODEOWNERS, semantic retrieval, ACLs, metadata, and citations |
+| Migration `0005` | Passed upgrade to head, downgrade to `0004`, and re-upgrade on the explicit disposable migration database; local development DB upgraded to head |
+| Authenticated GitHub read smoke | Passed against `shivam2003-dev/RAGCore`; resolved `main`, read an untruncated 216-blob tree, observed no dependency/vendor paths, and read recent PR #1 without mutating the repository |
+| Changed Python files Ruff | Passed |
+| Frontend lint and TypeScript | Passed |
+| Browser desktop | Passed in Chrome; Integrations and Knowledge Sources show honest GitHub empty/config states and keep indexing disabled without a server-side credential |
+
+The real GitHub read surface was exercised through the already authenticated OS-keyring CLI. The
+incremental change/rename/delete smoke remains fixture-backed because modifying the connected source
+repository is outside the authorized read-only boundary.
+The pre-commit full backend suite passed with 128 tests and 1 explicitly gated migration test
+skipped. The 129-case dataset gate, frontend lint, TypeScript check, and 21-page production build
+also passed.
+
 ## Files and migrations changed
 
 - `shivam_plan/new.md` — source recommendation plan prepared before the goal began.
@@ -144,7 +181,6 @@ also passed.
 ## Remaining work
 
 - Phase 3: Slack read-only connector with fixture/contract coverage.
-- Phase 4: GitHub read-only incremental indexing and code intelligence.
 - Phase 5: planner/executor/evidence tools and MCP parity.
 - Phase 6: product workflows and visible desktop/mobile verification.
 - Phase 7: final docs, full matrix, containers/manifests, secret scan, commits, push, and draft PR.

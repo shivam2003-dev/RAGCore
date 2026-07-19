@@ -46,6 +46,11 @@ allowlisted public channel IDs, rejects private channels and direct messages, an
 `chat:write`, `groups:history`, `im:history`, or `mpim:history`. Slack tokens remain environment or
 secret-manager values and are never persisted in connector state.
 
+The GitHub connector exposes GET-only REST operations and never runs repository code or shell search.
+Repository, branch, and path policies deny dependency/vendor/generated/build, secret-like, binary,
+and oversized files. GitHub credentials are server-side only, and code/PR retrieval uses the same
+Project and source ACL intersection as Ask.
+
 ## Frontend Settings Boundary
 
 The Settings page separates local UI preferences from backend-managed runtime controls. Runtime controls such as auth TTLs, RAG weights, provider keys, and connector scopes are shown as server-managed instead of editable browser toggles.

@@ -107,3 +107,72 @@ class SlackEventReceipt(UUIDPKMixin, Base):
         UniqueConstraint("connector_state_id", "event_id", name="uq_slack_event_receipts_event"),
         Index("ix_slack_event_receipts_status", "connector_state_id", "status"),
     )
+
+
+class GitHubRepositoryMapping(UUIDPKMixin, TimestampMixin, Base):
+    __tablename__ = "github_repository_mappings"
+
+    organization_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True))
+    connector_state_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True))
+    project_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True))
+    knowledge_base_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True))
+    owner: Mapped[str] = mapped_column(String(255))
+    repository: Mapped[str] = mapped_column(String(255))
+    branch: Mapped[str] = mapped_column(String(255))
+    path_allowlist: Mapped[list] = mapped_column(JSONB, default=list)
+    path_denylist: Mapped[list] = mapped_column(JSONB, default=list)
+    is_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    status: Mapped[str] = mapped_column(String(40), default="configured")
+    head_commit_sha: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    head_tree_sha: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    last_indexed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_error_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    error_detail: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["organization_id", "connector_state_id"],
+            ["connector_states.organization_id", "connector_states.id"],
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["organization_id", "project_id"],
+            ["projects.organization_id", "projects.id"],
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["organization_id", "knowledge_base_id"],
+            ["knowledge_bases.organization_id", "knowledge_bases.id"],
+            ondelete="CASCADE",
+        ),
+        UniqueConstraint(
+            "organization_id",
+            "owner",
+            "repository",
+            "branch",
+            name="uq_github_repository_mappings_repo_branch",
+        ),
+        Index("ix_github_repository_mappings_org_project", "organization_id", "project_id"),
+    )
+
+
+class GitHubFileState(UUIDPKMixin, TimestampMixin, Base):
+    __tablename__ = "github_file_states"
+
+    repository_mapping_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("github_repository_mappings.id", ondelete="CASCADE")
+    )
+    document_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("documents.id", ondelete="SET NULL"), nullable=True
+    )
+    path: Mapped[str] = mapped_column(Text)
+    blob_sha: Mapped[str] = mapped_column(String(64))
+    language: Mapped[str] = mapped_column(String(80), default="text")
+    status: Mapped[str] = mapped_column(String(32), default="active")
+    last_commit_sha: Mapped[str] = mapped_column(String(64))
+
+    __table_args__ = (
+        UniqueConstraint("repository_mapping_id", "path", name="uq_github_file_states_mapping_path"),
+        Index("ix_github_file_states_mapping_status", "repository_mapping_id", "status"),
+        Index("ix_github_file_states_blob", "repository_mapping_id", "blob_sha"),
+    )

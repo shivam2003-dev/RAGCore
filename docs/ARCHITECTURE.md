@@ -27,7 +27,8 @@ Vector search is isolated in `backend/repositories/chunks.py`. The retrieval pip
 - Knowledge: knowledge bases, documents, document versions, chunks, and collections.
 - Retrieval: dense pgvector HNSW search plus sparse Postgres full-text search.
 - Chat: conversations, messages, streamed SSE answers, citations, feedback, and timings.
-- Connectors: read-only Confluence/Jira sync services and the allowlisted Slack Socket Mode worker.
+- Connectors: read-only Confluence/Jira sync services, the allowlisted Slack Socket Mode worker, and
+  SHA-incremental GitHub repository indexing.
 - Metrics: live aggregate metrics from database tables, with no static dashboard numbers.
 
 ## Frontend Shape

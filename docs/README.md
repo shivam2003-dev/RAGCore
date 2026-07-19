@@ -8,6 +8,7 @@ This folder is the source-safe operator and developer reference for the CVUM Kno
 - [RAG Pipeline](./RAG_PIPELINE.md) - ingestion, chunking, retrieval, citations, and chat streaming.
 - [Atlassian Read-Only Sync](./ATLASSIAN_READ_ONLY_SYNC.md) - Confluence and Jira connector behavior.
 - [Slack Knowledge Connector](./SLACK_CONNECTOR.md) - allowlisted Socket Mode thread ingestion and safety boundaries.
+- [GitHub Code Connector](./GITHUB_CONNECTOR.md) - read-only incremental code and pull-request intelligence.
 - [Web Search and Council Mode](./WEB_SEARCH_AND_COUNCIL.md) - optional internet retrieval and multi-model answer synthesis.
 - [Discover](./DISCOVER.md) - live department feeds, alerts, research, and board pulse configuration.
 - [Evals](./EVALS.md) - live RAG answer quality, citation, latency, model, and feedback metrics.

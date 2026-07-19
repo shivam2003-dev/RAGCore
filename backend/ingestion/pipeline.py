@@ -13,7 +13,7 @@ from database.base import utcnow
 from database.session import SessionFactory
 from embeddings.base import EmbeddingProvider
 from ingestion.chunkers.base import Chunker, count_tokens
-from ingestion.chunkers.code import CodeChunker
+from ingestion.chunkers.code import CodeChunker, code_language_for_suffix
 from ingestion.chunkers.markdown import MarkdownChunker
 from ingestion.chunkers.recursive import RecursiveChunker
 from ingestion.extractors.registry import extract_text
@@ -23,7 +23,27 @@ from repositories.knowledge import DocumentRepository
 
 log = get_logger(__name__)
 
-_CODE_SUFFIXES = {".py", ".ts", ".js", ".go", ".java", ".rs"}
+_CODE_SUFFIXES = {
+    ".c",
+    ".cc",
+    ".cpp",
+    ".cs",
+    ".go",
+    ".h",
+    ".hpp",
+    ".java",
+    ".js",
+    ".jsx",
+    ".kt",
+    ".php",
+    ".py",
+    ".rb",
+    ".rs",
+    ".sh",
+    ".swift",
+    ".ts",
+    ".tsx",
+}
 EMBED_BATCH_SIZE = 64
 
 
@@ -31,7 +51,7 @@ def select_chunker(suffix: str) -> Chunker:
     if suffix in {".md", ".html", ".htm"}:
         return MarkdownChunker()
     if suffix in _CODE_SUFFIXES:
-        return CodeChunker()
+        return CodeChunker(language=code_language_for_suffix(suffix))
     return RecursiveChunker()
 
 

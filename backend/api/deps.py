@@ -27,6 +27,7 @@ from services.chat_service import ChatService
 from services.confluence_service import ConfluenceSyncService
 from services.discover_service import DiscoverService
 from services.document_service import DocumentService
+from services.github_index import GitHubIndexService
 from services.jira_service import JiraSyncService
 from services.slack_service import SlackConnectorService
 from services.web_search_service import WebSearchService
@@ -137,6 +138,17 @@ def get_slack_connector_service(
     return SlackConnectorService(db=db, settings=settings, document_service=document_service)
 
 
+def get_github_index_service(
+    db: DbDep,
+    settings: SettingsDep,
+    embedder: EmbedderDep,
+    background: BackgroundTasks,
+) -> GitHubIndexService:
+    queue = BackgroundTasksQueue(background)
+    document_service = DocumentService(db=db, settings=settings, embedder=embedder, queue=queue)
+    return GitHubIndexService(db=db, settings=settings, document_service=document_service)
+
+
 def get_web_search_service(db: DbDep, settings: SettingsDep, embedder: EmbedderDep) -> WebSearchService:
     return WebSearchService(db=db, settings=settings, embedder=embedder)
 
@@ -183,6 +195,7 @@ DocumentServiceDep = Annotated[DocumentService, Depends(get_document_service)]
 ConfluenceSyncDep = Annotated[ConfluenceSyncService, Depends(get_confluence_sync_service)]
 JiraSyncDep = Annotated[JiraSyncService, Depends(get_jira_sync_service)]
 SlackConnectorDep = Annotated[SlackConnectorService, Depends(get_slack_connector_service)]
+GitHubIndexDep = Annotated[GitHubIndexService, Depends(get_github_index_service)]
 WebSearchDep = Annotated[WebSearchService, Depends(get_web_search_service)]
 DiscoverDep = Annotated[DiscoverService, Depends(get_discover_service)]
 RetrievalDep = Annotated[RetrievalPipeline, Depends(get_retrieval_pipeline)]

@@ -1,6 +1,12 @@
 from database.base import Base
 from models.chat import Citation, Conversation, Feedback, Message
-from models.connector import ConnectorState, SlackChannelMapping, SlackEventReceipt
+from models.connector import (
+    ConnectorState,
+    GitHubFileState,
+    GitHubRepositoryMapping,
+    SlackChannelMapping,
+    SlackEventReceipt,
+)
 from models.knowledge import (
     AccessScope,
     Chunk,
@@ -27,6 +33,8 @@ __all__ = [
     "DocumentStatus",
     "DocumentVersion",
     "Feedback",
+    "GitHubFileState",
+    "GitHubRepositoryMapping",
     "KnowledgeBase",
     "Message",
     "Organization",

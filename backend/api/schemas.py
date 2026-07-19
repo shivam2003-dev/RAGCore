@@ -320,6 +320,98 @@ class SlackSyncOut(BaseModel):
     failed: int
 
 
+# --- GitHub ---
+class GitHubRepositoryConfigIn(BaseModel):
+    owner: str = Field(min_length=1, max_length=255)
+    repository: str = Field(min_length=1, max_length=255)
+    branch: str = Field(default="main", min_length=1, max_length=255)
+    project_id: uuid.UUID
+    path_allowlist: list[str] = Field(default_factory=list, max_length=200)
+    path_denylist: list[str] = Field(default_factory=list, max_length=200)
+
+
+class GitHubRepositoryOut(BaseModel):
+    id: uuid.UUID
+    owner: str
+    repository: str
+    branch: str
+    project_id: uuid.UUID
+    knowledge_base_id: uuid.UUID
+    path_allowlist: list[str]
+    path_denylist: list[str]
+    is_enabled: bool
+    status: str
+    head_commit_sha: str | None
+    head_tree_sha: str | None
+    last_indexed_at: datetime | None
+    last_error_at: datetime | None
+    error_detail: str | None
+
+
+class GitHubStatusOut(BaseModel):
+    configured: bool
+    credentials_configured: bool
+    read_only: bool = True
+    preferred_auth: str
+    status: str
+    repositories: list[GitHubRepositoryOut]
+    last_success_at: datetime | None
+    last_error_at: datetime | None
+    lag_seconds: int | None
+    failure_count: int
+    error_detail: str | None
+
+
+class GitHubSyncOut(BaseModel):
+    created: int
+    updated: int
+    renamed: int
+    deleted: int
+    skipped: int
+    denied: int
+    oversized: int
+    binary: int
+    commit_sha: str
+    tree_sha: str
+
+
+class GitHubPullRequestOut(BaseModel):
+    number: int
+    title: str
+    body: str
+    state: str
+    author: str
+    url: str
+    base_branch: str
+    head_branch: str
+    created_at: str
+    updated_at: str
+    merged_at: str | None
+    draft: bool
+    labels: list[str]
+
+
+class ExactCodeSearchIn(BaseModel):
+    query: str = Field(min_length=2, max_length=256)
+    project_id: uuid.UUID | None = None
+    limit: int = Field(default=20, ge=1, le=100)
+
+
+class ExactCodeHitOut(BaseModel):
+    chunk_id: uuid.UUID
+    document_id: uuid.UUID
+    path: str
+    symbol: str | None
+    language: str
+    commit_sha: str
+    url: str
+    snippet: str
+
+
+class ExactCodeSearchOut(BaseModel):
+    hits: list[ExactCodeHitOut]
+
+
 class JiraSyncResponse(BaseModel):
     knowledge_base_id: uuid.UUID
     knowledge_base_name: str

@@ -157,6 +157,24 @@ class Settings(BaseSettings):
     slack_burst_reaction_threshold: int = 2
     slack_summary_max_chars: int = 1800
 
+    # GitHub read-only repository indexing. Production should prefer a GitHub
+    # App installation token; a fine-grained read-only token is supported for
+    # local verification and is never persisted in connector state.
+    github_token: str = ""
+    github_api_base_url: str = "https://api.github.com"
+    github_api_version: str = "2026-03-10"
+    github_default_branch: str = "main"
+    github_request_timeout_seconds: float = 20.0
+    github_api_max_retries: int = 3
+    github_max_files_per_sync: int = 2000
+    github_max_blob_bytes: int = 1_000_000
+    github_recent_pr_limit: int = 20
+    github_default_path_denylist: str = (
+        ".git/**,node_modules/**,.next/**,dist/**,build/**,coverage/**,vendor/**,"
+        "**/*.min.js,**/*.map,**/generated/**,**/.env*,**/*secret*,**/*credential*,"
+        "**/*.pem,**/*.key,**/*.p12,**/id_rsa*"
+    )
+
     # Optional web search for Ask. Disabled by default so the app never fabricates
     # internet results when no real provider is configured.
     web_search_provider: str = "disabled"  # disabled | duckduckgo | brave | tavily | searxng | fake

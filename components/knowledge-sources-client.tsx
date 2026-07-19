@@ -2,9 +2,9 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Cloud, Clock, Database, FileText, Loader2, MessageSquare, Plus, RefreshCw, ShieldCheck, SquareKanban } from "lucide-react";
+import { Cloud, Clock, Database, FileText, GitBranch, Loader2, MessageSquare, Plus, RefreshCw, ShieldCheck, SquareKanban } from "lucide-react";
 import { Badge, Card, CardLink, GhostButton, PageHeader, PrimaryButton } from "@/components/ui";
-import { kimbalApi, type ConfluenceStatus, type JiraStatus, type KnowledgeBase, type SlackStatus } from "@/lib/kimbal-api";
+import { kimbalApi, type ConfluenceStatus, type GitHubStatus, type JiraStatus, type KnowledgeBase, type SlackStatus } from "@/lib/kimbal-api";
 
 type SourceRow = {
   kb: KnowledgeBase;
@@ -18,21 +18,24 @@ export function KnowledgeSourcesClient() {
   const [confluence, setConfluence] = useState<ConfluenceStatus | null>(null);
   const [jira, setJira] = useState<JiraStatus | null>(null);
   const [slack, setSlack] = useState<SlackStatus | null>(null);
+  const [github, setGithub] = useState<GitHubStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [syncingConfluence, setSyncingConfluence] = useState(false);
   const [syncingJira, setSyncingJira] = useState(false);
   const [syncingSlack, setSyncingSlack] = useState(false);
+  const [syncingGithubId, setSyncingGithubId] = useState<string | null>(null);
   const [status, setStatus] = useState("Loading live sources");
 
   async function refresh() {
     setLoading(true);
     try {
       await kimbalApi.ensureSession();
-      const [kbs, confluenceStatus, jiraStatus, slackStatus] = await Promise.all([
+      const [kbs, confluenceStatus, jiraStatus, slackStatus, githubStatus] = await Promise.all([
         kimbalApi.listKnowledgeBases(),
         kimbalApi.confluenceStatus().catch(() => null),
         kimbalApi.jiraStatus().catch(() => null),
         kimbalApi.slackStatus().catch(() => null),
+        kimbalApi.githubStatus().catch(() => null),
       ]);
       const rows = await Promise.all(
         kbs.map(async (kb) => {
@@ -45,6 +48,7 @@ export function KnowledgeSourcesClient() {
       setConfluence(confluenceStatus);
       setJira(jiraStatus);
       setSlack(slackStatus);
+      setGithub(githubStatus);
       setStatus(`${visibleRows.length} knowledge bases loaded`);
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "Failed to load sources");
@@ -101,6 +105,23 @@ export function KnowledgeSourcesClient() {
       setStatus(error instanceof Error ? error.message : "Slack sync failed");
     } finally {
       setSyncingSlack(false);
+    }
+  }
+
+  async function syncGithub(mappingId: string) {
+    setSyncingGithubId(mappingId);
+    setStatus("Indexing changed GitHub files");
+    try {
+      await kimbalApi.ensureSession();
+      const result = await kimbalApi.syncGithubRepository(mappingId);
+      setStatus(
+        `GitHub sync: ${result.created} created, ${result.updated} updated, ${result.renamed} renamed, ${result.deleted} deleted, ${result.skipped} unchanged`
+      );
+      await refresh();
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "GitHub sync failed");
+    } finally {
+      setSyncingGithubId(null);
     }
   }
 
@@ -187,6 +208,62 @@ export function KnowledgeSourcesClient() {
             Sync
           </PrimaryButton>
         </div>
+      </Card>
+
+      <Card className="mb-5 p-5 animate-rise-1">
+        <div className="flex items-start gap-3">
+          <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-[13px] border border-line bg-white text-ink-900 shadow-[var(--shadow-card)]">
+            <GitBranch size={21} />
+          </span>
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <p className="text-[15px] font-bold text-ink-900">GitHub Code</p>
+              <Badge tone={github?.configured ? "green" : "amber"}>
+                {github?.configured ? "Configured" : "Needs config"}
+              </Badge>
+              <Badge tone="blue">Read only</Badge>
+            </div>
+            <p className="mt-1 text-[12.5px] text-ink-500">
+              {github?.repositories.length
+                ? `${github.repositories.length} repository branch${github.repositories.length === 1 ? "" : "es"} mapped to projects.`
+                : "Configure a GitHub App or fine-grained read-only token and a repository/branch/path allowlist."}
+            </p>
+          </div>
+          <span className="inline-flex items-center gap-1.5 rounded-full bg-canvas px-3 py-1.5 text-[12px] font-semibold text-ink-600">
+            <ShieldCheck size={13} className="text-emerald-500" />
+            Contents read only
+          </span>
+        </div>
+        {github?.repositories.length ? (
+          <div className="mt-4 divide-y divide-line rounded-[12px] border border-line">
+            {github.repositories.map((repository) => (
+              <div key={repository.id} className="flex items-center gap-4 px-4 py-3 text-[12.5px]">
+                <div className="min-w-0 flex-1">
+                  <p className="font-semibold text-ink-900">
+                    {repository.owner}/{repository.repository} · {repository.branch}
+                  </p>
+                  <p className="truncate text-ink-500">
+                    {repository.error_detail
+                      ? `Error: ${repository.error_detail}`
+                      : repository.head_commit_sha
+                        ? `Last commit ${repository.head_commit_sha.slice(0, 12)} · indexed ${repository.last_indexed_at ? new Date(repository.last_indexed_at).toLocaleString() : "pending"}`
+                        : "Not indexed yet"}
+                  </p>
+                </div>
+                <Badge tone={repository.status === "connected" ? "green" : repository.status === "failed" ? "red" : "amber"}>
+                  {repository.status}
+                </Badge>
+                <GhostButton
+                  onClick={() => void syncGithub(repository.id)}
+                  disabled={!github.credentials_configured || syncingGithubId !== null}
+                >
+                  {syncingGithubId === repository.id ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
+                  Index changes
+                </GhostButton>
+              </div>
+            ))}
+          </div>
+        ) : null}
       </Card>
 
       <Card className="mb-5 flex items-center justify-between gap-4 p-5 animate-rise-1">

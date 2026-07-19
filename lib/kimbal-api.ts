@@ -254,6 +254,78 @@ export type SlackSyncResponse = {
   failed: number;
 };
 
+export type GitHubRepository = {
+  id: string;
+  owner: string;
+  repository: string;
+  branch: string;
+  project_id: string;
+  knowledge_base_id: string;
+  path_allowlist: string[];
+  path_denylist: string[];
+  is_enabled: boolean;
+  status: string;
+  head_commit_sha: string | null;
+  head_tree_sha: string | null;
+  last_indexed_at: string | null;
+  last_error_at: string | null;
+  error_detail: string | null;
+};
+
+export type GitHubStatus = {
+  configured: boolean;
+  credentials_configured: boolean;
+  read_only: boolean;
+  preferred_auth: "github_app";
+  status: string;
+  repositories: GitHubRepository[];
+  last_success_at: string | null;
+  last_error_at: string | null;
+  lag_seconds: number | null;
+  failure_count: number;
+  error_detail: string | null;
+};
+
+export type GitHubSyncResponse = {
+  created: number;
+  updated: number;
+  renamed: number;
+  deleted: number;
+  skipped: number;
+  denied: number;
+  oversized: number;
+  binary: number;
+  commit_sha: string;
+  tree_sha: string;
+};
+
+export type GitHubPullRequest = {
+  number: number;
+  title: string;
+  body: string;
+  state: string;
+  author: string;
+  url: string;
+  base_branch: string;
+  head_branch: string;
+  created_at: string;
+  updated_at: string;
+  merged_at: string | null;
+  draft: boolean;
+  labels: string[];
+};
+
+export type ExactCodeHit = {
+  chunk_id: string;
+  document_id: string;
+  path: string;
+  symbol: string | null;
+  language: string;
+  commit_sha: string;
+  url: string;
+  snippet: string;
+};
+
 export type SourceMetric = {
   knowledge_base_id: string | null;
   name: string;
@@ -1173,6 +1245,48 @@ export class CVUMApi {
     });
     this.clearLiveCache();
     return result;
+  }
+
+  async githubStatus() {
+    return this.cached("githubStatus", LIVE_CACHE_MS, () => this.request<GitHubStatus>("/github/status"));
+  }
+
+  async configureGithubRepository(input: {
+    owner: string;
+    repository: string;
+    branch: string;
+    project_id: string;
+    path_allowlist?: string[];
+    path_denylist?: string[];
+  }) {
+    const result = await this.request<GitHubRepository>("/github/repositories", {
+      method: "POST",
+      body: input,
+    });
+    this.clearLiveCache();
+    return result;
+  }
+
+  async syncGithubRepository(mappingId: string) {
+    const result = await this.request<GitHubSyncResponse>(
+      `/github/repositories/${encodeURIComponent(mappingId)}/sync`,
+      { method: "POST" }
+    );
+    this.clearLiveCache();
+    return result;
+  }
+
+  async githubRecentPullRequests(mappingId: string) {
+    return this.request<GitHubPullRequest[]>(
+      `/github/repositories/${encodeURIComponent(mappingId)}/recent-prs`
+    );
+  }
+
+  async exactCodeSearch(query: string, projectId?: string, limit = 20) {
+    return this.request<{ hits: ExactCodeHit[] }>("/github/code-search", {
+      method: "POST",
+      body: { query, project_id: projectId ?? null, limit },
+    });
   }
 
   async metricsOverview() {

@@ -41,6 +41,11 @@ question, summary, resolution, systems, code/config references, participants, pe
 selected high-signal message bursts, and raw thread text. Embedding input includes the normalized
 thread context; raw text remains available to Postgres full-text retrieval.
 
+GitHub stores one versioned document per allowed repository path. Unchanged blob SHAs are neither
+downloaded nor re-embedded. Code chunks preserve repository, branch, path, language, symbol,
+CODEOWNERS, contributors, blob/commit SHAs, and a commit-pinned citation URL. Exact code search is a
+parameterized literal database query; semantic code search uses the normal authorized hybrid path.
+
 ## Retrieval
 
 The retrieval pipeline is in `backend/retrieval/pipeline.py`.

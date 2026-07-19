@@ -1,6 +1,6 @@
 "use client";
 
-import { Bot, Cloud, FileUp, Search, SquareKanban, TerminalSquare, Webhook } from "lucide-react";
+import { Bot, Cloud, FileUp, GitBranch, Search, SquareKanban, TerminalSquare, Webhook } from "lucide-react";
 import { Badge, Card, PageHeader } from "@/components/ui";
 import { useLiveMetrics } from "@/components/use-live-metrics";
 
@@ -10,7 +10,7 @@ const planned = [
 ];
 
 export function IntegrationsClient() {
-  const { confluence, jira, slack, metrics } = useLiveMetrics();
+  const { confluence, jira, slack, github, metrics } = useLiveMetrics();
   const live = [
     {
       name: "Confluence",
@@ -38,6 +38,15 @@ export function IntegrationsClient() {
       icon: Bot,
       tone: slack?.configured ? "green" as const : "amber" as const,
       status: slack?.configured ? "Configured" : "Needs config",
+    },
+    {
+      name: "GitHub",
+      desc: github?.repositories.length
+        ? `${github.repositories.length} read-only repository branch${github.repositories.length === 1 ? "" : "es"} mapped to projects.`
+        : "Read-only incremental code indexing is available after a repository allowlist is configured.",
+      icon: GitBranch,
+      tone: github?.configured ? "green" as const : "amber" as const,
+      status: github?.configured ? "Configured" : "Needs config",
     },
     {
       name: "CVUM API",

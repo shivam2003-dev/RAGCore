@@ -15,6 +15,7 @@ from api.routes import (
     discover,
     documents,
     evals,
+    github,
     health,
     jira,
     knowledge_bases,
@@ -106,6 +107,7 @@ def create_app() -> FastAPI:
     app.include_router(discover.router, prefix=api)
     app.include_router(evals.router, prefix=api)
     app.include_router(jira.router, prefix=api)
+    app.include_router(github.router, prefix=api)
     app.include_router(slack.router, prefix=api)
     app.include_router(product_metrics.router, prefix=api)
     app.include_router(web_search.router, prefix=api)

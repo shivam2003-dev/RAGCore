@@ -7,7 +7,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.ids import uuid7
 from database.base import utcnow
-from models import ConnectorState, SlackChannelMapping, SlackEventReceipt
+from models import (
+    ConnectorState,
+    GitHubFileState,
+    GitHubRepositoryMapping,
+    SlackChannelMapping,
+    SlackEventReceipt,
+)
 
 
 class ConnectorRepository:
@@ -160,3 +166,53 @@ class ConnectorRepository:
         state.last_error_at = utcnow()
         state.failure_count += 1
         state.error_detail = error[:1000]
+
+    async def list_github_mappings(self, organization_id: uuid.UUID) -> list[GitHubRepositoryMapping]:
+        rows = await self.db.scalars(
+            select(GitHubRepositoryMapping)
+            .where(GitHubRepositoryMapping.organization_id == organization_id)
+            .order_by(
+                GitHubRepositoryMapping.owner,
+                GitHubRepositoryMapping.repository,
+                GitHubRepositoryMapping.branch,
+            )
+        )
+        return list(rows)
+
+    async def get_github_mapping(
+        self,
+        *,
+        mapping_id: uuid.UUID,
+        organization_id: uuid.UUID,
+    ) -> GitHubRepositoryMapping | None:
+        return await self.db.scalar(
+            select(GitHubRepositoryMapping).where(
+                GitHubRepositoryMapping.id == mapping_id,
+                GitHubRepositoryMapping.organization_id == organization_id,
+            )
+        )
+
+    async def get_github_mapping_by_repo(
+        self,
+        *,
+        organization_id: uuid.UUID,
+        owner: str,
+        repository: str,
+        branch: str,
+    ) -> GitHubRepositoryMapping | None:
+        return await self.db.scalar(
+            select(GitHubRepositoryMapping).where(
+                GitHubRepositoryMapping.organization_id == organization_id,
+                GitHubRepositoryMapping.owner == owner,
+                GitHubRepositoryMapping.repository == repository,
+                GitHubRepositoryMapping.branch == branch,
+            )
+        )
+
+    async def github_file_states(self, mapping_id: uuid.UUID) -> list[GitHubFileState]:
+        rows = await self.db.scalars(
+            select(GitHubFileState)
+            .where(GitHubFileState.repository_mapping_id == mapping_id)
+            .order_by(GitHubFileState.path)
+        )
+        return list(rows)
