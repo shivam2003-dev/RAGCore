@@ -194,6 +194,18 @@ async def test_github_incremental_indexing_code_search_prs_and_acl(client, auth_
         expires_at=utcnow() + timedelta(minutes=30),
     )
     await db.commit()
+    lease_mapping = await connector_repository.get_github_mapping(
+        mapping_id=uuid.UUID(mapping["id"]),
+        organization_id=organization_id,
+    )
+    assert lease_mapping is not None
+    original_title = indexed_document.title
+    indexed_document.title = "pending title must not be committed by lease heartbeat"
+    await service._renew_sync_lease(lease_mapping, first_lease_id)
+    await db.rollback()
+    await db.refresh(indexed_document)
+    await db.refresh(user)
+    assert indexed_document.title == original_title
     assert not await connector_repository.acquire_github_sync(
         mapping_id=uuid.UUID(mapping["id"]),
         organization_id=organization_id,
