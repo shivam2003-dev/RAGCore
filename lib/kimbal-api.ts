@@ -110,6 +110,112 @@ export type SearchResponse = {
   timings_ms: Record<string, number>;
 };
 
+export type EvidenceItem = {
+  source_type: string;
+  source_id: string;
+  source_url: string | null;
+  project_id: string;
+  title: string;
+  content: string;
+  snippet: string;
+  retrieval_arms: string[];
+  rank: number;
+  score: number;
+  freshness: string | null;
+  metadata: Record<string, unknown>;
+  citation_identity: string;
+  chunk_id: string | null;
+  document_id: string | null;
+};
+
+export type IncidentCopilot = {
+  issue_key: string;
+  project_id: string;
+  current_status: string;
+  owner: string;
+  facts: string[];
+  timeline: Array<{
+    occurred_at: string;
+    label: string;
+    detail: string;
+    source_type: string;
+    source_url: string | null;
+    citation_identity: string;
+  }>;
+  immediate_checks: string[];
+  likely_next_actions: string[];
+  missing_evidence: string[];
+  evidence: EvidenceItem[];
+  partial: boolean;
+  tool_failures: string[];
+};
+
+export type ExpertResponse = {
+  project_id: string;
+  query: string;
+  experts: Array<{
+    rank: number;
+    person: string;
+    score: number;
+    explanation: string;
+    signals: Array<Record<string, unknown>>;
+    source_ids: string[];
+    citation_identity: string;
+    source_url: string | null;
+  }>;
+  empty_reason: string | null;
+};
+
+export type ChangeResponse = {
+  project_id: string;
+  start_date: string;
+  end_date: string;
+  changes: Array<{
+    changed_at: string;
+    change_type: string;
+    source_type: string;
+    source_id: string;
+    title: string;
+    source_url: string | null;
+    summary: string;
+    citation_identity: string;
+    document_id: string;
+  }>;
+  deduplicated_count: number;
+  source_counts: Record<string, number>;
+};
+
+export type FreshnessResponse = {
+  project_id: string;
+  generated_at: string;
+  score: number;
+  stale_sources: number;
+  failing_sources: number;
+  outdated_slack_resolutions: number;
+  repository_branch_lag: number;
+  replaced_documents: number;
+  total_findings: number;
+  issues: Array<{
+    kind: string;
+    severity: string;
+    source_type: string;
+    source_id: string;
+    title: string;
+    age_days: number | null;
+    source_url: string | null;
+    suggested_remediation: string;
+  }>;
+  connectors: Array<{
+    kind: string;
+    status: string;
+    last_success_at: string | null;
+    lag_seconds: number | null;
+    failure_count: number;
+    detail: string | null;
+  }>;
+  suggestions: string[];
+};
+
 export type Conversation = {
   id: string;
   knowledge_base_id: string;
@@ -1026,6 +1132,33 @@ export class CVUMApi {
 
   async listProjects() {
     return this.request<Project[]>("/projects");
+  }
+
+  async incidentCopilot(projectId: string, issueKey: string) {
+    return this.request<IncidentCopilot>("/workflows/incident", {
+      method: "POST",
+      body: { project_id: projectId, issue_key: issueKey },
+    });
+  }
+
+  async findExperts(projectId: string, query: string, limit = 8) {
+    return this.request<ExpertResponse>("/workflows/experts", {
+      method: "POST",
+      body: { project_id: projectId, query, limit },
+    });
+  }
+
+  async whatChanged(projectId: string, startDate: string, endDate: string, limit = 100) {
+    return this.request<ChangeResponse>("/workflows/changes", {
+      method: "POST",
+      body: { project_id: projectId, start_date: startDate, end_date: endDate, limit },
+    });
+  }
+
+  async freshness(projectId: string) {
+    return this.request<FreshnessResponse>(
+      `/workflows/freshness?project_id=${encodeURIComponent(projectId)}`
+    );
   }
 
   async createProject(input: { name: string; slug?: string; description?: string }) {

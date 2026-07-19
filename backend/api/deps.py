@@ -34,6 +34,7 @@ from services.evidence_runtime import independent_evidence_tool_context
 from services.evidence_tools import EvidenceToolService
 from services.github_index import GitHubIndexService
 from services.jira_service import JiraSyncService
+from services.knowledge_workflows import KnowledgeWorkflowService
 from services.slack_service import SlackConnectorService
 from services.web_search_service import WebSearchService
 
@@ -234,6 +235,20 @@ def get_chat_service(
     )
 
 
+def get_knowledge_workflow_service(
+    db: DbDep,
+    settings: SettingsDep,
+    orchestrator: Annotated[EvidenceOrchestrator, Depends(get_evidence_orchestrator)],
+    tools: Annotated[EvidenceToolService, Depends(get_evidence_tool_service)],
+) -> KnowledgeWorkflowService:
+    return KnowledgeWorkflowService(
+        db=db,
+        settings=settings,
+        orchestrator=orchestrator,
+        tools=tools,
+    )
+
+
 AuthServiceDep = Annotated[AuthService, Depends(get_auth_service)]
 DocumentServiceDep = Annotated[DocumentService, Depends(get_document_service)]
 ConfluenceSyncDep = Annotated[ConfluenceSyncService, Depends(get_confluence_sync_service)]
@@ -246,3 +261,4 @@ RetrievalDep = Annotated[RetrievalPipeline, Depends(get_retrieval_pipeline)]
 EvidenceToolDep = Annotated[EvidenceToolService, Depends(get_evidence_tool_service)]
 EvidenceOrchestratorDep = Annotated[EvidenceOrchestrator, Depends(get_evidence_orchestrator)]
 ChatServiceDep = Annotated[ChatService, Depends(get_chat_service)]
+KnowledgeWorkflowDep = Annotated[KnowledgeWorkflowService, Depends(get_knowledge_workflow_service)]

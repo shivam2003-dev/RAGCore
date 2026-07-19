@@ -1,5 +1,6 @@
 """Read-only evidence primitives with project and source ACL enforcement."""
 
+import re
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -10,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.config import Settings
 from core.exceptions import AuthenticationError
-from models import Document, User
+from models import Chunk, Document, User
 from repositories.code_search import CodeSearchRepository
 from repositories.connectors import ConnectorRepository
 from repositories.projects import ProjectAuthorizationRepository
@@ -38,8 +39,9 @@ _SOURCE_FAMILIES: dict[EvidenceToolName, set[str]] = {
 
 @dataclass(slots=True)
 class _ExpertCandidate:
-    count: int
+    score: float
     sources: list[str]
+    signals: list[dict[str, object]]
     source: Evidence
 
 
@@ -92,6 +94,51 @@ class EvidenceToolService:
         if user is None or not user.is_active or user.organization_id != principal.organization_id:
             raise AuthenticationError("Evidence principal is inactive or unavailable")
         return await self.invoke(tool=selection.tool, request=request, user=user)
+
+    async def evidence_for_documents(
+        self,
+        *,
+        document_ids: list[uuid.UUID],
+        project_id: uuid.UUID,
+        user: User,
+        limit: int = 100,
+    ) -> list[Evidence]:
+        """Normalize explicitly selected authorized documents into the common contract."""
+
+        scope = await self._authorization.authorized_scope(user=user, project_id=project_id)
+        if not document_ids or not scope.knowledge_base_ids:
+            return []
+        rows = await self._db.execute(
+            select(Chunk, Document)
+            .join(Document, Document.id == Chunk.document_id)
+            .where(
+                Document.id.in_(document_ids),
+                Document.knowledge_base_id.in_(scope.knowledge_base_ids),
+                Document.is_deleted.is_(False),
+                Chunk.is_active.is_(True),
+            )
+            .order_by(Document.updated_at.desc(), Chunk.ordinal)
+            .limit(max(1, min(limit * 8, 800)))
+        )
+        first_by_document: dict[uuid.UUID, RetrievedChunk] = {}
+        for chunk, document in rows:
+            first_by_document.setdefault(
+                document.id,
+                RetrievedChunk(
+                    chunk_id=chunk.id,
+                    document_id=document.id,
+                    document_title=document.title,
+                    content=chunk.content,
+                    metadata={**(document.doc_metadata or {}), **(chunk.chunk_metadata or {})},
+                    score=1.0,
+                    retrieval_arms=["authorized_document_change"],
+                ),
+            )
+        return await self._normalize_chunks(
+            chunks=list(first_by_document.values())[:limit],
+            user=user,
+            project_id=scope.project.id,
+        )
 
     async def _retrieval_evidence(
         self,
@@ -176,7 +223,17 @@ class EvidenceToolService:
                     document_id=hit.document_id,
                 )
             )
-        return evidence
+        if len(evidence) < request.limit:
+            semantic = await self._retrieval_evidence(
+                request=request.model_copy(update={"limit": request.limit - len(evidence)}),
+                user=user,
+                source_families={"github"},
+            )
+            seen = {item.citation_identity for item in evidence}
+            evidence.extend(item for item in semantic if item.citation_identity not in seen)
+        for rank, item in enumerate(evidence[: request.limit], start=1):
+            item.rank = rank
+        return evidence[: request.limit]
 
     async def _recent_prs(self, *, request: EvidenceToolRequest, user: User) -> list[Evidence]:
         scope = await self._authorization.authorized_scope(user=user, project_id=request.project_id)
@@ -245,36 +302,68 @@ class EvidenceToolService:
         return evidence
 
     async def _who_knows(self, *, request: EvidenceToolRequest, user: User) -> list[Evidence]:
-        sources = await self._retrieval_evidence(request=request, user=user)
+        sources = await self._retrieval_evidence(
+            request=request.model_copy(update={"limit": min(50, max(20, request.limit * 4))}),
+            user=user,
+        )
+        issue_keys = {value.upper() for value in re.findall(r"\b[A-Za-z][A-Za-z0-9]{1,9}-\d+\b", request.query)}
+        if issue_keys:
+            exact_sources = [source for source in sources if _evidence_contains_any(source, issue_keys)]
+            if exact_sources:
+                sources = exact_sources
         candidates: dict[str, _ExpertCandidate] = {}
+
+        def add_person(raw: object, *, signal: str, weight: float, source: Evidence) -> None:
+            if isinstance(raw, dict):
+                person = str(raw.get("display_name") or raw.get("name") or raw.get("id") or "").strip()
+            else:
+                person = str(raw or "").strip()
+            if not person:
+                return
+            entry = candidates.setdefault(
+                person,
+                _ExpertCandidate(score=0.0, sources=[], signals=[], source=source),
+            )
+            if sum(item.get("signal") == signal for item in entry.signals) >= 3:
+                return
+            identity = (signal, source.source_id)
+            if any((item.get("signal"), item.get("source_id")) == identity for item in entry.signals):
+                return
+            entry.score += weight
+            if source.source_id not in entry.sources:
+                entry.sources.append(source.source_id)
+            entry.signals.append(
+                {
+                    "signal": signal,
+                    "weight": weight,
+                    "source_id": source.source_id,
+                    "source_type": source.source_type,
+                    "citation_identity": source.citation_identity,
+                }
+            )
+
         for source in sources:
             metadata = source.metadata
-            raw_people: list[object] = []
-            raw_people.extend(_as_list(metadata.get("github_codeowners")))
-            raw_people.extend(_as_list(metadata.get("github_contributors")))
-            raw_people.extend(_as_list(metadata.get("participants")))
-            raw_people.extend(_as_list(metadata.get("jira_assignee")))
-            for raw in raw_people:
-                if isinstance(raw, dict):
-                    person = str(raw.get("display_name") or raw.get("name") or raw.get("id") or "").strip()
-                else:
-                    person = str(raw).strip()
-                if not person:
-                    continue
-                entry = candidates.setdefault(
-                    person,
-                    _ExpertCandidate(count=0, sources=[], source=source),
-                )
-                entry.count += 1
-                if source.source_id not in entry.sources:
-                    entry.sources.append(source.source_id)
-        ranked = sorted(candidates.items(), key=lambda item: (-item[1].count, item[0].casefold()))
+            for raw in _as_list(metadata.get("github_codeowners")):
+                add_person(raw, signal="github_codeowner", weight=4.0, source=source)
+            for raw in _as_list(metadata.get("github_contributors")):
+                add_person(raw, signal="github_contributor", weight=1.0, source=source)
+            for raw in _as_list(metadata.get("participants")):
+                add_person(raw, signal="slack_participant", weight=2.0, source=source)
+            add_person(metadata.get("jira_assignee"), signal="jira_assignee", weight=3.0, source=source)
+            add_person(metadata.get("jira_reporter"), signal="jira_reporter", weight=1.0, source=source)
+            add_person(metadata.get("confluence_author"), signal="confluence_author", weight=2.0, source=source)
+        ranked = sorted(candidates.items(), key=lambda item: (-item[1].score, item[0].casefold()))
         results: list[Evidence] = []
         for rank, (person, detail) in enumerate(ranked[: request.limit], start=1):
             source = detail.source
             source_ids = detail.sources
-            count = detail.count
-            content = f"{person} appears in ownership or participation metadata for {count} authorized source(s)."
+            score = detail.score
+            signal_names = sorted({str(item["signal"]) for item in detail.signals})
+            content = (
+                f"{person} has authorized expertise signals from {len(source_ids)} source(s): "
+                f"{', '.join(signal_names)}."
+            )
             results.append(
                 Evidence(
                     source_type="expert_signal",
@@ -287,9 +376,15 @@ class EvidenceToolService:
                     snippet=content,
                     retrieval_arms=["ownership_metadata"],
                     rank=rank,
-                    score=float(count),
+                    score=score,
                     freshness=source.freshness,
-                    metadata={"person": person, "evidence_count": count, "source_ids": source_ids},
+                    metadata={
+                        "person": person,
+                        "expert_score": score,
+                        "evidence_count": len(source_ids),
+                        "source_ids": source_ids,
+                        "signals": detail.signals,
+                    },
                     citation_identity=f"{source.project_id}:expert:{person.casefold()}",
                     chunk_id=source.chunk_id,
                     document_id=source.document_id,
@@ -401,3 +496,8 @@ def _as_list(value: object) -> list[object]:
     if value is None:
         return []
     return value if isinstance(value, list) else [value]
+
+
+def _evidence_contains_any(evidence: Evidence, values: set[str]) -> bool:
+    searchable = " ".join((evidence.source_id, evidence.title, evidence.snippet, evidence.content)).upper()
+    return any(value in searchable for value in values)

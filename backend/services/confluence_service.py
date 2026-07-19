@@ -39,6 +39,7 @@ class ConfluencePage:
     storage_html: str
     version_number: int | None
     version_created_at: str | None
+    author: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -275,6 +276,7 @@ class ConfluenceClient:
         body = _dict(row.get("body"))
         storage = _dict(body.get("storage"))
         version = _dict(row.get("version"))
+        by = _dict(version.get("by"))
         return ConfluencePage(
             id=_required_str(row, "id"),
             title=_str(row.get("title")) or "Untitled Confluence page",
@@ -282,6 +284,7 @@ class ConfluenceClient:
             storage_html=_str(storage.get("value")) or "",
             version_number=_int(version.get("number")),
             version_created_at=_str(version.get("createdAt")),
+            author=_str(by.get("displayName")) or _str(version.get("authorId")),
         )
 
     def _parse_v1_page(self, row: JsonDict) -> ConfluencePage:
@@ -289,6 +292,7 @@ class ConfluenceClient:
         body = _dict(row.get("body"))
         storage = _dict(body.get("storage"))
         version = _dict(row.get("version"))
+        by = _dict(version.get("by"))
         return ConfluencePage(
             id=_required_str(row, "id"),
             title=_str(row.get("title")) or "Untitled Confluence page",
@@ -296,6 +300,7 @@ class ConfluenceClient:
             storage_html=_str(storage.get("value")) or "",
             version_number=_int(version.get("number")),
             version_created_at=_str(version.get("createdAt")) or _str(version.get("when")),
+            author=_str(by.get("displayName")) or _str(version.get("authorId")),
         )
 
     def _absolute_url(self, link: str) -> str:
@@ -551,7 +556,7 @@ def _page_metadata(*, space: ConfluenceSpace, page: ConfluencePage) -> dict[str,
         "updated_at": updated_at,
         "status": "current",
         "labels": [],
-        "owner": space.name,
+        "owner": page.author or space.name,
         "acl": "connector-visible",
         "connector": "confluence",
         "connector_scope": space.key,
@@ -566,6 +571,7 @@ def _page_metadata(*, space: ConfluenceSpace, page: ConfluencePage) -> dict[str,
         "confluence_page_title": page.title,
         "confluence_version": page.version_number,
         "confluence_version_created_at": page.version_created_at,
+        "confluence_author": page.author,
         "source_sha256": hashlib.sha256(rendered).hexdigest(),
     }
     return normalize_source_metadata(
@@ -578,7 +584,7 @@ def _page_metadata(*, space: ConfluenceSpace, page: ConfluencePage) -> dict[str,
         source_version=page.version_number,
         updated_at=updated_at,
         status="current",
-        owner=space.name,
+        owner=page.author or space.name,
         acl="connector-visible",
         connector="confluence",
         connector_scope=space.key,

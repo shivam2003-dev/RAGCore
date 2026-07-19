@@ -22,6 +22,7 @@ import {
   LogOut,
   PanelLeftClose,
   PanelLeftOpen,
+  AlertTriangle,
   X,
   type LucideIcon,
 } from "lucide-react";
@@ -41,6 +42,7 @@ const groups: Array<{ label?: string; items: Item[] }> = [
     label: "Knowledge",
     items: [
       { label: "Ask CVUM (RAG)", href: "/", icon: MessageSquare },
+      { label: "Incident Copilot", href: "/incident-copilot", icon: AlertTriangle },
       { label: "Knowledge Sources", href: "/knowledge-sources", icon: Database },
       { label: "Documents", href: "/documents", icon: FileText },
       { label: "Saved Answers", href: "/saved-answers", icon: BookmarkCheck },
@@ -90,7 +92,8 @@ export function Sidebar({ user, onLogout }: { user: UserOut; onLogout: () => voi
     : [{
         items: [
           { label: "Ask CVUM", href: "/", icon: MessageSquare },
-          ...(user.role === "editor" ? [{ label: "Projects", href: "/projects", icon: FolderKanban }] : []),
+          { label: "Incident Copilot", href: "/incident-copilot", icon: AlertTriangle },
+          { label: "Projects", href: "/projects", icon: FolderKanban },
         ],
       }];
 

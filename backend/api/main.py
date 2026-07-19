@@ -24,6 +24,7 @@ from api.routes import (
     slack,
     tools,
     web_search,
+    workflows,
 )
 from api.routes import (
     metrics as product_metrics,
@@ -111,6 +112,7 @@ def create_app() -> FastAPI:
     app.include_router(github.router, prefix=api)
     app.include_router(slack.router, prefix=api)
     app.include_router(tools.router, prefix=api)
+    app.include_router(workflows.router, prefix=api)
     app.include_router(product_metrics.router, prefix=api)
     app.include_router(web_search.router, prefix=api)
     app.include_router(search.router, prefix=api)

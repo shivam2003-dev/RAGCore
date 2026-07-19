@@ -38,6 +38,7 @@ export function ProjectsClient() {
   const [saving, setSaving] = useState(false);
 
   const selectedProject = projects.find((project) => project.id === selectedId) ?? null;
+  const defaultProject = projects.find((project) => project.id === user?.default_project_id) ?? null;
   const canManage = Boolean(
     user && selectedProject && (
       user.role === "admin" ||
@@ -243,6 +244,22 @@ export function ProjectsClient() {
       <p role="status" className="mb-5 rounded-[12px] border border-line bg-white px-4 py-3 text-[12.5px] text-ink-600">
         {status}
       </p>
+
+      <Card className="mb-5 p-4">
+        <div className="grid gap-3 sm:grid-cols-3">
+          {[
+            ["1. Choose", selectedProject?.name ?? "Select a project", "This lens controls relevance for Ask and workflows."],
+            ["2. Default", defaultProject?.name ?? "Not selected", "Your default opens automatically on desktop and mobile."],
+            ["3. Verify", `${selectedProject?.authorized_source_ids.length ?? 0} authorized sources`, "Restricted sources still require an explicit grant."],
+          ].map(([step, value, detail]) => (
+            <div key={step} className="rounded-[11px] bg-canvas px-3 py-3">
+              <p className="text-[10.5px] font-bold uppercase tracking-[0.08em] text-brand-500">{step}</p>
+              <p className="mt-1 truncate text-[13px] font-semibold text-ink-900">{value}</p>
+              <p className="mt-1 text-[11px] leading-4 text-ink-500">{detail}</p>
+            </div>
+          ))}
+        </div>
+      </Card>
 
       <div className="grid gap-5 lg:grid-cols-[300px_minmax(0,1fr)]">
         <div className="space-y-5">
