@@ -93,19 +93,18 @@ async def metrics_overview(user: CurrentUser, db: DbDep) -> MetricsOverviewOut:
     sources = await _source_metrics(db, org_id)
     connector_runs = await _connector_runs(db, org_id)
     runs_by_kb = {str(run.knowledge_base_id): run for run in connector_runs if run.knowledge_base_id}
-    sources = [
-        source.model_copy(
-            update={
-                "last_run_at": runs_by_kb.get(str(source.knowledge_base_id)).created_at
-                if source.knowledge_base_id and runs_by_kb.get(str(source.knowledge_base_id))
-                else None,
-                "last_run_detail": runs_by_kb.get(str(source.knowledge_base_id)).detail
-                if source.knowledge_base_id and runs_by_kb.get(str(source.knowledge_base_id))
-                else None,
-            }
+    sources_with_runs: list[SourceMetricOut] = []
+    for source in sources:
+        run = runs_by_kb.get(str(source.knowledge_base_id)) if source.knowledge_base_id else None
+        sources_with_runs.append(
+            source.model_copy(
+                update={
+                    "last_run_at": run.created_at if run else None,
+                    "last_run_detail": run.detail if run else None,
+                }
+            )
         )
-        for source in sources
-    ]
+    sources = sources_with_runs
     recent_activity = await _recent_activity(db, org_id)
     top_questions = await _top_questions(db, org_id)
 
@@ -135,7 +134,11 @@ async def metrics_overview(user: CurrentUser, db: DbDep) -> MetricsOverviewOut:
 
 
 async def _source_metrics(db: AsyncSession, org_id: uuid.UUID) -> list[SourceMetricOut]:
-    source_expr = func.coalesce(Document.doc_metadata["source_type"].as_string(), Document.doc_metadata["source"].as_string(), Document.source_type)
+    source_expr = func.coalesce(
+        Document.doc_metadata["source_type"].as_string(),
+        Document.doc_metadata["source"].as_string(),
+        Document.source_type,
+    )
     scope_expr = func.coalesce(
         Document.doc_metadata["connector_scope"].as_string(),
         Document.doc_metadata["source_space"].as_string(),
@@ -187,7 +190,13 @@ async def _source_metrics(db: AsyncSession, org_id: uuid.UUID) -> list[SourceMet
                 source_type=source_type,
                 source_scope=source_scope,
                 connector=connector,
-                health=_source_health(documents=documents, ready=ready, uploaded=uploaded, processing=processing, failed=failed),
+                health=_source_health(
+                    documents=documents,
+                    ready=ready,
+                    uploaded=uploaded,
+                    processing=processing,
+                    failed=failed,
+                ),
                 documents=documents,
                 ready_documents=ready,
                 pending_documents=max(0, uploaded + processing),

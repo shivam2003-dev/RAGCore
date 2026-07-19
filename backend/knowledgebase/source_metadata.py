@@ -91,8 +91,14 @@ def normalize_source_metadata(
     normalized_labels = _labels(labels if labels is not None else result.get("labels"))
     normalized_owner = _clean(owner or _str(result.get("owner")) or _str(result.get("assignee")))
     normalized_connector = _clean(connector or _str(result.get("connector")) or inferred_type).lower()
-    normalized_scope = _clean(connector_scope or inferred_space or ("uploads" if inferred_type == "upload" else "global"))
-    normalized_acl = _clean(acl or _str(result.get("acl")) or ("user-upload" if inferred_type == "upload" else "connector-visible"))
+    normalized_scope = _clean(
+        connector_scope or inferred_space or ("uploads" if inferred_type == "upload" else "global")
+    )
+    normalized_acl = _clean(
+        acl
+        or _str(result.get("acl"))
+        or ("user-upload" if inferred_type == "upload" else "connector-visible")
+    )
     normalized_status = _clean(
         status
         or _str(result.get("status"))
@@ -138,9 +144,10 @@ def normalize_source_metadata(
         }
     )
 
+    version_identity = inferred_version or result.get("source_sha256") or "v1"
     result["connector_sync_id"] = _clean(
         _str(result.get("connector_sync_id"))
-        or f"{normalized_connector}:{normalized_scope}:{inferred_id}:{inferred_version or result.get('source_sha256') or 'v1'}"
+        or f"{normalized_connector}:{normalized_scope}:{inferred_id}:{version_identity}"
     )
     result["source_inventory_key"] = f"{inferred_type}:{normalized_scope}:{inferred_id}"
     result["source_freshness_bucket"] = _freshness_bucket(_str(result.get("source_updated_at")))

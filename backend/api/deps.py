@@ -27,7 +27,15 @@ from services.chat_service import ChatService
 from services.confluence_service import ConfluenceSyncService
 from services.discover_service import DiscoverService
 from services.document_service import DocumentService
+from services.evidence_executor import EvidenceExecutor
+from services.evidence_orchestrator import EvidenceOrchestrator
+from services.evidence_planner import EvidencePlanner
+from services.evidence_runtime import independent_evidence_tool_context
+from services.evidence_tools import EvidenceToolService
+from services.github_index import GitHubIndexService
 from services.jira_service import JiraSyncService
+from services.knowledge_workflows import KnowledgeWorkflowService
+from services.slack_service import SlackConnectorService
 from services.web_search_service import WebSearchService
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login", auto_error=False)
@@ -110,25 +118,41 @@ def get_auth_service(db: DbDep, settings: SettingsDep) -> AuthService:
 def get_document_service(
     db: DbDep, settings: SettingsDep, embedder: EmbedderDep, background: BackgroundTasks
 ) -> DocumentService:
-    return DocumentService(
-        db=db, settings=settings, embedder=embedder, queue=BackgroundTasksQueue(background)
-    )
+    return DocumentService(db=db, settings=settings, embedder=embedder, queue=BackgroundTasksQueue(background))
 
 
 def get_confluence_sync_service(
     db: DbDep, settings: SettingsDep, embedder: EmbedderDep, background: BackgroundTasks
 ) -> ConfluenceSyncService:
-    return ConfluenceSyncService(
-        db=db, settings=settings, embedder=embedder, queue=BackgroundTasksQueue(background)
-    )
+    return ConfluenceSyncService(db=db, settings=settings, embedder=embedder, queue=BackgroundTasksQueue(background))
 
 
 def get_jira_sync_service(
     db: DbDep, settings: SettingsDep, embedder: EmbedderDep, background: BackgroundTasks
 ) -> JiraSyncService:
-    return JiraSyncService(
-        db=db, settings=settings, embedder=embedder, queue=BackgroundTasksQueue(background)
-    )
+    return JiraSyncService(db=db, settings=settings, embedder=embedder, queue=BackgroundTasksQueue(background))
+
+
+def get_slack_connector_service(
+    db: DbDep,
+    settings: SettingsDep,
+    embedder: EmbedderDep,
+    background: BackgroundTasks,
+) -> SlackConnectorService:
+    queue = BackgroundTasksQueue(background)
+    document_service = DocumentService(db=db, settings=settings, embedder=embedder, queue=queue)
+    return SlackConnectorService(db=db, settings=settings, document_service=document_service)
+
+
+def get_github_index_service(
+    db: DbDep,
+    settings: SettingsDep,
+    embedder: EmbedderDep,
+    background: BackgroundTasks,
+) -> GitHubIndexService:
+    queue = BackgroundTasksQueue(background)
+    document_service = DocumentService(db=db, settings=settings, embedder=embedder, queue=queue)
+    return GitHubIndexService(db=db, settings=settings, document_service=document_service)
 
 
 def get_web_search_service(db: DbDep, settings: SettingsDep, embedder: EmbedderDep) -> WebSearchService:
@@ -140,11 +164,57 @@ def get_discover_service(db: DbDep, settings: SettingsDep) -> DiscoverService:
 
 
 def get_retrieval_pipeline(
-    db: DbDep, settings: SettingsDep, embedder: EmbedderDep
+    db: DbDep,
+    settings: SettingsDep,
+    embedder: EmbedderDep,
+    llm: LLMDep,
 ) -> RetrievalPipeline:
+    reranker = None
+    if settings.retrieval_model_reranker_enabled:
+        from retrieval.rerankers import ModelReranker
+
+        reranker = ModelReranker(
+            llm=llm,
+            timeout_seconds=settings.retrieval_model_reranker_timeout_seconds,
+            candidate_limit=settings.retrieval_model_reranker_candidate_k,
+        )
     return RetrievalPipeline(
-        search_repo=ChunkSearchRepository(db), embedder=embedder, settings=settings
+        search_repo=ChunkSearchRepository(db),
+        embedder=embedder,
+        settings=settings,
+        reranker=reranker,
     )
+
+
+def get_evidence_tool_service(
+    db: DbDep,
+    settings: SettingsDep,
+    retrieval: Annotated[RetrievalPipeline, Depends(get_retrieval_pipeline)],
+) -> EvidenceToolService:
+    return EvidenceToolService(db=db, retrieval=retrieval, settings=settings)
+
+
+def get_evidence_orchestrator(
+    settings: SettingsDep,
+    embedder: EmbedderDep,
+    llm: LLMDep,
+) -> EvidenceOrchestrator:
+    planner = EvidencePlanner(
+        llm=llm,
+        model_enabled=settings.knowledge_planner_model_enabled,
+        max_tools=settings.knowledge_planner_max_tools,
+    )
+    executor = EvidenceExecutor(
+        tool_context_factory=lambda: independent_evidence_tool_context(
+            settings=settings,
+            embedder=embedder,
+            llm=llm,
+        ),
+        per_tool_timeout_seconds=settings.knowledge_planner_per_tool_timeout_seconds,
+        overall_timeout_seconds=settings.knowledge_planner_overall_timeout_seconds,
+        max_tools=settings.knowledge_planner_max_tools,
+    )
+    return EvidenceOrchestrator(planner=planner, executor=executor)
 
 
 def get_chat_service(
@@ -153,15 +223,42 @@ def get_chat_service(
     llm: LLMDep,
     web_search: Annotated[WebSearchService, Depends(get_web_search_service)],
     retrieval: Annotated[RetrievalPipeline, Depends(get_retrieval_pipeline)],
+    evidence_orchestrator: Annotated[EvidenceOrchestrator, Depends(get_evidence_orchestrator)],
 ) -> ChatService:
-    return ChatService(db=db, retrieval=retrieval, llm=llm, web_search=web_search, settings=settings)
+    return ChatService(
+        db=db,
+        retrieval=retrieval,
+        llm=llm,
+        web_search=web_search,
+        settings=settings,
+        evidence_orchestrator=evidence_orchestrator,
+    )
+
+
+def get_knowledge_workflow_service(
+    db: DbDep,
+    settings: SettingsDep,
+    orchestrator: Annotated[EvidenceOrchestrator, Depends(get_evidence_orchestrator)],
+    tools: Annotated[EvidenceToolService, Depends(get_evidence_tool_service)],
+) -> KnowledgeWorkflowService:
+    return KnowledgeWorkflowService(
+        db=db,
+        settings=settings,
+        orchestrator=orchestrator,
+        tools=tools,
+    )
 
 
 AuthServiceDep = Annotated[AuthService, Depends(get_auth_service)]
 DocumentServiceDep = Annotated[DocumentService, Depends(get_document_service)]
 ConfluenceSyncDep = Annotated[ConfluenceSyncService, Depends(get_confluence_sync_service)]
 JiraSyncDep = Annotated[JiraSyncService, Depends(get_jira_sync_service)]
+SlackConnectorDep = Annotated[SlackConnectorService, Depends(get_slack_connector_service)]
+GitHubIndexDep = Annotated[GitHubIndexService, Depends(get_github_index_service)]
 WebSearchDep = Annotated[WebSearchService, Depends(get_web_search_service)]
 DiscoverDep = Annotated[DiscoverService, Depends(get_discover_service)]
 RetrievalDep = Annotated[RetrievalPipeline, Depends(get_retrieval_pipeline)]
+EvidenceToolDep = Annotated[EvidenceToolService, Depends(get_evidence_tool_service)]
+EvidenceOrchestratorDep = Annotated[EvidenceOrchestrator, Depends(get_evidence_orchestrator)]
 ChatServiceDep = Annotated[ChatService, Depends(get_chat_service)]
+KnowledgeWorkflowDep = Annotated[KnowledgeWorkflowService, Depends(get_knowledge_workflow_service)]

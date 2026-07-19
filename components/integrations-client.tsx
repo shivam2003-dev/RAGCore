@@ -1,17 +1,16 @@
 "use client";
 
-import { Bot, Cloud, FileUp, Search, SquareKanban, TerminalSquare, Webhook } from "lucide-react";
+import { Bot, Cloud, FileUp, GitBranch, Search, SquareKanban, TerminalSquare, Webhook } from "lucide-react";
 import { Badge, Card, PageHeader } from "@/components/ui";
 import { useLiveMetrics } from "@/components/use-live-metrics";
 
 const planned = [
-  { name: "Slack", desc: "No Slack connector is implemented in this build.", icon: Bot },
   { name: "Google Drive", desc: "No Drive connector is implemented in this build.", icon: FileUp },
   { name: "Webhooks", desc: "No outbound webhook delivery is implemented yet.", icon: Webhook },
 ];
 
 export function IntegrationsClient() {
-  const { confluence, jira, metrics } = useLiveMetrics();
+  const { confluence, jira, slack, github, metrics } = useLiveMetrics();
   const live = [
     {
       name: "Confluence",
@@ -30,6 +29,24 @@ export function IntegrationsClient() {
       icon: SquareKanban,
       tone: jira?.configured ? "green" as const : "amber" as const,
       status: jira?.configured ? "Configured" : "Needs config",
+    },
+    {
+      name: "Slack",
+      desc: slack?.allowlisted_channels
+        ? `Socket Mode indexing is allowlisted to ${slack.allowlisted_channels} public channel${slack.allowlisted_channels === 1 ? "" : "s"}.`
+        : "Read-only Socket Mode indexing is available after credentials and a public-channel allowlist are configured.",
+      icon: Bot,
+      tone: slack?.configured ? "green" as const : "amber" as const,
+      status: slack?.configured ? "Configured" : "Needs config",
+    },
+    {
+      name: "GitHub",
+      desc: github?.repositories.length
+        ? `${github.repositories.length} read-only repository branch${github.repositories.length === 1 ? "" : "es"} mapped to projects.`
+        : "Read-only incremental code indexing is available after a repository allowlist is configured.",
+      icon: GitBranch,
+      tone: github?.configured ? "green" as const : "amber" as const,
+      status: github?.configured ? "Configured" : "Needs config",
     },
     {
       name: "CVUM API",

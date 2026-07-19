@@ -16,18 +16,20 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from chat.citations import extract_citations
 from chat.prompts import build_system_prompt
 from core.config import Settings
-from core.exceptions import NotFoundError, ProviderError, ValidationError
+from core.exceptions import AuthorizationError, NotFoundError, ProviderError, ValidationError
 from database.base import utcnow
 from llm.base import ChatMessage, LLMProvider, LLMRequest, LLMUsage
 from llm.openai_compat import OpenAICompatLLM
-from models import Chunk, Citation, Conversation, Document, KnowledgeBase, Message, User
+from models import Chunk, Citation, Conversation, Document, KnowledgeBase, Message, Role, User
 from repositories.conversations import ConversationRepository, MessageRepository
 from repositories.knowledge import KnowledgeBaseRepository
+from repositories.projects import ProjectAuthorizationRepository
 from retrieval.context import RetrievedChunk
 from retrieval.pipeline import RetrievalPipeline
 from services.chat_memory import MemoryManager
 from services.chat_sessions import ChatSessionManager
-from services.conversational_retriever import ConversationalRetriever
+from services.conversational_retriever import ConversationalRetriever, RetrievalResult
+from services.evidence_orchestrator import EvidenceOrchestrator
 from services.question_rewriter import QuestionRewriter
 from services.response_generator import ResponseGenerator
 from services.web_search_service import WebSearchService
@@ -109,6 +111,7 @@ class ChatService:
         llm: LLMProvider,
         web_search: WebSearchService,
         settings: Settings,
+        evidence_orchestrator: EvidenceOrchestrator | None = None,
     ) -> None:
         self._db = db
         self._conversations = ConversationRepository(db)
@@ -118,6 +121,8 @@ class ChatService:
         self._llm = llm
         self._web_search = web_search
         self._settings = settings
+        self._evidence_orchestrator = evidence_orchestrator
+        self._authorization = ProjectAuthorizationRepository(db)
         self._sessions = ChatSessionManager(db)
         self._memory = MemoryManager(db, default_model=llm.model)
         self._question_rewriter = QuestionRewriter(llm)
@@ -129,8 +134,19 @@ class ChatService:
         )
         self._response_generator = ResponseGenerator(llm=llm, settings=settings)
 
-    async def start_conversation(self, user: User, kb_id: uuid.UUID, title: str | None) -> Conversation:
-        return await self._sessions.start_conversation(user, kb_id, title)
+    async def start_conversation(
+        self,
+        user: User,
+        kb_id: uuid.UUID,
+        title: str | None,
+        project_id: uuid.UUID | None = None,
+    ) -> Conversation:
+        scope = await self._authorization.require_source(
+            user=user,
+            knowledge_base_id=kb_id,
+            project_id=project_id,
+        )
+        return await self._sessions.start_conversation(user, kb_id, scope.project.id, title)
 
     async def clear_history(self, *, user: User, conversation_id: uuid.UUID) -> None:
         conversation = await self._sessions.get_owned(conversation_id, user)
@@ -145,6 +161,7 @@ class ChatService:
         conversation_id: uuid.UUID,
         question: str,
         regenerate: bool = False,
+        project_id: uuid.UUID | None = None,
         source_mode: str = "knowledge",
         answer_mode: str = "fast",
         assistant_role: str | None = None,
@@ -158,6 +175,14 @@ class ChatService:
         conversation = await self._sessions.get_owned(conversation_id, user)
         if conversation is None:
             raise NotFoundError("Conversation not found")
+        scope = await self._authorization.authorized_scope(
+            user=user,
+            project_id=project_id or conversation.project_id,
+        )
+        if not scope.knowledge_base_ids and source_mode != "web":
+            raise AuthorizationError("The selected project has no authorized knowledge sources")
+        if conversation.project_id != scope.project.id:
+            await self._sessions.set_project(conversation, scope.project.id)
 
         history = await self._memory.recent_history(
             conversation_id,
@@ -174,6 +199,7 @@ class ChatService:
         if source_mode != "web":
             jira_count = await self._jira_structured_count(
                 org_id=user.organization_id,
+                knowledge_base_ids=scope.knowledge_base_ids,
                 question=standalone_question or question,
             )
             if jira_count is not None:
@@ -193,16 +219,86 @@ class ChatService:
                     yield event
                 return
 
-        retrieval = await self._conversation_retriever.retrieve(
-            user=user,
-            conversation=conversation,
-            current_question=question,
-            standalone_question=standalone_question,
-            history=history,
-            source_mode=source_mode,
-            assistant_role=assistant_role,
-            assistant_role_prompt=assistant_role_prompt,
-        )
+        if (
+            self._settings.knowledge_planner_enabled
+            and source_mode != "web"
+            and self._evidence_orchestrator is not None
+        ):
+            orchestration = await self._evidence_orchestrator.retrieve(
+                question=standalone_question or question,
+                project_id=scope.project.id,
+                user=user,
+            )
+            planned_chunks = orchestration.chunks
+            planner_timings = {
+                f"tool_{item.tool.value}": item.latency_ms
+                for item in orchestration.execution.executions
+            }
+            quality_notes = [
+                f"{item.tool.value}_failed={item.failure}"
+                for item in orchestration.execution.executions
+                if item.failure
+            ]
+            if source_mode == "blended":
+                web_started = time.perf_counter()
+                planned_chunks.extend(
+                    await self._web_search.search(
+                        user=user,
+                        query=standalone_question or question,
+                        max_results=self._settings.web_search_top_k,
+                    )
+                )
+                planner_timings["web_search"] = int((time.perf_counter() - web_started) * 1000)
+            chunks_by_identity: dict[tuple[uuid.UUID, uuid.UUID], RetrievedChunk] = {}
+            for chunk in planned_chunks:
+                chunks_by_identity.setdefault((chunk.document_id, chunk.chunk_id), chunk)
+            planned_chunks = list(chunks_by_identity.values())[: max(self._settings.retrieval_top_k, 20)]
+            retrieval = RetrievalResult(
+                chunks=planned_chunks,
+                timings_ms={
+                    "evidence_executor": orchestration.execution.total_latency_ms,
+                    **planner_timings,
+                },
+                confidence=0.8 if planned_chunks else 0.0,
+                query_classification="planned_evidence",
+                subqueries=list(dict.fromkeys(item.query for item in orchestration.plan.selections)),
+                attempts=[],
+                quality_notes=quality_notes,
+                weak_internal_retrieval=not planned_chunks,
+                fallback_requested=not planned_chunks,
+                trace={
+                    "planner": {
+                        "strategy": orchestration.plan.strategy,
+                        "fallback_reason": orchestration.plan.fallback_reason,
+                        "selected_tools": [item.tool.value for item in orchestration.plan.selections],
+                        "tool_count": len(orchestration.plan.selections),
+                        "partial": orchestration.execution.partial,
+                        "total_latency_ms": orchestration.execution.total_latency_ms,
+                        "executions": [
+                            {
+                                "tool": item.tool.value,
+                                "latency_ms": item.latency_ms,
+                                "result_count": len(item.evidence),
+                                "failure": item.failure,
+                                "timed_out": item.timed_out,
+                            }
+                            for item in orchestration.execution.executions
+                        ],
+                    }
+                },
+            )
+        else:
+            retrieval = await self._conversation_retriever.retrieve(
+                user=user,
+                conversation=conversation,
+                current_question=question,
+                standalone_question=standalone_question,
+                history=history,
+                source_mode=source_mode,
+                assistant_role=assistant_role,
+                assistant_role_prompt=assistant_role_prompt,
+                authorized_kb_ids=scope.knowledge_base_ids,
+            )
         chunks = retrieval.chunks
         timings_ms = {"question_rewrite": rewrite_ms, **retrieval.timings_ms}
         confidence = retrieval.confidence
@@ -220,6 +316,7 @@ class ChatService:
                 "retrieval_attempts": retrieval.attempts,
                 "quality_notes": retrieval.quality_notes,
                 "weak_internal_retrieval": retrieval.weak_internal_retrieval,
+                "retrieval_trace": retrieval.trace if user.role is Role.ADMIN else None,
             },
         )
 
@@ -587,6 +684,7 @@ class ChatService:
         self,
         *,
         org_id: uuid.UUID,
+        knowledge_base_ids: list[uuid.UUID],
         question: str,
     ) -> JiraIssueCountResult | None:
         normalized = question.lower()
@@ -608,6 +706,7 @@ class ChatService:
             .join(KnowledgeBase, KnowledgeBase.id == Document.knowledge_base_id)
             .where(
                 KnowledgeBase.organization_id == org_id,
+                Document.knowledge_base_id.in_(knowledge_base_ids),
                 Document.is_deleted.is_(False),
                 Document.doc_metadata["source"].as_string() == "jira",
             )
@@ -683,9 +782,7 @@ class ChatService:
             seen.add(chunk.document_id)
             document = await self._db.get(Document, chunk.document_id)
             document_metadata = (
-                document.doc_metadata
-                if document is not None and isinstance(document.doc_metadata, dict)
-                else {}
+                document.doc_metadata if document is not None and isinstance(document.doc_metadata, dict) else {}
             )
             by_document[chunk.document_id] = RetrievedChunk(
                 chunk_id=chunk.id,
@@ -774,9 +871,7 @@ class ChatService:
                 return jira_kbs
 
         if _contains_any(normalized, CONFLUENCE_TERMS):
-            confluence_kbs = [
-                kb.id for kb in candidates if kb.name == self._settings.confluence_default_kb_name
-            ]
+            confluence_kbs = [kb.id for kb in candidates if kb.name == self._settings.confluence_default_kb_name]
             if confluence_kbs:
                 return confluence_kbs
 

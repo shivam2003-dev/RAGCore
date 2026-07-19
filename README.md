@@ -1,36 +1,63 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# RAGCore
 
-## Getting Started
+RAGCore is the repository for the CVUM/Kimbal enterprise knowledge hub: a Next.js 16 frontend and
+FastAPI backend backed by PostgreSQL/pgvector and Redis. It provides Project-scoped, permission-aware
+RAG across local documents and read-only Confluence, Jira, public Slack, and GitHub sources.
 
-First, run the development server:
+Core workflows include grounded Ask with citations, Incident Copilot, evidence-backed expert
+ranking, authorized change summaries, a Knowledge Freshness Center, and read-only REST/MCP evidence
+tools.
+
+## Local development
+
+Prerequisites: Node.js/npm, Python 3.13 with `uv`, Docker, and Docker Compose.
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+docker compose up -d postgres redis
+cd backend
+uv sync
+.venv/bin/alembic upgrade head
+.venv/bin/uvicorn api.main:app --host 127.0.0.1 --port 8000
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+In a second terminal:
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```bash
+npm install
+npm run dev -- --hostname 127.0.0.1 --port 3100
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+Open `http://localhost:3100`. Copy `backend/.env.example` to the ignored `backend/.env` for local
+configuration. Never commit populated environment files or credentials.
 
-## Learn More
+## Verification
 
-To learn more about Next.js, take a look at the following resources:
+```bash
+npm run lint
+npx tsc --noEmit
+env NODE_ENV=production npm run build
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+cd backend
+.venv/bin/ruff check .
+.venv/bin/pytest -q
+.venv/bin/python scripts/run_evals.py
+```
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+See [Testing](./docs/TESTING.md) for scoped type checks, migration gates, and the browser matrix.
 
-## Deploy on Vercel
+## Documentation
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+- [Documentation index](./docs/README.md)
+- [Architecture](./docs/ARCHITECTURE.md)
+- [Projects and authorization](./docs/PROJECTS_AND_AUTHORIZATION.md)
+- [RAG pipeline](./docs/RAG_PIPELINE.md)
+- [Evidence-backed workflows](./docs/KNOWLEDGE_WORKFLOWS.md)
+- [Slack connector](./docs/SLACK_CONNECTOR.md)
+- [GitHub connector](./docs/GITHUB_CONNECTOR.md)
+- [MCP evidence tools](./docs/MCP_TOOLS.md)
+- [Operations](./docs/OPERATIONS.md)
+- [Migrations and rollback](./docs/MIGRATIONS_AND_ROLLBACK.md)
+- [Security and secrets](./docs/SECURITY_AND_SECRETS.md)
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Jira and Confluence integrations are read-only. Slack is restricted to explicitly allowlisted public
+channels. GitHub indexing uses GET-only APIs and never executes connected repository code.

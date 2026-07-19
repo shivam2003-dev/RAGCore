@@ -856,7 +856,7 @@ def _render_adf(value: object, *, list_depth: int = 0, ordered: bool = False) ->
     if node_type == "hardBreak":
         return "\n"
     if node_type == "heading":
-        level = min(max(int(attrs.get("level") or 2), 1), 6)
+        level = min(max(_int(attrs.get("level")) or 2, 1), 6)
         return f"{'#' * level} {_inline_adf(children).strip()}\n\n"
     if node_type == "paragraph":
         text = _inline_adf(children).strip()
@@ -1119,7 +1119,8 @@ def _extract_image_text(payload: bytes) -> str:
     from PIL import Image
 
     with Image.open(io.BytesIO(payload)) as image:
-        return pytesseract.image_to_string(image).strip()[:120_000]
+        text = cast(str, pytesseract.image_to_string(image))
+        return text.strip()[:120_000]
 
 
 def _extract_xlsx_text(payload: bytes) -> str:

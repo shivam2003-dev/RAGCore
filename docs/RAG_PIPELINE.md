@@ -12,6 +12,8 @@ Documents enter the system from manual uploads or read-only source syncs.
 6. Chunks are stored in Postgres with pgvector embeddings and a generated full-text `tsv` column.
 
 Manual uploads go into `CVUM Local Uploads`. Confluence and Jira write into dedicated source knowledge bases.
+Each allowlisted Slack public channel writes into its own project-mapped knowledge base so channel
+scope is enforced before retrieval.
 
 ## Chunking
 
@@ -34,6 +36,16 @@ Jira preprocessing removes empty/automation boilerplate but preserves headings, 
 code, user-visible mentions, and comments. Attachment extraction is size/count bounded and the
 connector remains read-only.
 
+Slack stores one normalized, versioned document per thread. The document preserves the searchable
+question, summary, resolution, systems, code/config references, participants, permalink, timestamps,
+selected high-signal message bursts, and raw thread text. Embedding input includes the normalized
+thread context; raw text remains available to Postgres full-text retrieval.
+
+GitHub stores one versioned document per allowed repository path. Unchanged blob SHAs are neither
+downloaded nor re-embedded. Code chunks preserve repository, branch, path, language, symbol,
+CODEOWNERS, contributors, blob/commit SHAs, and a commit-pinned citation URL. Exact code search is a
+parameterized literal database query; semantic code search uses the normal authorized hybrid path.
+
 ## Retrieval
 
 The retrieval pipeline is in `backend/retrieval/pipeline.py`.
@@ -45,10 +57,16 @@ For a query, the pipeline:
 3. Runs dense vector search over pgvector.
 4. Runs strict and relaxed sparse search through Postgres full-text search, with normalized content
    ranking, document-title boosts, and exact Jira-key boosts.
-5. Fuses dense and sparse results. Local deterministic embeddings use a lexical-first fusion balance;
-   configured semantic embedding providers use the configured dense/sparse weights.
-6. Reranks against the original user intent, evaluates evidence quality and source coverage, and
-   applies the corrective retrieval policy loop.
+5. Optionally runs explicit exact-identifier and document-frequency-weighted rare-token arms.
+6. Fuses candidates with either the existing weighted strategy or configurable weighted Reciprocal
+   Rank Fusion (RRF). Each candidate retains the contributing arms, native arm scores, and arm ranks.
+7. Optionally applies a floor-bounded, source-specific recency multiplier when a valid source update
+   timestamp exists. Missing dates are not penalized.
+8. Reranks a bounded candidate set against the original user intent. Heuristic reranking is always
+   available; the optional model reranker has a timeout and falls back on any provider or output error.
+9. Selects the final diverse context and only then optionally inserts adjacent chunks from the same
+   active document version, within a separate context token budget.
+10. Evaluates evidence quality and source coverage and applies the corrective retrieval policy loop.
 
 An exact Jira key also activates relationship retrieval. Indexed metadata expands the issue to
 parent, child, and linked tickets. Ask then performs a read-only live Jira refresh for that issue
@@ -61,6 +79,30 @@ Default fusion weights:
 - Dense: `0.7`
 - Sparse: `0.3`
 
+The request-scoped SQLAlchemy session is deliberately used sequentially. Retrieval arms do not run
+concurrent statements through the same `AsyncSession`.
+
+### Retrieval experiment flags
+
+The conservative production defaults preserve weighted fusion, heuristic reranking, and no extra
+arms or expansion. The experimental path is controlled with:
+
+- `RETRIEVAL_FUSION_MODE=weighted|rrf`
+- `RETRIEVAL_RRF_SMOOTHING_K`
+- `RETRIEVAL_EXACT_IDENTIFIER_ENABLED` and `RETRIEVAL_EXACT_IDENTIFIER_WEIGHT`
+- `RETRIEVAL_RARE_TOKEN_ENABLED` and `RETRIEVAL_RARE_TOKEN_WEIGHT`
+- `RETRIEVAL_RECENCY_DECAY_ENABLED`, `RETRIEVAL_RECENCY_HALF_LIVES`, and
+  `RETRIEVAL_RECENCY_FLOOR`
+- `RETRIEVAL_MODEL_RERANKER_ENABLED`, `RETRIEVAL_MODEL_RERANKER_TIMEOUT_SECONDS`, and
+  `RETRIEVAL_MODEL_RERANKER_CANDIDATE_K`
+- `RETRIEVAL_NEIGHBOR_EXPANSION_ENABLED`, `RETRIEVAL_NEIGHBOR_WINDOW`,
+  `RETRIEVAL_NEIGHBOR_TOKEN_BUDGET`, and `RETRIEVAL_NEIGHBOR_MAX_CHUNKS`
+
+An administrator can inspect a content-free retrieval trace in the Ask source drawer. It reports
+fusion/reranker mode, arm hit counts and latency, selected and discarded counts, selected chunk IDs,
+contributing arms, and ranks. Non-admin responses omit the trace. The local 129-case weighted/RRF
+comparison and default decision are recorded in `shivam_plan/retrieval_experiment.md`.
+
 The CRAG path includes:
 
 - `RetrievalEvaluator`
@@ -70,6 +112,27 @@ The CRAG path includes:
 
 The pipeline keeps the strongest attempt across retries so a weaker rewrite cannot replace better
 evidence found earlier.
+
+## Project scope and evidence orchestration
+
+Every retrieval request resolves an authorized Project scope before hitting dense, sparse, exact,
+Jira relationship, code, workflow, or MCP paths. Project mapping narrows the candidate knowledge
+bases; it never grants a restricted source.
+
+Optional identifier/rare-token/recency signals, RRF, model reranking, and neighbor expansion are
+independently flagged. The default remains the measured weighted configuration. Model reranking
+falls back to the heuristic ranker on timeout, provider failure, or invalid output. Neighbor chunks
+come only from the winning document version and retain the winning citation identity.
+
+When `KNOWLEDGE_PLANNER_ENABLED=true`, Ask performs bounded plan -> tool execution -> synthesis.
+Planning cannot set authorization IDs. Parallel tools use independent sessions, deadlines, and
+partial-result handling. All results normalize to the shared `Evidence` contract and reuse existing
+grounding, citation validation, and weak-evidence refusal.
+
+The 129-case experiment kept weighted fusion as the default: weighted recall/precision/MRR/top-k
+were 0.8372/0.9298/0.9607/0.9845 at p95 1293 ms; RRF improved recall to 0.8643 but reduced
+precision/MRR to 0.9191/0.9566 and raised p95 to 1473 ms. Exact, rare-token, recency, model reranking,
+and neighbor context remain independent rollout switches.
 
 ## CRAG Status
 
@@ -87,7 +150,6 @@ Implemented now:
 
 Not implemented yet:
 
-- An optional model-based relevance grader for ambiguous semantic questions.
 - Claim-level natural-language inference against each cited source.
 - Automatic web fallback for Knowledge mode. Web evidence remains explicit through Web or Both mode.
 

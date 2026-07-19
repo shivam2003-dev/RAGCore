@@ -44,8 +44,15 @@ Rules, in priority order:
 def render_sources(chunks: list[RetrievedChunk]) -> str:
     blocks = []
     for i, chunk in enumerate(chunks, start=1):
+        source_family = str(
+            chunk.metadata.get("source_family")
+            or chunk.metadata.get("source_type")
+            or chunk.metadata.get("source")
+            or "knowledge"
+        )
         blocks.append(
-            f'<source id="{i}" title="{chunk.document_title}">\n{chunk.content}\n</source>'
+            f'<source id="{i}" title="{chunk.document_title}">\n'
+            f"<source_family>{source_family}</source_family>\n{chunk.content}\n</source>"
         )
     return "\n\n".join(blocks) if blocks else "<no_sources>No sources retrieved.</no_sources>"
 

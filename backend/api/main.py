@@ -15,11 +15,16 @@ from api.routes import (
     discover,
     documents,
     evals,
+    github,
     health,
     jira,
     knowledge_bases,
+    projects,
     search,
+    slack,
+    tools,
     web_search,
+    workflows,
 )
 from api.routes import (
     metrics as product_metrics,
@@ -98,11 +103,16 @@ def create_app() -> FastAPI:
     app.include_router(health.router)
     app.include_router(auth.router, prefix=api)
     app.include_router(knowledge_bases.router, prefix=api)
+    app.include_router(projects.router, prefix=api)
     app.include_router(documents.router, prefix=api)
     app.include_router(confluence.router, prefix=api)
     app.include_router(discover.router, prefix=api)
     app.include_router(evals.router, prefix=api)
     app.include_router(jira.router, prefix=api)
+    app.include_router(github.router, prefix=api)
+    app.include_router(slack.router, prefix=api)
+    app.include_router(tools.router, prefix=api)
+    app.include_router(workflows.router, prefix=api)
     app.include_router(product_metrics.router, prefix=api)
     app.include_router(web_search.router, prefix=api)
     app.include_router(search.router, prefix=api)

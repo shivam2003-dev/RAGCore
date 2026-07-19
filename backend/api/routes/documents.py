@@ -9,6 +9,7 @@ from api.schemas import DocumentLineageOut, DocumentListOut, DocumentOut, Docume
 from core.exceptions import NotFoundError
 from models import Chunk, DocumentVersion, Role
 from repositories.knowledge import DocumentRepository, KnowledgeBaseRepository
+from repositories.projects import ProjectAuthorizationRepository
 
 router = APIRouter(prefix="/documents", tags=["documents"])
 
@@ -42,19 +43,27 @@ async def list_documents(
 ) -> DocumentListOut:
     repo = DocumentRepository(db)
     bounded_limit = min(max(limit, 1), 1000)
-    kb_names = {kb.id: kb.name for kb in await KnowledgeBaseRepository(db).list_by_org(user.organization_id)}
+    authorized_ids = await ProjectAuthorizationRepository(db).authorized_source_ids_any_project(user)
+    kb_names = {
+        kb.id: kb.name
+        for kb in await KnowledgeBaseRepository(db).list_by_ids(
+            user.organization_id,
+            authorized_ids,
+        )
+    }
     if knowledge_base_id is not None:
-        kb = await KnowledgeBaseRepository(db).get(knowledge_base_id, user.organization_id)
-        if kb is None:
+        if knowledge_base_id not in authorized_ids:
             raise NotFoundError("Knowledge base not found")
         docs, total = await repo.list_by_kb(knowledge_base_id, limit=bounded_limit, offset=offset)
     else:
-        docs, total = await repo.list_by_org(user.organization_id, limit=bounded_limit, offset=offset)
+        docs, total = await repo.list_by_kb_ids(
+            authorized_ids,
+            limit=bounded_limit,
+            offset=offset,
+        )
     return DocumentListOut(
         items=[
-            DocumentOut.model_validate(d).model_copy(
-                update={"knowledge_base_name": kb_names.get(d.knowledge_base_id)}
-            )
+            DocumentOut.model_validate(d).model_copy(update={"knowledge_base_name": kb_names.get(d.knowledge_base_id)})
             for d in docs
         ],
         total=total,
@@ -69,6 +78,10 @@ async def get_document(document_id: uuid.UUID, user: CurrentUser, db: DbDep) -> 
     kb = await KnowledgeBaseRepository(db).get(doc.knowledge_base_id, user.organization_id)
     if kb is None:
         raise NotFoundError("Document not found")
+    await ProjectAuthorizationRepository(db).require_source_any_project(
+        user=user,
+        knowledge_base_id=doc.knowledge_base_id,
+    )
     return DocumentOut.model_validate(doc)
 
 
@@ -80,6 +93,10 @@ async def get_document_lineage(document_id: uuid.UUID, user: CurrentUser, db: Db
     kb = await KnowledgeBaseRepository(db).get(doc.knowledge_base_id, user.organization_id)
     if kb is None:
         raise NotFoundError("Document not found")
+    await ProjectAuthorizationRepository(db).require_source_any_project(
+        user=user,
+        knowledge_base_id=doc.knowledge_base_id,
+    )
 
     chunk_counts = (
         await db.execute(
@@ -139,17 +156,13 @@ async def get_document_lineage(document_id: uuid.UUID, user: CurrentUser, db: Db
     status_code=202,
     dependencies=[require_role(Role.ADMIN)],
 )
-async def reindex_document(
-    document_id: uuid.UUID, user: CurrentUser, service: DocumentServiceDep
-) -> DocumentOut:
+async def reindex_document(document_id: uuid.UUID, user: CurrentUser, service: DocumentServiceDep) -> DocumentOut:
     doc = await service.reindex(user=user, document_id=document_id)
     return DocumentOut.model_validate(doc)
 
 
 @router.delete("/{document_id}", status_code=204, dependencies=[require_role(Role.ADMIN)])
-async def delete_document(
-    document_id: uuid.UUID, user: CurrentUser, service: DocumentServiceDep
-) -> None:
+async def delete_document(document_id: uuid.UUID, user: CurrentUser, service: DocumentServiceDep) -> None:
     await service.delete(user=user, document_id=document_id)
 
 

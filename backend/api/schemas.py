@@ -34,6 +34,7 @@ class UserOut(ORMModel):
     full_name: str
     role: str
     is_active: bool
+    default_project_id: uuid.UUID | None
     created_at: datetime
 
 
@@ -66,7 +67,70 @@ class KnowledgeBaseOut(ORMModel):
     name: str
     description: str
     embedding_model: str
+    access_scope: str
     created_at: datetime
+
+
+class ProjectCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=255)
+    slug: str | None = Field(default=None, max_length=100)
+    description: str = Field(default="", max_length=2000)
+
+
+class ProjectUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=255)
+    slug: str | None = Field(default=None, min_length=1, max_length=100)
+    description: str | None = Field(default=None, max_length=2000)
+    is_active: bool | None = None
+
+
+class ProjectOut(ORMModel):
+    id: uuid.UUID
+    name: str
+    slug: str
+    description: str
+    is_active: bool
+    source_ids: list[uuid.UUID] = Field(default_factory=list)
+    authorized_source_ids: list[uuid.UUID] = Field(default_factory=list)
+    member_count: int = 0
+    user_project_role: str | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class ProjectSourceUpdate(BaseModel):
+    knowledge_base_ids: list[uuid.UUID] = Field(max_length=500)
+
+
+class ProjectMemberWrite(BaseModel):
+    user_id: uuid.UUID
+    project_role: str = Field(default="member", pattern="^(member|manager)$")
+
+
+class ProjectMemberUpdate(BaseModel):
+    members: list[ProjectMemberWrite] = Field(max_length=500)
+
+
+class ProjectMemberOut(BaseModel):
+    user_id: uuid.UUID
+    full_name: str
+    email: str
+    project_role: str
+
+
+class DefaultProjectUpdate(BaseModel):
+    project_id: uuid.UUID
+
+
+class SourcePermissionUpdate(BaseModel):
+    access_scope: str = Field(pattern="^(organization|restricted)$")
+    user_ids: list[uuid.UUID] = Field(default_factory=list, max_length=500)
+
+
+class SourcePermissionOut(BaseModel):
+    knowledge_base_id: uuid.UUID
+    access_scope: str
+    user_ids: list[uuid.UUID]
 
 
 class CollectionCreate(BaseModel):
@@ -200,6 +264,152 @@ class JiraIssueSyncOut(BaseModel):
     document_id: uuid.UUID
     document_status: str
     action: str
+
+
+# --- Slack ---
+class SlackChannelConfigIn(BaseModel):
+    channel_id: str = Field(min_length=3, max_length=64)
+    channel_name: str = Field(min_length=1, max_length=255)
+    project_id: uuid.UUID
+    visibility: str = Field(default="public", pattern="^public$")
+
+
+class SlackConfigurationIn(BaseModel):
+    workspace_id: str = Field(min_length=1, max_length=64)
+    channels: list[SlackChannelConfigIn] = Field(default_factory=list, max_length=100)
+
+
+class SlackChannelOut(BaseModel):
+    id: uuid.UUID
+    workspace_id: str
+    channel_id: str
+    channel_name: str
+    visibility: str
+    is_enabled: bool
+    project_id: uuid.UUID
+    knowledge_base_id: uuid.UUID
+    last_thread_ts: str | None
+
+
+class SlackStatusOut(BaseModel):
+    configured: bool
+    credentials_configured: bool
+    socket_mode_configured: bool
+    read_only: bool = True
+    workspace_id: str | None
+    status: str
+    allowlisted_channels: int
+    last_event_at: datetime | None
+    last_success_at: datetime | None
+    last_error_at: datetime | None
+    lag_seconds: int | None
+    failure_count: int
+    error_detail: str | None
+    channels: list[SlackChannelOut]
+
+
+class SlackSyncRequest(BaseModel):
+    channel_id: str | None = Field(default=None, min_length=3, max_length=64)
+
+
+class SlackSyncOut(BaseModel):
+    created: int
+    updated: int
+    skipped: int
+    deleted: int
+    failed: int
+
+
+# --- GitHub ---
+class GitHubRepositoryConfigIn(BaseModel):
+    owner: str = Field(min_length=1, max_length=255)
+    repository: str = Field(min_length=1, max_length=255)
+    branch: str = Field(default="main", min_length=1, max_length=255)
+    project_id: uuid.UUID
+    path_allowlist: list[str] = Field(default_factory=list, max_length=200)
+    path_denylist: list[str] = Field(default_factory=list, max_length=200)
+
+
+class GitHubRepositoryOut(BaseModel):
+    id: uuid.UUID
+    owner: str
+    repository: str
+    branch: str
+    project_id: uuid.UUID
+    knowledge_base_id: uuid.UUID
+    path_allowlist: list[str]
+    path_denylist: list[str]
+    is_enabled: bool
+    status: str
+    head_commit_sha: str | None
+    head_tree_sha: str | None
+    last_indexed_at: datetime | None
+    last_error_at: datetime | None
+    error_detail: str | None
+
+
+class GitHubStatusOut(BaseModel):
+    configured: bool
+    credentials_configured: bool
+    read_only: bool = True
+    preferred_auth: str
+    status: str
+    repositories: list[GitHubRepositoryOut]
+    last_success_at: datetime | None
+    last_error_at: datetime | None
+    lag_seconds: int | None
+    failure_count: int
+    error_detail: str | None
+
+
+class GitHubSyncOut(BaseModel):
+    created: int
+    updated: int
+    renamed: int
+    deleted: int
+    skipped: int
+    denied: int
+    oversized: int
+    binary: int
+    commit_sha: str
+    tree_sha: str
+
+
+class GitHubPullRequestOut(BaseModel):
+    number: int
+    title: str
+    body: str
+    state: str
+    author: str
+    url: str
+    base_branch: str
+    head_branch: str
+    created_at: str
+    updated_at: str
+    merged_at: str | None
+    draft: bool
+    labels: list[str]
+
+
+class ExactCodeSearchIn(BaseModel):
+    query: str = Field(min_length=2, max_length=256)
+    project_id: uuid.UUID | None = None
+    limit: int = Field(default=20, ge=1, le=100)
+
+
+class ExactCodeHitOut(BaseModel):
+    chunk_id: uuid.UUID
+    document_id: uuid.UUID
+    path: str
+    symbol: str | None
+    language: str
+    commit_sha: str
+    url: str
+    snippet: str
+
+
+class ExactCodeSearchOut(BaseModel):
+    hits: list[ExactCodeHitOut]
 
 
 class JiraSyncResponse(BaseModel):
@@ -530,6 +740,7 @@ class RoleGenerateResponse(BaseModel):
 class SearchRequest(BaseModel):
     query: str = Field(min_length=1, max_length=2000)
     knowledge_base_id: uuid.UUID
+    project_id: uuid.UUID | None = None
     collection_id: uuid.UUID | None = None
     top_k: int = Field(default=8, ge=1, le=50)
 
@@ -548,17 +759,20 @@ class SearchResponse(BaseModel):
     hits: list[SearchHitOut]
     confidence: float | None
     timings_ms: dict[str, int]
+    trace: dict[str, object] | None = None
 
 
 # --- chat ---
 class ConversationCreate(BaseModel):
     knowledge_base_id: uuid.UUID
+    project_id: uuid.UUID | None = None
     title: str | None = Field(default=None, max_length=300)
 
 
 class ConversationOut(ORMModel):
     id: uuid.UUID
     knowledge_base_id: uuid.UUID
+    project_id: uuid.UUID | None
     title: str
     created_at: datetime
     updated_at: datetime
@@ -567,6 +781,7 @@ class ConversationOut(ORMModel):
 class AskRequest(BaseModel):
     question: str = Field(min_length=1, max_length=4000)
     regenerate: bool = False
+    project_id: uuid.UUID | None = None
     source_mode: str = Field(default="knowledge", pattern="^(knowledge|web|blended)$")
     answer_mode: str = Field(default="fast", pattern="^(fast|council)$")
     assistant_role: str | None = Field(default=None, max_length=80)

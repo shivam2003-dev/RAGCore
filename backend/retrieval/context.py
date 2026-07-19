@@ -9,10 +9,16 @@ class RetrievedChunk:
     document_id: uuid.UUID
     document_title: str
     content: str
-    metadata: dict = field(default_factory=dict)
+    metadata: dict[str, object] = field(default_factory=dict)
     dense_score: float = 0.0
     sparse_score: float = 0.0
     score: float = 0.0  # fused
+    fusion_score: float = 0.0
+    retrieval_arms: list[str] = field(default_factory=list)
+    arm_ranks: dict[str, int] = field(default_factory=dict)
+    arm_scores: dict[str, float] = field(default_factory=dict)
+    selected_rank: int | None = None
+    expanded_from_chunk_id: uuid.UUID | None = None
 
 
 @dataclass(slots=True)
@@ -45,6 +51,7 @@ class RetrievalContext:
     fallback_requested: bool = False
     quality_notes: list[str] = field(default_factory=list)
     timings_ms: dict[str, int] = field(default_factory=dict)
+    trace: dict[str, object] = field(default_factory=dict)
 
     @property
     def effective_query(self) -> str:

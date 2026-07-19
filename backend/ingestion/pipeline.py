@@ -13,7 +13,7 @@ from database.base import utcnow
 from database.session import SessionFactory
 from embeddings.base import EmbeddingProvider
 from ingestion.chunkers.base import Chunker, count_tokens
-from ingestion.chunkers.code import CodeChunker
+from ingestion.chunkers.code import CodeChunker, code_language_for_suffix
 from ingestion.chunkers.markdown import MarkdownChunker
 from ingestion.chunkers.recursive import RecursiveChunker
 from ingestion.extractors.registry import extract_text
@@ -23,7 +23,27 @@ from repositories.knowledge import DocumentRepository
 
 log = get_logger(__name__)
 
-_CODE_SUFFIXES = {".py", ".ts", ".js", ".go", ".java", ".rs"}
+_CODE_SUFFIXES = {
+    ".c",
+    ".cc",
+    ".cpp",
+    ".cs",
+    ".go",
+    ".h",
+    ".hpp",
+    ".java",
+    ".js",
+    ".jsx",
+    ".kt",
+    ".php",
+    ".py",
+    ".rb",
+    ".rs",
+    ".sh",
+    ".swift",
+    ".ts",
+    ".tsx",
+}
 EMBED_BATCH_SIZE = 64
 
 
@@ -31,7 +51,7 @@ def select_chunker(suffix: str) -> Chunker:
     if suffix in {".md", ".html", ".htm"}:
         return MarkdownChunker()
     if suffix in _CODE_SUFFIXES:
-        return CodeChunker()
+        return CodeChunker(language=code_language_for_suffix(suffix))
     return RecursiveChunker()
 
 
@@ -42,6 +62,7 @@ async def ingest_document(
     kb_id: uuid.UUID,
     file_path: str,
     embedder: EmbeddingProvider,
+    embedding_text: str | None = None,
 ) -> None:
     settings = get_settings()
     async with SessionFactory() as db:
@@ -89,9 +110,14 @@ async def ingest_document(
                 for chunk, chunk_metadata in enriched_chunks
             ]
 
+            embedding_contents = (
+                [f"{embedding_text}\n\nSection:\n{content}" for content in contextual_contents]
+                if embedding_text and embedding_text.strip()
+                else contextual_contents
+            )
             embeddings: list[list[float]] = []
-            for i in range(0, len(contextual_contents), EMBED_BATCH_SIZE):
-                batch = contextual_contents[i : i + EMBED_BATCH_SIZE]
+            for i in range(0, len(embedding_contents), EMBED_BATCH_SIZE):
+                batch = embedding_contents[i : i + EMBED_BATCH_SIZE]
                 embeddings.extend(await embedder.embed(batch))
 
             # replace-then-insert inside one transaction: supersede old version's

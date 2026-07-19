@@ -1,6 +1,14 @@
 from database.base import Base
 from models.chat import Citation, Conversation, Feedback, Message
+from models.connector import (
+    ConnectorState,
+    GitHubFileState,
+    GitHubRepositoryMapping,
+    SlackChannelMapping,
+    SlackEventReceipt,
+)
 from models.knowledge import (
+    AccessScope,
     Chunk,
     Collection,
     Document,
@@ -8,24 +16,36 @@ from models.knowledge import (
     DocumentVersion,
     KnowledgeBase,
 )
+from models.project import Project, ProjectMember, ProjectRole, ProjectSource, SourceAccessGrant
 from models.user import ApiKey, AuditLog, Organization, RefreshToken, Role, User
 
 __all__ = [
+    "AccessScope",
     "ApiKey",
     "AuditLog",
     "Base",
     "Chunk",
     "Citation",
     "Collection",
+    "ConnectorState",
     "Conversation",
     "Document",
     "DocumentStatus",
     "DocumentVersion",
     "Feedback",
+    "GitHubFileState",
+    "GitHubRepositoryMapping",
     "KnowledgeBase",
     "Message",
     "Organization",
+    "Project",
+    "ProjectMember",
+    "ProjectRole",
+    "ProjectSource",
     "RefreshToken",
     "Role",
+    "SlackChannelMapping",
+    "SlackEventReceipt",
+    "SourceAccessGrant",
     "User",
 ]

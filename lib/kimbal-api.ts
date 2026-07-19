@@ -12,6 +12,7 @@ export type UserOut = {
   full_name: string;
   role: string;
   is_active: boolean;
+  default_project_id: string | null;
   created_at: string;
 };
 
@@ -20,7 +21,35 @@ export type KnowledgeBase = {
   name: string;
   description: string;
   embedding_model: string;
+  access_scope: "organization" | "restricted";
   created_at: string;
+};
+
+export type Project = {
+  id: string;
+  name: string;
+  slug: string;
+  description: string;
+  is_active: boolean;
+  source_ids: string[];
+  authorized_source_ids: string[];
+  member_count: number;
+  user_project_role: "member" | "manager" | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ProjectMember = {
+  user_id: string;
+  full_name: string;
+  email: string;
+  project_role: "member" | "manager";
+};
+
+export type SourcePermission = {
+  knowledge_base_id: string;
+  access_scope: "organization" | "restricted";
+  user_ids: string[];
 };
 
 export type DocumentOut = {
@@ -81,9 +110,116 @@ export type SearchResponse = {
   timings_ms: Record<string, number>;
 };
 
+export type EvidenceItem = {
+  source_type: string;
+  source_id: string;
+  source_url: string | null;
+  project_id: string;
+  title: string;
+  content: string;
+  snippet: string;
+  retrieval_arms: string[];
+  rank: number;
+  score: number;
+  freshness: string | null;
+  metadata: Record<string, unknown>;
+  citation_identity: string;
+  chunk_id: string | null;
+  document_id: string | null;
+};
+
+export type IncidentCopilot = {
+  issue_key: string;
+  project_id: string;
+  current_status: string;
+  owner: string;
+  facts: string[];
+  timeline: Array<{
+    occurred_at: string;
+    label: string;
+    detail: string;
+    source_type: string;
+    source_url: string | null;
+    citation_identity: string;
+  }>;
+  immediate_checks: string[];
+  likely_next_actions: string[];
+  missing_evidence: string[];
+  evidence: EvidenceItem[];
+  partial: boolean;
+  tool_failures: string[];
+};
+
+export type ExpertResponse = {
+  project_id: string;
+  query: string;
+  experts: Array<{
+    rank: number;
+    person: string;
+    score: number;
+    explanation: string;
+    signals: Array<Record<string, unknown>>;
+    source_ids: string[];
+    citation_identity: string;
+    source_url: string | null;
+  }>;
+  empty_reason: string | null;
+};
+
+export type ChangeResponse = {
+  project_id: string;
+  start_date: string;
+  end_date: string;
+  changes: Array<{
+    changed_at: string;
+    change_type: string;
+    source_type: string;
+    source_id: string;
+    title: string;
+    source_url: string | null;
+    summary: string;
+    citation_identity: string;
+    document_id: string;
+  }>;
+  deduplicated_count: number;
+  source_counts: Record<string, number>;
+};
+
+export type FreshnessResponse = {
+  project_id: string;
+  generated_at: string;
+  score: number;
+  stale_sources: number;
+  failing_sources: number;
+  outdated_slack_resolutions: number;
+  repository_branch_lag: number;
+  replaced_documents: number;
+  total_findings: number;
+  issues: Array<{
+    kind: string;
+    severity: string;
+    source_type: string;
+    source_id: string;
+    title: string;
+    age_days: number | null;
+    source_url: string | null;
+    suggested_remediation: string;
+  }>;
+  connectors: Array<{
+    kind: string;
+    status: string;
+    last_success_at: string | null;
+    lag_seconds: number | null;
+    failure_count: number;
+    detail: string | null;
+  }>;
+  suggestions: string[];
+};
+
 export type Conversation = {
   id: string;
   knowledge_base_id: string;
+  project_id: string | null;
   title: string;
   created_at: string;
   updated_at: string;
@@ -185,6 +321,115 @@ export type JiraSyncResponse = {
   updated: number;
   skipped: number;
   documents: JiraSyncedDocument[];
+};
+
+export type SlackChannel = {
+  id: string;
+  workspace_id: string;
+  channel_id: string;
+  channel_name: string;
+  visibility: "public";
+  is_enabled: boolean;
+  project_id: string;
+  knowledge_base_id: string;
+  last_thread_ts: string | null;
+};
+
+export type SlackStatus = {
+  configured: boolean;
+  credentials_configured: boolean;
+  socket_mode_configured: boolean;
+  read_only: boolean;
+  workspace_id: string | null;
+  status: string;
+  allowlisted_channels: number;
+  last_event_at: string | null;
+  last_success_at: string | null;
+  last_error_at: string | null;
+  lag_seconds: number | null;
+  failure_count: number;
+  error_detail: string | null;
+  channels: SlackChannel[];
+};
+
+export type SlackSyncResponse = {
+  created: number;
+  updated: number;
+  skipped: number;
+  deleted: number;
+  failed: number;
+};
+
+export type GitHubRepository = {
+  id: string;
+  owner: string;
+  repository: string;
+  branch: string;
+  project_id: string;
+  knowledge_base_id: string;
+  path_allowlist: string[];
+  path_denylist: string[];
+  is_enabled: boolean;
+  status: string;
+  head_commit_sha: string | null;
+  head_tree_sha: string | null;
+  last_indexed_at: string | null;
+  last_error_at: string | null;
+  error_detail: string | null;
+};
+
+export type GitHubStatus = {
+  configured: boolean;
+  credentials_configured: boolean;
+  read_only: boolean;
+  preferred_auth: "github_app";
+  status: string;
+  repositories: GitHubRepository[];
+  last_success_at: string | null;
+  last_error_at: string | null;
+  lag_seconds: number | null;
+  failure_count: number;
+  error_detail: string | null;
+};
+
+export type GitHubSyncResponse = {
+  created: number;
+  updated: number;
+  renamed: number;
+  deleted: number;
+  skipped: number;
+  denied: number;
+  oversized: number;
+  binary: number;
+  commit_sha: string;
+  tree_sha: string;
+};
+
+export type GitHubPullRequest = {
+  number: number;
+  title: string;
+  body: string;
+  state: string;
+  author: string;
+  url: string;
+  base_branch: string;
+  head_branch: string;
+  created_at: string;
+  updated_at: string;
+  merged_at: string | null;
+  draft: boolean;
+  labels: string[];
+};
+
+export type ExactCodeHit = {
+  chunk_id: string;
+  document_id: string;
+  path: string;
+  symbol: string | null;
+  language: string;
+  commit_sha: string;
+  url: string;
+  snippet: string;
 };
 
 export type SourceMetric = {
@@ -525,6 +770,35 @@ export type RagSource = {
   freshness_label?: string;
 };
 
+export type RetrievalTraceQuery = {
+  fusion_mode?: string;
+  reranker?: string;
+  candidate_count?: number;
+  selected_count?: number;
+  expanded_count?: number;
+  discarded_candidate_count?: number;
+  fusion_latency_ms?: number;
+  neighbor_expansion_latency_ms?: number;
+  arms?: Array<{
+    arm: string;
+    result_count: number;
+    latency_ms: number;
+    identifier_count?: number;
+    token_count?: number;
+  }>;
+  selected?: Array<{
+    chunk_id: string;
+    retrieval_arms: string[];
+    arm_ranks: Record<string, number>;
+    selected_rank: number | null;
+    expanded_from_chunk_id: string | null;
+  }>;
+};
+
+export type RetrievalTrace = {
+  queries?: RetrievalTraceQuery[];
+};
+
 export type AskStreamEvent =
   | {
       type: "sources";
@@ -534,6 +808,7 @@ export type AskStreamEvent =
         source_mode?: SourceMode;
         answer_mode?: AnswerMode;
         query_classification?: string;
+        retrieval_trace?: RetrievalTrace | null;
       };
     }
   | { type: "delta"; data: { text?: string; delta?: string; content?: string } }
@@ -762,10 +1037,17 @@ export class CVUMApi {
     return this.request<KnowledgeBase[]>("/knowledge-bases");
   }
 
-  async ensureKnowledgeBase(): Promise<KnowledgeBase> {
+  async ensureKnowledgeBase(projectId?: string): Promise<KnowledgeBase> {
     await this.ensureSession();
-    const existing = await this.listKnowledgeBases();
-    const kb = PREFERRED_KB_NAMES.map((name) => existing.find((item) => item.name === name)).find(Boolean) ?? existing[0];
+    const [existing, projects] = await Promise.all([
+      this.listKnowledgeBases(),
+      projectId ? this.listProjects() : Promise.resolve([]),
+    ]);
+    const project = projects.find((item) => item.id === projectId);
+    const scoped = project
+      ? existing.filter((item) => project.authorized_source_ids.includes(item.id))
+      : existing;
+    const kb = PREFERRED_KB_NAMES.map((name) => scoped.find((item) => item.name === name)).find(Boolean) ?? scoped[0];
     if (kb) return kb;
     return this.request<KnowledgeBase>("/knowledge-bases", {
       method: "POST",
@@ -776,18 +1058,26 @@ export class CVUMApi {
     });
   }
 
-  async ensureUploadKnowledgeBase(): Promise<KnowledgeBase> {
+  async ensureUploadKnowledgeBase(projectId?: string): Promise<KnowledgeBase> {
     await this.ensureSession();
     const existing = await this.listKnowledgeBases();
-    const kb = existing.find((item) => item.name === "CVUM Local Uploads");
-    if (kb) return kb;
-    return this.request<KnowledgeBase>("/knowledge-bases", {
-      method: "POST",
-      body: {
-        name: "CVUM Local Uploads",
-        description: "Operator-uploaded documents kept separate from read-only external source syncs.",
-      },
-    });
+    let kb = existing.find((item) => item.name === "CVUM Local Uploads");
+    if (!kb) {
+      kb = await this.request<KnowledgeBase>("/knowledge-bases", {
+        method: "POST",
+        body: {
+          name: "CVUM Local Uploads",
+          description: "Operator-uploaded documents kept separate from read-only external source syncs.",
+        },
+      });
+    }
+    if (projectId) {
+      const project = (await this.listProjects()).find((item) => item.id === projectId);
+      if (project && !project.source_ids.includes(kb.id)) {
+        await this.updateProjectSources(project.id, [...project.source_ids, kb.id]);
+      }
+    }
+    return kb;
   }
 
   async listDocuments(kbId?: string, limit = 50, offset = 0) {
@@ -840,11 +1130,129 @@ export class CVUMApi {
     });
   }
 
-  async createConversation(kbId: string, title: string) {
+  async listProjects() {
+    return this.request<Project[]>("/projects");
+  }
+
+  async incidentCopilot(projectId: string, issueKey: string) {
+    return this.request<IncidentCopilot>("/workflows/incident", {
+      method: "POST",
+      body: { project_id: projectId, issue_key: issueKey },
+    });
+  }
+
+  async findExperts(projectId: string, query: string, limit = 8) {
+    return this.request<ExpertResponse>("/workflows/experts", {
+      method: "POST",
+      body: { project_id: projectId, query, limit },
+    });
+  }
+
+  async whatChanged(projectId: string, startDate: string, endDate: string, limit = 100) {
+    return this.request<ChangeResponse>("/workflows/changes", {
+      method: "POST",
+      body: { project_id: projectId, start_date: startDate, end_date: endDate, limit },
+    });
+  }
+
+  async freshness(projectId: string) {
+    return this.request<FreshnessResponse>(
+      `/workflows/freshness?project_id=${encodeURIComponent(projectId)}`
+    );
+  }
+
+  async createProject(input: { name: string; slug?: string; description?: string }) {
+    const project = await this.request<Project>("/projects", {
+      method: "POST",
+      body: input,
+    });
+    this.clearLiveCache();
+    return project;
+  }
+
+  async updateProject(
+    projectId: string,
+    input: Partial<Pick<Project, "name" | "slug" | "description" | "is_active">>
+  ) {
+    const project = await this.request<Project>(`/projects/${encodeURIComponent(projectId)}`, {
+      method: "PATCH",
+      body: input,
+    });
+    this.clearLiveCache();
+    return project;
+  }
+
+  async deleteProject(projectId: string) {
+    await this.request<void>(`/projects/${encodeURIComponent(projectId)}`, { method: "DELETE" });
+    this.clearLiveCache();
+  }
+
+  async updateProjectSources(projectId: string, knowledgeBaseIds: string[]) {
+    const project = await this.request<Project>(`/projects/${encodeURIComponent(projectId)}/sources`, {
+      method: "PUT",
+      body: { knowledge_base_ids: knowledgeBaseIds },
+    });
+    this.clearLiveCache();
+    return project;
+  }
+
+  async listProjectMembers(projectId: string) {
+    return this.request<ProjectMember[]>(`/projects/${encodeURIComponent(projectId)}/members`);
+  }
+
+  async updateProjectMembers(
+    projectId: string,
+    members: Array<{ user_id: string; project_role: "member" | "manager" }>
+  ) {
+    const result = await this.request<ProjectMember[]>(`/projects/${encodeURIComponent(projectId)}/members`, {
+      method: "PUT",
+      body: { members },
+    });
+    this.clearLiveCache();
+    return result;
+  }
+
+  async setDefaultProject(projectId: string) {
+    const project = await this.request<Project>("/users/me/default-project", {
+      method: "PUT",
+      body: { project_id: projectId },
+    });
+    this.sessionUser = this.sessionUser
+      ? { ...this.sessionUser, default_project_id: project.id }
+      : null;
+    this.sessionCheckedAt = Date.now();
+    this.clearLiveCache();
+    return project;
+  }
+
+  async sourcePermissions(knowledgeBaseId: string) {
+    return this.request<SourcePermission>(
+      `/knowledge-bases/${encodeURIComponent(knowledgeBaseId)}/permissions`
+    );
+  }
+
+  async updateSourcePermissions(
+    knowledgeBaseId: string,
+    accessScope: "organization" | "restricted",
+    userIds: string[]
+  ) {
+    const result = await this.request<SourcePermission>(
+      `/knowledge-bases/${encodeURIComponent(knowledgeBaseId)}/permissions`,
+      {
+        method: "PUT",
+        body: { access_scope: accessScope, user_ids: userIds },
+      }
+    );
+    this.clearLiveCache();
+    return result;
+  }
+
+  async createConversation(kbId: string, title: string, projectId?: string) {
     return this.request<Conversation>("/conversations", {
       method: "POST",
       body: {
         knowledge_base_id: kbId,
+        project_id: projectId ?? null,
         title,
       },
     });
@@ -947,6 +1355,73 @@ export class CVUMApi {
     return result;
   }
 
+  async slackStatus() {
+    return this.cached("slackStatus", LIVE_CACHE_MS, () => this.request<SlackStatus>("/slack/status"));
+  }
+
+  async configureSlack(input: {
+    workspace_id: string;
+    channels: Array<{ channel_id: string; channel_name: string; project_id: string; visibility?: "public" }>;
+  }) {
+    const result = await this.request<SlackStatus>("/slack/configuration", {
+      method: "PUT",
+      body: input,
+    });
+    this.clearLiveCache();
+    return result;
+  }
+
+  async syncSlack(channelId?: string) {
+    const result = await this.request<SlackSyncResponse>("/slack/sync", {
+      method: "POST",
+      body: { channel_id: channelId ?? null },
+    });
+    this.clearLiveCache();
+    return result;
+  }
+
+  async githubStatus() {
+    return this.cached("githubStatus", LIVE_CACHE_MS, () => this.request<GitHubStatus>("/github/status"));
+  }
+
+  async configureGithubRepository(input: {
+    owner: string;
+    repository: string;
+    branch: string;
+    project_id: string;
+    path_allowlist?: string[];
+    path_denylist?: string[];
+  }) {
+    const result = await this.request<GitHubRepository>("/github/repositories", {
+      method: "POST",
+      body: input,
+    });
+    this.clearLiveCache();
+    return result;
+  }
+
+  async syncGithubRepository(mappingId: string) {
+    const result = await this.request<GitHubSyncResponse>(
+      `/github/repositories/${encodeURIComponent(mappingId)}/sync`,
+      { method: "POST" }
+    );
+    this.clearLiveCache();
+    return result;
+  }
+
+  async githubRecentPullRequests(mappingId: string) {
+    return this.request<GitHubPullRequest[]>(
+      `/github/repositories/${encodeURIComponent(mappingId)}/recent-prs`
+    );
+  }
+
+  async exactCodeSearch(query: string, projectId?: string, limit = 20) {
+    return this.request<{ hits: ExactCodeHit[] }>("/github/code-search", {
+      method: "POST",
+      body: { query, project_id: projectId ?? null, limit },
+    });
+  }
+
   async metricsOverview() {
     return this.cached("metricsOverview", LIVE_CACHE_MS, () => this.request<MetricsOverview>("/metrics/overview"));
   }
@@ -997,7 +1472,8 @@ export class CVUMApi {
     sourceMode: SourceMode = "knowledge",
     answerMode: AnswerMode = "fast",
     council?: CouncilConfig,
-    assistantRole?: AssistantRoleConfig
+    assistantRole?: AssistantRoleConfig,
+    projectId?: string
   ): AsyncGenerator<AskStreamEvent> {
     const body: {
       question: string;
@@ -1007,7 +1483,9 @@ export class CVUMApi {
       assistant_role_prompt?: string;
       council_models?: string[];
       council_chair_model?: string;
+      project_id?: string;
     } = { question, source_mode: sourceMode, answer_mode: answerMode };
+    if (projectId) body.project_id = projectId;
     if (assistantRole?.name && assistantRole.prompt) {
       body.assistant_role = assistantRole.name;
       body.assistant_role_prompt = assistantRole.prompt;

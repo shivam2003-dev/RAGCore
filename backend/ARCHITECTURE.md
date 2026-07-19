@@ -54,27 +54,27 @@ FastAPI `Depends` for request-scoped wiring (db session, current user); construc
 ## 3. Retrieval pipeline (request path)
 
 ```
-query ─ auth ─ conversation context ─ [query rewrite] ─┐
+query ─ Project/source ACL ─ conversation context ─ [query rewrite] ─┐
                                                        ▼
                        ┌── dense: pgvector cosine top-K ──┐
-                       │                                  ├─ weighted fusion ─ [rerank] ─ prompt ─ LLM ─ SSE stream
-                       └── sparse: Postgres FTS top-K ────┘                                  │
+                       ├── sparse: Postgres FTS top-K ────┼─ weighted/RRF ─ rerank ─ neighbors ─ prompt ─ LLM ─ SSE
+                       └── optional exact/rare-token arm ─┘                                       │
                                                                               citations extracted from
                                                                               chunk-ids echoed in output
 ```
 
-- Hybrid fusion: normalized weighted sum (`score = w_dense·cos + w_sparse·ts_rank`), weights in config. Simple, debuggable, good enough until measured otherwise.
+- Weighted fusion is the measured default; flagged RRF, exact/rare-token, source recency, model
+  reranking, and neighbor expansion can be evaluated independently.
 - Every stage is a `PipelineStep` protocol: `async def run(ctx: RetrievalContext) -> RetrievalContext`. The pipeline is an ordered list of steps.
 
-### CRAG extension points (designed now, implemented later)
+### CRAG and evidence orchestration
 
-`RetrievalContext` carries `confidence: float | None` and `attempts: list[RetrievalAttempt]`. Three seams already in the pipeline:
+`RetrievalContext` carries confidence and attempts. The implemented evaluator, policy, query
+rewriter, and grounding verifier keep the strongest attempt across bounded retries.
 
-1. **`RetrievalEvaluator`** protocol — scores retrieved set post-fusion. Ships as `NoopEvaluator`; CRAG drops in an LLM/classifier grader.
-2. **`RetrievalPolicy`** protocol — decides `ACCEPT | REWRITE | WIDEN_K | FALLBACK` from the context. Ships as `AlwaysAccept`; CRAG adds retry loops without touching the pipeline.
-3. **`GroundingVerifier`** protocol — post-generation answer-vs-sources check. Ships as noop.
-
-Agentic RAG later = a planner service composing the same pipeline steps as tools. No rewrite needed.
+The optional planner composes seven read-only evidence tools. Planner inputs cannot widen the
+already-resolved Project/source scope. Parallel database tools use independent sessions and bounded
+deadlines; successful partial evidence still reaches the existing citation and grounding gates.
 
 ## 4. Ingestion pipeline (background path)
 
@@ -90,7 +90,10 @@ upload → validate (type, size, magic bytes) → store file → extract text
 
 ## 5. Data model (summary — full DDL in Module 3)
 
-`organizations → users → knowledge_bases → collections → documents → document_versions → chunks (embedding vector(D), tsv tsvector)` plus `conversations → messages → citations`, `feedback`, `api_keys`, `audit_logs`, `refresh_tokens`.
+`organizations → users/projects → knowledge_bases → collections → documents → document_versions → chunks`
+plus conversations/messages/citations, Project sources/members, restricted-source grants, connector
+state, Slack mappings/event receipts, GitHub repository mappings/file state, feedback, API keys,
+audit logs, and refresh tokens.
 
 - UUIDv7 primary keys (time-ordered, index-friendly).
 - `chunks.embedding` → HNSW index (cosine); `chunks.tsv` → GIN index. Both in the same row: hybrid search is one SQL query with two CTEs.
@@ -101,7 +104,7 @@ upload → validate (type, size, magic bytes) → store file → extract text
 | Concern | Approach |
 |---|---|
 | AuthN | OAuth2 password flow → short-lived JWT access + rotating refresh tokens; API keys for service access |
-| AuthZ | RBAC: `admin / editor / viewer` per organization, enforced in a single `require_role` dependency |
+| AuthZ | RBAC plus server-side Project/source intersection; restricted sources require explicit grants |
 | Caching | Redis: embedding cache (hash of text+model), response cache (hash of query+kb+filters, short TTL), rate-limit counters, session/refresh state |
 | Observability | structlog JSON logs w/ request-id; Prometheus `/metrics`; OpenTelemetry traces spanning retrieve→embed→llm; per-request timing breakdown returned in response metadata |
 | Security | Pydantic validation everywhere, file magic-byte checks, prompt-injection guards (source-tagging + instruction hierarchy in prompt builder), PII redaction hook in logging pipeline, secrets via env only |

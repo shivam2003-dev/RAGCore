@@ -2,8 +2,8 @@ from fastapi import APIRouter
 
 from api.deps import CurrentUser, DbDep, RedisDep, RetrievalDep, SettingsDep
 from api.schemas import SearchHitOut, SearchRequest, SearchResponse
-from core.exceptions import NotFoundError
-from repositories.knowledge import KnowledgeBaseRepository
+from models import Role
+from repositories.projects import ProjectAuthorizationRepository
 from retrieval.context import RetrievalContext
 from services.cache import ResponseCache
 
@@ -19,13 +19,32 @@ async def search(
     redis: RedisDep,
     settings: SettingsDep,
 ) -> SearchResponse:
-    kb = await KnowledgeBaseRepository(db).get(body.knowledge_base_id, user.organization_id)
-    if kb is None:
-        raise NotFoundError("Knowledge base not found")
+    scope = await ProjectAuthorizationRepository(db).require_source(
+        user=user,
+        knowledge_base_id=body.knowledge_base_id,
+        project_id=body.project_id,
+    )
 
     cache = ResponseCache(redis, settings.response_cache_ttl_seconds)
     cache_key = cache.key_for(
-        "search", str(body.knowledge_base_id), str(body.collection_id), body.query, str(body.top_k)
+        "search",
+        "auth-v2",
+        str(user.organization_id),
+        str(user.id),
+        user.role.value,
+        str(scope.project.id),
+        ",".join(str(source_id) for source_id in scope.knowledge_base_ids),
+        str(body.knowledge_base_id),
+        str(body.collection_id),
+        body.query,
+        str(body.top_k),
+        settings.retrieval_fusion_mode,
+        str(settings.retrieval_rrf_smoothing_k),
+        str(settings.retrieval_exact_identifier_enabled),
+        str(settings.retrieval_rare_token_enabled),
+        str(settings.retrieval_recency_decay_enabled),
+        str(settings.retrieval_model_reranker_enabled),
+        str(settings.retrieval_neighbor_expansion_enabled),
     )
     if cached := await cache.get(cache_key):
         return SearchResponse.model_validate(cached)
@@ -52,6 +71,7 @@ async def search(
         ],
         confidence=ctx.confidence,
         timings_ms=ctx.timings_ms,
+        trace=ctx.trace if user.role is Role.ADMIN else None,
     )
     await cache.set(cache_key, response.model_dump(mode="json"))
     return response

@@ -18,9 +18,11 @@ import {
   Users,
   Settings,
   Workflow,
+  FolderKanban,
   LogOut,
   PanelLeftClose,
   PanelLeftOpen,
+  AlertTriangle,
   X,
   type LucideIcon,
 } from "lucide-react";
@@ -40,6 +42,7 @@ const groups: Array<{ label?: string; items: Item[] }> = [
     label: "Knowledge",
     items: [
       { label: "Ask CVUM (RAG)", href: "/", icon: MessageSquare },
+      { label: "Incident Copilot", href: "/incident-copilot", icon: AlertTriangle },
       { label: "Knowledge Sources", href: "/knowledge-sources", icon: Database },
       { label: "Documents", href: "/documents", icon: FileText },
       { label: "Saved Answers", href: "/saved-answers", icon: BookmarkCheck },
@@ -60,6 +63,7 @@ const groups: Array<{ label?: string; items: Item[] }> = [
     items: [
       { label: "Data Sources", href: "/data-sources", icon: Server },
       { label: "Access Control", href: "/access-control", icon: Users },
+      { label: "Projects", href: "/projects", icon: FolderKanban },
       { label: "Settings", href: "/settings", icon: Settings },
       { label: "Integrations", href: "/integrations", icon: Workflow },
     ],
@@ -83,10 +87,15 @@ export function Sidebar({ user, onLogout }: { user: UserOut; onLogout: () => voi
     if (typeof window === "undefined") return false;
     return window.localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === "true";
   });
-  const visibleGroups =
-    user.role === "admin"
-      ? groups
-      : [{ items: [{ label: "Ask CVUM", href: "/", icon: MessageSquare }] }];
+  const visibleGroups = user.role === "admin"
+    ? groups
+    : [{
+        items: [
+          { label: "Ask CVUM", href: "/", icon: MessageSquare },
+          { label: "Incident Copilot", href: "/incident-copilot", icon: AlertTriangle },
+          { label: "Projects", href: "/projects", icon: FolderKanban },
+        ],
+      }];
 
   useEffect(() => {
     document.body.classList.toggle("sidebar-collapsed", collapsed);

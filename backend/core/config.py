@@ -65,6 +65,30 @@ class Settings(BaseSettings):
     retrieval_candidate_k: int = 24  # per-arm candidates before fusion
     retrieval_dense_weight: float = 0.7
     retrieval_sparse_weight: float = 0.3
+    retrieval_fusion_mode: str = "weighted"  # weighted | rrf
+    retrieval_rrf_smoothing_k: int = 60
+    retrieval_exact_identifier_enabled: bool = False
+    retrieval_exact_identifier_weight: float = 0.25
+    retrieval_rare_token_enabled: bool = False
+    retrieval_rare_token_weight: float = 0.15
+    retrieval_recency_decay_enabled: bool = False
+    retrieval_recency_half_lives: str = "jira=45,confluence=180,slack=30,github=90,upload=365,web=14,default=180"
+    retrieval_recency_floor: float = 0.35
+    retrieval_model_reranker_enabled: bool = False
+    retrieval_model_reranker_timeout_seconds: float = 3.0
+    retrieval_model_reranker_candidate_k: int = 20
+    retrieval_neighbor_expansion_enabled: bool = False
+    retrieval_neighbor_window: int = 1
+    retrieval_neighbor_token_budget: int = 1200
+    retrieval_neighbor_max_chunks: int = 8
+
+    # Optional planner -> tools -> synthesis path. It is conservative/off by
+    # default; deterministic planning remains available without an LLM.
+    knowledge_planner_enabled: bool = False
+    knowledge_planner_model_enabled: bool = False
+    knowledge_planner_max_tools: int = 5
+    knowledge_planner_per_tool_timeout_seconds: float = 4.0
+    knowledge_planner_overall_timeout_seconds: float = 8.0
 
     # chunking
     chunk_size_tokens: int = 400
@@ -126,6 +150,38 @@ class Settings(BaseSettings):
     jira_max_attachments_per_issue: int = 10
     jira_attachment_max_bytes: int = 5_242_880
     jira_hydration_concurrency: int = 8
+
+    # Slack Socket Mode connector. Tokens are server-side environment values;
+    # database configuration contains only non-secret channel/project mappings.
+    slack_app_token: str = ""
+    slack_bot_token: str = ""
+    slack_workspace_id: str = ""
+    slack_default_kb_name_prefix: str = "Slack"
+    slack_request_timeout_seconds: float = 20.0
+    slack_api_max_retries: int = 3
+    slack_history_limit: int = 15
+    slack_burst_min_messages: int = 2
+    slack_burst_rare_token_threshold: int = 2
+    slack_burst_reaction_threshold: int = 2
+    slack_summary_max_chars: int = 1800
+
+    # GitHub read-only repository indexing. Production should prefer a GitHub
+    # App installation token; a fine-grained read-only token is supported for
+    # local verification and is never persisted in connector state.
+    github_token: str = ""
+    github_api_base_url: str = "https://api.github.com"
+    github_api_version: str = "2026-03-10"
+    github_default_branch: str = "main"
+    github_request_timeout_seconds: float = 20.0
+    github_api_max_retries: int = 3
+    github_max_files_per_sync: int = 2000
+    github_max_blob_bytes: int = 1_000_000
+    github_recent_pr_limit: int = 20
+    github_default_path_denylist: str = (
+        ".git/**,node_modules/**,.next/**,dist/**,build/**,coverage/**,vendor/**,"
+        "**/*.min.js,**/*.map,**/generated/**,**/.env*,**/*secret*,**/*credential*,"
+        "**/*.pem,**/*.key,**/*.p12,**/id_rsa*"
+    )
 
     # Optional web search for Ask. Disabled by default so the app never fabricates
     # internet results when no real provider is configured.

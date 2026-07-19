@@ -37,12 +37,14 @@ OPENROUTER_API_KEY=...
 EMBEDDING_PROVIDER=fake
 ```
 
+The complete safe-default reference is [Environment Variables](./ENVIRONMENT_VARIABLES.md).
+
 For production retrieval quality, configure a real embedding provider such as OpenAI, Jina, Voyage, or a TEI-compatible endpoint.
 
 ## Health and Metrics
 
-- `GET /healthz`
-- `GET /readyz`
+- `GET /health/live`
+- `GET /health/ready`
 - `GET /metrics`
 - `GET /api/v1/metrics/overview`
 
@@ -51,6 +53,13 @@ For production retrieval quality, configure a real embedding provider such as Op
 ## Docker
 
 The backend Dockerfile is multi-stage and runs as a non-root user. Use the compose full profile when local Postgres, Redis, and backend need to run together.
+
+Validation commands:
+
+```bash
+docker compose config --quiet
+docker build -t ragcore-backend:local ./backend
+```
 
 ## Kubernetes
 
@@ -62,6 +71,28 @@ Kubernetes manifests include:
 - ingress tuned for SSE streaming
 
 Run migrations before serving API traffic.
+
+Follow [Migrations and Rollback](./MIGRATIONS_AND_ROLLBACK.md) for the revision order, disposable
+round-trip gate, application-first rollback, and schema downgrade precautions.
+
+## Optional feature rollout
+
+Keep weighted retrieval and planner orchestration at their conservative defaults first. Enable one
+retrieval signal at a time, run tests/evals, and inspect citations before enabling the next. The
+fastest planner kill switch is `KNOWLEDGE_PLANNER_ENABLED=false`; model planning already falls back
+to deterministic routing on invalid output or failure.
+
+Slack and GitHub are independently disabled until server-side credentials plus explicit Project
+allowlists exist. Disabling a mapping stops new sync/tool selection without widening permissions or
+deleting previously indexed audit history.
+
+## Knowledge operations
+
+- `/projects`: onboard/switch Project lenses and verify authorized source counts.
+- `/incident-copilot`: inspect cited incident facts, explicit inferences, and missing source families.
+- `/content-health`: review live connector lag, stale/failing sources, repository lag, and remediation.
+- `GET /api/v1/slack/status` and `GET /api/v1/github/status`: sanitized connector state.
+- `POST /api/v1/tools/{tool}`: authenticated read-only evidence primitives for diagnostics.
 
 ## Atlassian Sync Operations
 

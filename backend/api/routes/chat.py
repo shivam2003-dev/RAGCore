@@ -3,7 +3,7 @@ import uuid
 from collections.abc import AsyncIterator
 
 from fastapi import APIRouter
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sse_starlette.sse import EventSourceResponse
 
 from api.deps import ChatServiceDep, CurrentUser, DbDep, LLMDep, SettingsDep
@@ -26,22 +26,32 @@ from repositories.conversations import (
     FeedbackRepository,
     MessageRepository,
 )
+from repositories.projects import ProjectAuthorizationRepository, ProjectRepository
 from services.chat_service import llm_council_status
 
 router = APIRouter(tags=["chat"])
 
 
 @router.post("/conversations", response_model=ConversationOut, status_code=201)
-async def create_conversation(
-    body: ConversationCreate, user: CurrentUser, chat: ChatServiceDep
-) -> ConversationOut:
-    conversation = await chat.start_conversation(user, body.knowledge_base_id, body.title)
+async def create_conversation(body: ConversationCreate, user: CurrentUser, chat: ChatServiceDep) -> ConversationOut:
+    conversation = await chat.start_conversation(
+        user,
+        body.knowledge_base_id,
+        body.title,
+        body.project_id,
+    )
     return ConversationOut.model_validate(conversation)
 
 
 @router.get("/conversations", response_model=list[ConversationOut])
 async def list_conversations(user: CurrentUser, db: DbDep, limit: int = 50, offset: int = 0) -> list[ConversationOut]:
-    convs = await ConversationRepository(db).list_for_user(user.id, limit=min(limit, 200), offset=offset)
+    project_ids = {project.id for project in await ProjectRepository(db).list_for_user(user)}
+    convs = await ConversationRepository(db).list_for_user(
+        user.id,
+        limit=min(limit, 200),
+        offset=offset,
+        project_ids=project_ids,
+    )
     return [ConversationOut.model_validate(c) for c in convs]
 
 
@@ -59,9 +69,7 @@ async def chat_capabilities(_user: CurrentUser, settings: SettingsDep) -> ChatCa
 
 
 @router.post("/chat/roles/generate", response_model=RoleGenerateResponse)
-async def generate_role_prompt(
-    body: RoleGenerateRequest, _user: CurrentUser, llm: LLMDep
-) -> RoleGenerateResponse:
+async def generate_role_prompt(body: RoleGenerateRequest, _user: CurrentUser, llm: LLMDep) -> RoleGenerateResponse:
     system = (
         "You are the CVUM role prompt generator. Return valid JSON only with keys "
         '"name" and "prompt". Build a safe background role prompt for an enterprise '
@@ -94,18 +102,16 @@ async def generate_role_prompt(
 
 
 @router.get("/conversations/{conversation_id}/messages", response_model=list[MessageOut])
-async def list_messages(
-    conversation_id: uuid.UUID, user: CurrentUser, db: DbDep
-) -> list[MessageOut]:
+async def list_messages(conversation_id: uuid.UUID, user: CurrentUser, db: DbDep) -> list[MessageOut]:
     conv = await ConversationRepository(db).get_owned(conversation_id, user.id)
     if conv is None:
         raise NotFoundError("Conversation not found")
+    scope = await ProjectAuthorizationRepository(db).authorized_scope(
+        user=user,
+        project_id=conv.project_id,
+    )
     messages = await MessageRepository(db).list_for_conversation(conversation_id)
-    document_ids = {
-        citation.document_id
-        for message in messages
-        for citation in message.citations
-    }
+    document_ids = {citation.document_id for message in messages for citation in message.citations}
     docs_by_id: dict[uuid.UUID, Document] = {}
     if document_ids:
         rows = await db.scalars(
@@ -114,6 +120,10 @@ async def list_messages(
             .where(
                 Document.id.in_(document_ids),
                 KnowledgeBase.organization_id == user.organization_id,
+                or_(
+                    Document.knowledge_base_id.in_(scope.knowledge_base_ids),
+                    Document.doc_metadata["source"].as_string() == "web",
+                ),
             )
         )
         docs_by_id = {doc.id: doc for doc in rows}
@@ -131,9 +141,7 @@ async def delete_conversation(conversation_id: uuid.UUID, user: CurrentUser, db:
 
 
 @router.delete("/conversations/{conversation_id}/messages", status_code=204)
-async def clear_conversation_history(
-    conversation_id: uuid.UUID, user: CurrentUser, chat: ChatServiceDep
-) -> None:
+async def clear_conversation_history(conversation_id: uuid.UUID, user: CurrentUser, chat: ChatServiceDep) -> None:
     await chat.clear_history(user=user, conversation_id=conversation_id)
 
 
@@ -150,6 +158,7 @@ async def ask(
                 conversation_id=conversation_id,
                 question=body.question,
                 regenerate=body.regenerate,
+                project_id=body.project_id,
                 source_mode=body.source_mode,
                 answer_mode=body.answer_mode,
                 assistant_role=body.assistant_role,
@@ -188,19 +197,26 @@ async def submit_feedback(body: FeedbackCreate, user: CurrentUser, db: DbDep) ->
 
 def _message_out(message: Message, docs_by_id: dict[uuid.UUID, Document]) -> MessageOut:
     output = MessageOut.model_validate(message)
+    if message.citations and any(citation.document_id not in docs_by_id for citation in message.citations):
+        return output.model_copy(
+            update={
+                "content": "This answer is unavailable because its source permissions changed.",
+                "citations": [],
+            }
+        )
     citations = []
-    for citation in message.citations:
+    for citation, citation_out in zip(message.citations, output.citations, strict=True):
         doc = docs_by_id.get(citation.document_id)
-        citation_out = output.citations[len(citations)]
-        if doc is not None:
-            citation_out = citation_out.model_copy(
-                update={
-                    "document_title": doc.title,
-                    "title": doc.title,
-                    "source_type": _citation_source_type(doc),
-                    "url": _document_source_url(doc),
-                }
-            )
+        if doc is None:
+            continue
+        citation_out = citation_out.model_copy(
+            update={
+                "document_title": doc.title,
+                "title": doc.title,
+                "source_type": _citation_source_type(doc),
+                "url": _document_source_url(doc),
+            }
+        )
         citations.append(citation_out)
     return output.model_copy(update={"citations": citations})
 
