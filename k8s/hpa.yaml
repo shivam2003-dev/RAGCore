@@ -1,13 +1,13 @@
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
 metadata:
-  name: kimbal-api
-  namespace: kimbal
+  name: cvum-api
+  namespace: cvum
 spec:
   scaleTargetRef:
     apiVersion: apps/v1
     kind: Deployment
-    name: kimbal-api
+    name: cvum-api
   minReplicas: 3
   maxReplicas: 12
   metrics:

@@ -1,8 +1,8 @@
-/goal Upgrade KimbalGPT into a secure, project-scoped, multi-source enterprise knowledge platform inspired by the architecture documented in shivam_plan/
+/goal Upgrade CVUM into a secure, project-scoped, multi-source enterprise knowledge platform inspired by the architecture documented in shivam_plan/
   new.md. Work phase-by-phase until every applicable acceptance criterion below is implemented and verified.
 
   Workspace:
-  - /Users/shivamkumar/Desktop/kimbalGPT
+  - the checked-out RAGCore repository root
 
   Primary references:
   - AGENTS.md

@@ -51,11 +51,11 @@ async def test_architecture_hld_beats_incident_page_that_only_mentions_hes() -> 
         RetrievalContext(kb_id=uuid.uuid4(), query="Explain HES architecture and components", top_k=2),
         [
             _chunk("RCA: HES Web Not Accessible", "confluence", 0.88),
-            _chunk("Kimbal HES HLD", "confluence", 0.68),
+            _chunk("CVUM HES HLD", "confluence", 0.68),
         ],
     )
 
-    assert ranked[0].document_title == "Kimbal HES HLD"
+    assert ranked[0].document_title == "CVUM HES HLD"
 
 
 async def test_generic_query_words_are_not_treated_as_exact_identifiers() -> None:

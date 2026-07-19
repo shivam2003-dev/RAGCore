@@ -17,7 +17,7 @@ async def _create_kb(client, headers) -> str:
 
 async def _upload_and_wait(client, headers, kb_id: str) -> str:
     content = (
-        b"# Deploy Guide\n\nPush the image to harbor.kimbal.io registry. "
+        b"# Deploy Guide\n\nPush the image to harbor.cvum.io registry. "
         b"Then create a pull request in infrastructure-configs and ArgoCD syncs it.\n"
     )
     resp = await client.post(
@@ -183,7 +183,7 @@ async def test_structured_jira_count_remains_deterministic(client, auth_headers,
             "source": "jira",
             "jira_issue_key": "DEVO-4242",
             "jira_project_key": "DEVO",
-            "jira_assignee_email": "s.kumar@kimbal.io",
+            "jira_assignee_email": "s.kumar@cvum.io",
             "jira_issue_status": "In Progress",
             "jira_issue_status_category_key": "indeterminate",
         },
@@ -223,7 +223,7 @@ async def test_structured_jira_count_remains_deterministic(client, auth_headers,
     async with client.stream(
         "POST",
         f"/api/v1/conversations/{conversation.json()['id']}/ask",
-        json={"question": "How many open Jira issues in DEVO are assigned to s.kumar@kimbal.io?"},
+        json={"question": "How many open Jira issues in DEVO are assigned to s.kumar@cvum.io?"},
         headers=auth_headers,
     ) as response:
         events: list[tuple[str, str]] = []
@@ -264,7 +264,7 @@ async def test_document_delete_removes_from_search(client, auth_headers):
 
 
 async def test_rbac_viewer_cannot_upload(client, auth_headers):
-    # register a second Kimbal user → viewer role
+    # register a second CVUM user → viewer role
     me = await client.get("/api/v1/auth/me", headers=auth_headers)
     org_admin_email = me.json()["email"]
     org_name_resp = await client.get("/api/v1/knowledge-bases", headers=auth_headers)
@@ -277,7 +277,7 @@ async def test_rbac_viewer_cannot_upload(client, auth_headers):
     reg = await client.post(
         "/api/v1/auth/register",
         json={
-            "email": f"viewer-{_uuid.uuid4().hex[:8]}@kimbal.io",
+            "email": f"viewer-{_uuid.uuid4().hex[:8]}@cvum.io",
             "password": "SuperSecret123!",
             "full_name": "Viewer",
             "organization_name": "SharedOrgForRBAC",

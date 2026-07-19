@@ -2,7 +2,7 @@ import uuid
 
 
 async def test_register_login_refresh_me(client):
-    email = f"flow-{uuid.uuid4().hex[:8]}@kimbal.io"
+    email = f"flow-{uuid.uuid4().hex[:8]}@cvum.io"
     reg = await client.post(
         "/api/v1/auth/register",
         json={
@@ -43,18 +43,18 @@ async def test_register_login_refresh_me(client):
 async def test_super_admin_email_gets_admin_role(client, auth_headers):
     me = await client.get("/api/v1/auth/me", headers=auth_headers)
     assert me.status_code == 200
-    assert me.json()["email"] == "s.kumar@kimbal.io"
+    assert me.json()["email"] == "s.kumar@cvum.io"
     assert me.json()["role"] == "admin"
 
 
-async def test_non_kimbal_email_rejected(client):
+async def test_non_cvum_email_rejected(client):
     resp = await client.post(
         "/api/v1/auth/register",
         json={
             "email": "outsider@example.com",
             "password": "SuperSecret123!",
             "full_name": "Outsider",
-            "organization_name": "Kimbal",
+            "organization_name": "CVUM",
         },
     )
     assert resp.status_code == 422
@@ -97,7 +97,7 @@ async def test_api_key_auth(client, auth_headers):
 
 
 async def test_admin_can_create_viewer_user(client, auth_headers):
-    email = f"created-{uuid.uuid4().hex[:8]}@kimbal.io"
+    email = f"created-{uuid.uuid4().hex[:8]}@cvum.io"
     created = await client.post(
         "/api/v1/admin/users",
         json={
@@ -133,7 +133,7 @@ async def test_weak_password_rejected(client):
     resp = await client.post(
         "/api/v1/auth/register",
         json={
-            "email": "weak@kimbal.io",
+            "email": "weak@cvum.io",
             "password": "short",
             "full_name": "W",
             "organization_name": "WOrg",

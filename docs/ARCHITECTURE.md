@@ -71,7 +71,7 @@ The frontend uses a conversation-first Ask surface plus a separate enterprise ad
 - `/integrations`
 - `/projects`
 
-The frontend API client lives in `lib/kimbal-api.ts`. It performs local development session bootstrap and calls the backend APIs. Session bootstrap is single-flight so concurrent widgets do not race through register/login.
+The frontend API client lives in `lib/cvum-api.ts`. It performs local development session bootstrap and calls the backend APIs. Session bootstrap is single-flight so concurrent widgets do not race through register/login.
 
 ## Deployment
 

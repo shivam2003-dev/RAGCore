@@ -1,4 +1,4 @@
-# KimbalGPT Enterprise Knowledge Upgrade — Progress
+# CVUM Enterprise Knowledge Upgrade — Progress
 
 Last updated: 2026-07-19
 

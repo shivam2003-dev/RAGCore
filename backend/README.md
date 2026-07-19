@@ -1,4 +1,4 @@
-# Kimbal Backend
+# CVUM Backend
 
 Enterprise RAG backend. FastAPI + PostgreSQL/pgvector + Redis. See `ARCHITECTURE.md` for design.
 
@@ -22,7 +22,7 @@ cp .env.example .env                    # add provider keys
 ```bash
 # register (first user in an org becomes admin)
 curl -s -X POST localhost:8000/api/v1/auth/register -H 'content-type: application/json' \
-  -d '{"email":"you@kimbal.io","password":"SuperSecret123!","full_name":"You","organization_name":"Kimbal"}'
+  -d '{"email":"you@cvum.io","password":"SuperSecret123!","full_name":"You","organization_name":"CVUM"}'
 
 # then: create knowledge base → upload document → search → create conversation → ask (SSE)
 ```

@@ -1,4 +1,4 @@
-# KimbalGPT Enterprise Knowledge Upgrade — Implementation Design
+# CVUM Enterprise Knowledge Upgrade — Implementation Design
 
 Status: Phase 0 architecture contract
 
@@ -36,7 +36,7 @@ The schema is currently at Alembic revision `0002`. Revision `0001` bootstraps O
 
 ### Public APIs
 
-The FastAPI application exposes `/api/v1` routes for authentication, knowledge bases, documents, Jira, Confluence, search, chat/conversations, web search, discovery, evaluations, metrics, and administration. The frontend client in `lib/kimbal-api.ts` is the public browser integration point.
+The FastAPI application exposes `/api/v1` routes for authentication, knowledge bases, documents, Jira, Confluence, search, chat/conversations, web search, discovery, evaluations, metrics, and administration. The frontend client in `lib/cvum-api.ts` is the public browser integration point.
 
 Compatibility requirements:
 
@@ -205,7 +205,7 @@ normalize(change) -> document payload(s)
 
 Common connector state stores organization, connector kind, project mappings, non-secret allowlists, cursor/version, status, last event/success/error timestamps, lag, and sanitized error detail. Secret references are environment-variable names or secret-manager handles only.
 
-Connector writes are limited to KimbalGPT-owned database/files. Source-system clients expose read methods only. Tests assert the absence of mutation calls.
+Connector writes are limited to CVUM-owned database/files. Source-system clients expose read methods only. Tests assert the absence of mutation calls.
 
 ## 7. Slack normalized thread contract
 
@@ -271,7 +271,7 @@ The executor creates one database session per parallel database tool, applies pe
 
 ## 10. MCP boundary
 
-MCP exposes narrow, read-only retrieval primitives (`search_knowledge`, `search_jira`, `search_confluence`, `search_slack`, `search_code`, `recent_prs`, `who_knows`). Authentication resolves to the same KimbalGPT user and organization model. The server computes project/source scope exactly as REST/chat do; caller-supplied project IDs are validated and caller-supplied source IDs can only narrow scope.
+MCP exposes narrow, read-only retrieval primitives (`search_knowledge`, `search_jira`, `search_confluence`, `search_slack`, `search_code`, `recent_prs`, `who_knows`). Authentication resolves to the same CVUM user and organization model. The server computes project/source scope exactly as REST/chat do; caller-supplied project IDs are validated and caller-supplied source IDs can only narrow scope.
 
 MCP tools return typed evidence, not generated final answers. Inputs have length/count/date validation, deadlines, and audit correlation. No connector configuration, source mutation, credential, raw ACL list, or unrestricted SQL/filesystem operation is exposed.
 

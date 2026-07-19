@@ -5,7 +5,7 @@ import { usePathname } from "next/navigation";
 import { AppPreferences } from "@/components/app-preferences";
 import { Sidebar } from "@/components/sidebar";
 import { TopBar } from "@/components/topbar";
-import { ApiError, kimbalApi, type UserOut } from "@/lib/kimbal-api";
+import { ApiError, cvumApi, type UserOut } from "@/lib/cvum-api";
 
 const LOGIN_PATH = "/login";
 const ASK_PATH = "/";
@@ -39,7 +39,7 @@ export function AuthShell({ children }: { children: ReactNode }) {
       }
       setChecking(true);
       try {
-        const currentUser = await kimbalApi.ensureSession();
+        const currentUser = await cvumApi.ensureSession();
         if (cancelled) return;
         setUser(currentUser);
         if (currentUser.role !== "admin" && !isAsk && !isProjectLens && !isKnowledgeWorkflow) {
@@ -63,7 +63,7 @@ export function AuthShell({ children }: { children: ReactNode }) {
   }, [isAsk, isKnowledgeWorkflow, isLogin, isProjectLens, pathname]);
 
   async function logout() {
-    await kimbalApi.logout();
+    await cvumApi.logout();
     setUser(null);
     window.location.replace(LOGIN_PATH);
   }
@@ -95,7 +95,7 @@ export function AuthShell({ children }: { children: ReactNode }) {
     <>
       <AppPreferences />
       <Sidebar user={user} onLogout={() => void logout()} />
-      <div className="kimbal-shell lg:pl-[248px]">
+      <div className="cvum-shell lg:pl-[248px]">
         <TopBar user={user} onLogout={() => void logout()} />
         <main className="mx-auto max-w-[1440px] px-4 py-5 sm:px-6 lg:px-8 lg:py-7">{children}</main>
       </div>

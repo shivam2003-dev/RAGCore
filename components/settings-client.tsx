@@ -34,7 +34,7 @@ import {
   type SettingsState,
 } from "@/lib/settings-store";
 import {
-  kimbalApi,
+  cvumApi,
   type ChatCapabilities,
   type ConfluenceStatus,
   type EvalOverview,
@@ -43,7 +43,7 @@ import {
   type UserOut,
   type WebSearchStatus,
   type WebSearchTest,
-} from "@/lib/kimbal-api";
+} from "@/lib/cvum-api";
 
 type SectionId = "Workspace" | "Appearance" | "Retrieval" | "Connectors" | "Quality" | "Security";
 
@@ -82,15 +82,15 @@ export function SettingsClient() {
     setLoading(true);
     setError("");
     try {
-      if (force) kimbalApi.refreshLiveData();
-      const user = await kimbalApi.ensureSession();
+      if (force) cvumApi.refreshLiveData();
+      const user = await cvumApi.ensureSession();
       const [runtime, web, confluence, jira, capabilities, evals] = await Promise.all([
-        kimbalApi.runtimeConfig(),
-        kimbalApi.webSearchStatus(),
-        kimbalApi.confluenceStatus(),
-        kimbalApi.jiraStatus(),
-        kimbalApi.chatCapabilities(),
-        kimbalApi.evalsOverview(),
+        cvumApi.runtimeConfig(),
+        cvumApi.webSearchStatus(),
+        cvumApi.confluenceStatus(),
+        cvumApi.jiraStatus(),
+        cvumApi.chatCapabilities(),
+        cvumApi.evalsOverview(),
       ]);
       setLive({ user, runtime, web, confluence, jira, capabilities, evals });
       setNotice("Runtime status is current");
@@ -162,7 +162,7 @@ export function SettingsClient() {
         </SettingsCard>
         <SettingsCard icon={Activity} title="Environment">
           <LiveRow label="Environment" value={live?.runtime.app_env ?? "Loading"} />
-          <LiveRow label="API" value={kimbalApi.baseUrl} />
+          <LiveRow label="API" value={cvumApi.baseUrl} />
           <LiveRow label="Authentication" value={live?.runtime.auth_disabled ? "Local bypass" : "Enforced"} />
         </SettingsCard>
       </div>
@@ -221,11 +221,11 @@ export function SettingsClient() {
     ),
     Connectors: (
       <div className="grid gap-4 lg:grid-cols-2">
-        <ConnectorCard title="Tavily Web" configured={Boolean(live?.web.configured)} detail={`${live?.web.provider ?? "-"} / top ${live?.web.top_k ?? "-"}`} busy={busy === "Web test"} actionLabel="Test provider" onAction={() => void run("Web test", async () => setWebTest(await kimbalApi.testWebSearch()))}>
+        <ConnectorCard title="Tavily Web" configured={Boolean(live?.web.configured)} detail={`${live?.web.provider ?? "-"} / top ${live?.web.top_k ?? "-"}`} busy={busy === "Web test"} actionLabel="Test provider" onAction={() => void run("Web test", async () => setWebTest(await cvumApi.testWebSearch()))}>
           {webTest && <LiveRow label="Last test" value={`${webTest.result_count} results in ${webTest.latency_ms} ms`} />}
         </ConnectorCard>
-        <ConnectorCard title="Confluence" configured={Boolean(live?.confluence.configured)} detail={`${live?.confluence.space_key ?? "-"} / read only`} busy={busy === "Confluence sync"} actionLabel="Sync now" onAction={() => void run("Confluence sync", () => kimbalApi.syncConfluence())} />
-        <ConnectorCard title="Jira" configured={Boolean(live?.jira.configured)} detail={`${live?.jira.project_key ?? "-"} / read only`} busy={busy === "Jira sync"} actionLabel="Sync now" onAction={() => void run("Jira sync", () => kimbalApi.syncJira())} />
+        <ConnectorCard title="Confluence" configured={Boolean(live?.confluence.configured)} detail={`${live?.confluence.space_key ?? "-"} / read only`} busy={busy === "Confluence sync"} actionLabel="Sync now" onAction={() => void run("Confluence sync", () => cvumApi.syncConfluence())} />
+        <ConnectorCard title="Jira" configured={Boolean(live?.jira.configured)} detail={`${live?.jira.project_key ?? "-"} / read only`} busy={busy === "Jira sync"} actionLabel="Sync now" onAction={() => void run("Jira sync", () => cvumApi.syncJira())} />
         <SettingsCard icon={Database} title="Source administration">
           <CardLink href="/data-sources">Open data sources</CardLink>
           <CardLink href="/knowledge-sources">Open knowledge sources</CardLink>

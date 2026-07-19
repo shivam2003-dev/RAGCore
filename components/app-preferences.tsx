@@ -13,7 +13,7 @@ export function AppPreferences() {
     }
 
     function handleStorage(event: StorageEvent) {
-      if (event.key === "kimbal.settings.v1") {
+      if (event.key === "cvum.settings.v1") {
         applySettingsToDocument(loadSettings());
       }
     }

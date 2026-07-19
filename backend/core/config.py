@@ -13,8 +13,8 @@ class Settings(BaseSettings):
     app_name: str = "cvum-backend"
 
     # database
-    database_url: str = "postgresql+asyncpg://kimbal:kimbal_dev_password@localhost:5433/kimbal"
-    database_url_test: str = "postgresql+asyncpg://kimbal:kimbal_dev_password@localhost:5433/kimbal_test"
+    database_url: str = "postgresql+asyncpg://cvum:cvum_dev_password@localhost:5433/cvum"
+    database_url_test: str = "postgresql+asyncpg://cvum:cvum_dev_password@localhost:5433/cvum_test"
     database_pool_size: int = 10
     database_max_overflow: int = 10
 

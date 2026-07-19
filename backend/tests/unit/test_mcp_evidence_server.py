@@ -11,7 +11,7 @@ class FakeRestClient:
 
     def call_tool(self, *, name, request):  # type: ignore[no-untyped-def]
         if self.reject:
-            raise RuntimeError("Kimbal authorization rejected the tool call (404)")
+            raise RuntimeError("CVUM authorization rejected the tool call (404)")
         self.calls.append((name, request))
         return {"tool": name.value, "project_id": str(request.project_id), "evidence": []}
 

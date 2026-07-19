@@ -49,5 +49,5 @@ def test_uuid7_time_ordered():
 def test_pii_redaction():
     from utils.pii import redact_pii
 
-    assert "<email>" in redact_pii("contact s.kumar@kimbal.io now")
+    assert "<email>" in redact_pii("contact s.kumar@cvum.io now")
     assert "password=<redacted>" in redact_pii("password: hunter2secret")

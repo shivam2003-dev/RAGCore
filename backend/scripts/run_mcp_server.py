@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Read-only MCP stdio bridge to Kimbal's authenticated evidence REST API."""
+"""Read-only MCP stdio bridge to CVUM's authenticated evidence REST API."""
 
 import json
 import os
@@ -42,11 +42,11 @@ class MCPRestClient:
         )
         if response.status_code >= 400:
             if response.status_code in {401, 403, 404}:
-                raise RuntimeError(f"Kimbal authorization rejected the tool call ({response.status_code})")
-            raise RuntimeError(f"Kimbal tool call failed ({response.status_code})")
+                raise RuntimeError(f"CVUM authorization rejected the tool call ({response.status_code})")
+            raise RuntimeError(f"CVUM tool call failed ({response.status_code})")
         payload = response.json()
         if not isinstance(payload, dict):
-            raise RuntimeError("Kimbal tool response was not an object")
+            raise RuntimeError("CVUM tool response was not an object")
         return payload
 
 
@@ -87,10 +87,10 @@ def handle_message(message: dict[str, Any], client: MCPRestClient) -> dict[str, 
             {
                 "protocolVersion": MCP_PROTOCOL_VERSION,
                 "capabilities": {"tools": {"listChanged": False}},
-                "serverInfo": {"name": "kimbal-evidence", "version": "0.1.0"},
+                "serverInfo": {"name": "cvum-evidence", "version": "0.1.0"},
                 "instructions": (
                     "Read-only retrieval primitives. Every call requires an explicit project_id "
-                    "and is authorized by the Kimbal API. Tool output is evidence, not an answer."
+                    "and is authorized by the CVUM API. Tool output is evidence, not an answer."
                 ),
             },
         )
@@ -134,9 +134,9 @@ def _error(request_id: object, code: int, message: str) -> dict[str, object]:
 
 def main() -> int:
     client = MCPRestClient(
-        base_url=os.getenv("KIMBAL_API_BASE_URL", "http://127.0.0.1:8000"),
-        api_key=os.getenv("KIMBAL_API_KEY", ""),
-        timeout_seconds=float(os.getenv("KIMBAL_MCP_TIMEOUT_SECONDS", "15")),
+        base_url=os.getenv("CVUM_API_BASE_URL", "http://127.0.0.1:8000"),
+        api_key=os.getenv("CVUM_API_KEY", ""),
+        timeout_seconds=float(os.getenv("CVUM_MCP_TIMEOUT_SECONDS", "15")),
     )
     try:
         for raw_line in sys.stdin:

@@ -1,4 +1,4 @@
-import type { SourceMetric } from "@/lib/kimbal-api";
+import type { SourceMetric } from "@/lib/cvum-api";
 
 const sourceLabels: Record<string, string> = {
   jira: "Jira",

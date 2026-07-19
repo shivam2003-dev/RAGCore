@@ -18,12 +18,12 @@ jobs:
       postgres:
         image: pgvector/pgvector:pg17
         env:
-          POSTGRES_USER: kimbal
-          POSTGRES_PASSWORD: kimbal_dev_password
-          POSTGRES_DB: kimbal_test
+          POSTGRES_USER: cvum
+          POSTGRES_PASSWORD: cvum_dev_password
+          POSTGRES_DB: cvum_test
         ports: ["5433:5432"]
         options: >-
-          --health-cmd "pg_isready -U kimbal"
+          --health-cmd "pg_isready -U cvum"
           --health-interval 5s
           --health-timeout 3s
           --health-retries 10
@@ -50,7 +50,7 @@ jobs:
       - name: Enable pgvector extension
         run: |
           sudo apt-get install -y postgresql-client >/dev/null
-          PGPASSWORD=kimbal_dev_password psql -h localhost -p 5433 -U kimbal -d kimbal_test \
+          PGPASSWORD=cvum_dev_password psql -h localhost -p 5433 -U cvum -d cvum_test \
             -c "CREATE EXTENSION IF NOT EXISTS vector; CREATE EXTENSION IF NOT EXISTS pg_trgm;"
 
       - name: Lint (ruff)
@@ -62,7 +62,7 @@ jobs:
       - name: Tests
         run: pytest -q --cov=. --cov-report=term-missing
         env:
-          DATABASE_URL: postgresql+asyncpg://kimbal:kimbal_dev_password@localhost:5433/kimbal_test
+          DATABASE_URL: postgresql+asyncpg://cvum:cvum_dev_password@localhost:5433/cvum_test
 
       - name: Golden eval release gate
         run: python scripts/run_evals.py
@@ -74,12 +74,12 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Build image
-        run: docker build -t kimbal-api:${{ github.sha }} .
+        run: docker build -t cvum-api:${{ github.sha }} .
 
       - name: Security scan (Trivy)
         uses: aquasecurity/trivy-action@master
         with:
-          image-ref: kimbal-api:${{ github.sha }}
+          image-ref: cvum-api:${{ github.sha }}
           format: table
           exit-code: "1"
           severity: CRITICAL,HIGH

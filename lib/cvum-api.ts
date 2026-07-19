@@ -858,7 +858,7 @@ export type UserCreateInput = {
 
 const API_BASE =
   process.env.NEXT_PUBLIC_CVUM_API_BASE?.replace(/\/$/, "") ?? "http://localhost:8000/api/v1";
-const SESSION_KEY = "kimbal.local.session.v1";
+const SESSION_KEY = "cvum.local.session.v1";
 const PREFERRED_KB_NAMES = ["Jira DEVO", "Confluence DevOps1", "CVUM Local Uploads"];
 const SESSION_CACHE_MS = 30_000;
 const LIVE_CACHE_MS = 15_000;
@@ -1540,4 +1540,4 @@ function decodeSseFrame(frame: string): AskStreamEvent | null {
   }
 }
 
-export const kimbalApi = new CVUMApi();
+export const cvumApi = new CVUMApi();

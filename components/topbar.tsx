@@ -4,7 +4,7 @@ import { FormEvent, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Bell, CheckCircle2, LogOut, Menu, Search, Settings2, X } from "lucide-react";
 import Link from "next/link";
-import { kimbalApi, type ActivityMetric, type UserOut } from "@/lib/kimbal-api";
+import { cvumApi, type ActivityMetric, type UserOut } from "@/lib/cvum-api";
 
 function firstName(name: string) {
   return name.trim().split(/\s+/)[0] || "there";
@@ -20,8 +20,8 @@ export function TopBar({ user, onLogout }: { user: UserOut; onLogout: () => void
     async function load() {
       if (user.role !== "admin") return;
       try {
-        await kimbalApi.ensureSession();
-        const metrics = await kimbalApi.metricsOverview();
+        await cvumApi.ensureSession();
+        const metrics = await cvumApi.metricsOverview();
         setNotifications(metrics.recent_activity.slice(0, 5));
       } catch {
         setNotifications([]);
@@ -37,7 +37,7 @@ export function TopBar({ user, onLogout }: { user: UserOut; onLogout: () => void
   }
 
   return (
-    <header className="kimbal-topbar sticky top-0 z-20 flex h-[64px] items-center justify-between border-b border-line bg-canvas/80 px-4 backdrop-blur-xl sm:px-6 lg:px-8">
+    <header className="cvum-topbar sticky top-0 z-20 flex h-[64px] items-center justify-between border-b border-line bg-canvas/80 px-4 backdrop-blur-xl sm:px-6 lg:px-8">
       <div className="flex min-w-0 items-center gap-3">
         <button type="button" onClick={() => window.dispatchEvent(new Event("cvum:open-navigation"))} aria-label="Open navigation" className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-ink-500 hover:bg-white lg:hidden"><Menu size={19} /></button>
       <p className="truncate text-[14px] text-ink-500">

@@ -51,7 +51,7 @@ Secrets belong in backend environment variables or a production secret manager:
 - database and Redis credentials
 - `SLACK_APP_TOKEN` and `SLACK_BOT_TOKEN`
 - `GITHUB_TOKEN`
-- `KIMBAL_API_KEY` for an MCP client process
+- `CVUM_API_KEY` for an MCP client process
 
 Do not commit `.env` files or pasted tokens. The repository should contain only `.env.example` placeholders.
 

@@ -31,10 +31,10 @@ def test_jira_issue_rendering_indexes_assignment_and_status_fields() -> None:
         labels=[],
         components=[],
         assignee="Shivam Kumar",
-        assignee_email="s.kumar@kimbal.io",
+        assignee_email="s.kumar@cvum.io",
         assignee_account_id="abc-123",
         reporter="Platform",
-        reporter_email="platform@kimbal.io",
+        reporter_email="platform@cvum.io",
         reporter_account_id="reporter-123",
         created_at="2026-07-04T00:00:00.000+0000",
         updated_at="2026-07-04T01:00:00.000+0000",
@@ -47,9 +47,9 @@ def test_jira_issue_rendering_indexes_assignment_and_status_fields() -> None:
     metadata = _issue_metadata(board=board, issue=issue)
 
     assert "Assignee:** Shivam Kumar" in rendered
-    assert "s.kumar@kimbal.io" not in rendered
+    assert "s.kumar@cvum.io" not in rendered
     assert "abc-123" not in rendered
-    assert metadata["jira_assignee_email"] == "s.kumar@kimbal.io"
+    assert metadata["jira_assignee_email"] == "s.kumar@cvum.io"
     assert metadata["jira_issue_status_category_key"] == "new"
     assert metadata["source"] == "jira"
     assert metadata["source_type"] == "jira"
@@ -61,7 +61,7 @@ def test_jira_issue_rendering_indexes_assignment_and_status_fields() -> None:
     assert metadata["source_updated_at"] == "2026-07-04T01:00:00.000+0000"
     assert metadata["status"] == "To Do"
     assert metadata["labels"] == []
-    assert metadata["owner"] == "s.kumar@kimbal.io"
+    assert metadata["owner"] == "s.kumar@cvum.io"
     assert metadata["acl"] == "connector-visible"
     assert metadata["connector_sync_id"] == "jira:DEVO:DEVO-10555:2026-07-04T01:00:00.000+0000"
     assert metadata["chunk_strategy_version"] == "jira-relationship-comments-attachments-v5"

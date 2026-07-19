@@ -1,6 +1,6 @@
 # GitHub Code Connector
 
-The GitHub connector builds a read-only, incremental code index inside KimbalGPT's existing
+The GitHub connector builds a read-only, incremental code index inside CVUM's existing
 `KnowledgeBase -> Document -> DocumentVersion -> Chunk` pipeline. Production should use a GitHub App
 installation token; a fine-grained read-only personal access token is supported for initial local
 verification.

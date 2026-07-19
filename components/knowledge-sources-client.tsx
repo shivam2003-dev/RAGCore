@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { Cloud, Clock, Database, FileText, GitBranch, Loader2, MessageSquare, Plus, RefreshCw, ShieldCheck, SquareKanban } from "lucide-react";
 import { Badge, Card, CardLink, GhostButton, PageHeader, PrimaryButton } from "@/components/ui";
-import { kimbalApi, type ConfluenceStatus, type GitHubStatus, type JiraStatus, type KnowledgeBase, type SlackStatus } from "@/lib/kimbal-api";
+import { cvumApi, type ConfluenceStatus, type GitHubStatus, type JiraStatus, type KnowledgeBase, type SlackStatus } from "@/lib/cvum-api";
 
 type SourceRow = {
   kb: KnowledgeBase;
@@ -29,17 +29,17 @@ export function KnowledgeSourcesClient() {
   async function refresh() {
     setLoading(true);
     try {
-      await kimbalApi.ensureSession();
+      await cvumApi.ensureSession();
       const [kbs, confluenceStatus, jiraStatus, slackStatus, githubStatus] = await Promise.all([
-        kimbalApi.listKnowledgeBases(),
-        kimbalApi.confluenceStatus().catch(() => null),
-        kimbalApi.jiraStatus().catch(() => null),
-        kimbalApi.slackStatus().catch(() => null),
-        kimbalApi.githubStatus().catch(() => null),
+        cvumApi.listKnowledgeBases(),
+        cvumApi.confluenceStatus().catch(() => null),
+        cvumApi.jiraStatus().catch(() => null),
+        cvumApi.slackStatus().catch(() => null),
+        cvumApi.githubStatus().catch(() => null),
       ]);
       const rows = await Promise.all(
         kbs.map(async (kb) => {
-          const docs = await kimbalApi.listDocuments(kb.id, 1);
+          const docs = await cvumApi.listDocuments(kb.id, 1);
           return { kb, docsTotal: docs.total };
         })
       );
@@ -61,8 +61,8 @@ export function KnowledgeSourcesClient() {
     setSyncingConfluence(true);
     setStatus("Syncing Confluence DevOps1");
     try {
-      await kimbalApi.ensureSession();
-      const result = await kimbalApi.syncConfluence();
+      await cvumApi.ensureSession();
+      const result = await cvumApi.syncConfluence();
       setStatus(
         `Confluence sync queued: ${result.created} created, ${result.updated} updated, ${result.skipped} unchanged`
       );
@@ -78,8 +78,8 @@ export function KnowledgeSourcesClient() {
     setSyncingJira(true);
     setStatus("Syncing Jira DEVO");
     try {
-      await kimbalApi.ensureSession();
-      const result = await kimbalApi.syncJira();
+      await cvumApi.ensureSession();
+      const result = await cvumApi.syncJira();
       setStatus(
         `Jira sync queued: ${result.created} created, ${result.updated} updated, ${result.skipped} unchanged`
       );
@@ -95,8 +95,8 @@ export function KnowledgeSourcesClient() {
     setSyncingSlack(true);
     setStatus("Syncing allowlisted Slack channels");
     try {
-      await kimbalApi.ensureSession();
-      const result = await kimbalApi.syncSlack();
+      await cvumApi.ensureSession();
+      const result = await cvumApi.syncSlack();
       setStatus(
         `Slack sync queued: ${result.created} created, ${result.updated} updated, ${result.skipped} unchanged, ${result.deleted} deleted`
       );
@@ -112,8 +112,8 @@ export function KnowledgeSourcesClient() {
     setSyncingGithubId(mappingId);
     setStatus("Indexing changed GitHub files");
     try {
-      await kimbalApi.ensureSession();
-      const result = await kimbalApi.syncGithubRepository(mappingId);
+      await cvumApi.ensureSession();
+      const result = await cvumApi.syncGithubRepository(mappingId);
       setStatus(
         `GitHub sync: ${result.created} created, ${result.updated} updated, ${result.renamed} renamed, ${result.deleted} deleted, ${result.skipped} unchanged`
       );
