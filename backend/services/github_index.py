@@ -453,7 +453,7 @@ class GitHubIndexService:
             await self._db.commit()
             return {**counts, "commit_sha": snapshot.commit_sha, "tree_sha": snapshot.tree_sha}
         except asyncio.CancelledError:
-            await asyncio.shield(
+            cleanup_task = asyncio.create_task(
                 self._record_failure(
                     organization_id=organization_id,
                     mapping_id=mapping_id,
@@ -461,6 +461,10 @@ class GitHubIndexService:
                     error_detail="GitHub repository sync was cancelled",
                 )
             )
+            try:
+                await asyncio.shield(cleanup_task)
+            except asyncio.CancelledError:
+                await cleanup_task
             raise
         except Exception as exc:
             await self._record_failure(
