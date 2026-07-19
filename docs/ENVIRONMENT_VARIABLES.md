@@ -37,7 +37,7 @@ Change one retrieval flag at a time and rerun the 129-case evaluation gate befor
 | Confluence | `CONFLUENCE_EMAIL`, `CONFLUENCE_API_TOKEN` | `CONFLUENCE_BASE_URL`, space, filters, limits, timeouts |
 | Jira | `JIRA_EMAIL`, `JIRA_API_TOKEN` | base URL, project/board, filters, hydration/attachment limits |
 | Slack | `SLACK_APP_TOKEN`, `SLACK_BOT_TOKEN` | workspace ID, public-channel mappings in the database, retry/burst limits |
-| GitHub | `GITHUB_TOKEN` | API URL/version, repository mappings, branch/path policies, size/count limits |
+| GitHub | `GITHUB_TOKEN` | API URL/version, repository mappings, branch/path policies, size/count/lease limits |
 | Web/Discover | provider API key variables | provider, endpoint, locale, result/cache limits |
 
 Production GitHub should prefer a GitHub App installation token. Slack must use an app-level

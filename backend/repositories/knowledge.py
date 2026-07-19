@@ -52,7 +52,7 @@ class KnowledgeBaseRepository:
                     KnowledgeBase.organization_id == org_id,
                     KnowledgeBase.name == name,
                 )
-            )
+            ),
         )
 
 
@@ -95,8 +95,24 @@ class DocumentRepository:
                     Document.doc_metadata[key].as_string() == value,
                 )
                 .order_by(Document.updated_at.desc(), Document.created_at.desc())
-            )
+            ),
         )
+
+    async def list_active_by_metadata_key(
+        self,
+        kb_id: uuid.UUID,
+        key: str,
+    ) -> list[Document]:
+        rows = await self.db.scalars(
+            select(Document)
+            .where(
+                Document.knowledge_base_id == kb_id,
+                Document.is_deleted.is_(False),
+                Document.doc_metadata[key].as_string().is_not(None),
+            )
+            .order_by(Document.updated_at.desc(), Document.created_at.desc())
+        )
+        return list(rows)
 
     async def update_metadata(self, doc_id: uuid.UUID, metadata: dict[str, object]) -> None:
         await self.db.execute(update(Document).where(Document.id == doc_id).values(doc_metadata=metadata))
@@ -143,12 +159,8 @@ class DocumentRepository:
         orphan_ids = list(await self.db.scalars(stmt))
         if not orphan_ids:
             return 0
-        await self.db.execute(
-            update(Document).where(Document.id.in_(orphan_ids)).values(is_deleted=True)
-        )
-        await self.db.execute(
-            update(Chunk).where(Chunk.document_id.in_(orphan_ids)).values(is_active=False)
-        )
+        await self.db.execute(update(Document).where(Document.id.in_(orphan_ids)).values(is_deleted=True))
+        await self.db.execute(update(Chunk).where(Chunk.document_id.in_(orphan_ids)).values(is_active=False))
         return len(orphan_ids)
 
     async def list_by_kb(self, kb_id: uuid.UUID, limit: int = 50, offset: int = 0) -> tuple[list[Document], int]:

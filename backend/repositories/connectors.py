@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from typing import cast
 
-from sqlalchemy import select, update
+from sqlalchemy import or_, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -29,7 +29,7 @@ class ConnectorRepository:
                     ConnectorState.organization_id == organization_id,
                     ConnectorState.kind == kind,
                 )
-            )
+            ),
         )
 
     async def ensure_state(
@@ -92,7 +92,7 @@ class ConnectorRepository:
                     SlackChannelMapping.channel_id == channel_id,
                     SlackChannelMapping.is_enabled.is_(True),
                 )
-            )
+            ),
         )
 
     async def claim_slack_event(
@@ -145,9 +145,7 @@ class ConnectorRepository:
             values["processed_at"] = utcnow()
         if status == "processing":
             values["attempts"] = SlackEventReceipt.attempts + 1
-        await self.db.execute(
-            update(SlackEventReceipt).where(SlackEventReceipt.id == receipt_id).values(**values)
-        )
+        await self.db.execute(update(SlackEventReceipt).where(SlackEventReceipt.id == receipt_id).values(**values))
 
     async def record_connector_success(
         self,
@@ -163,9 +161,7 @@ class ConnectorRepository:
         state.error_detail = None
         state.failure_count = 0
         state.lag_seconds = (
-            max(0, int((now - source_activity_at).total_seconds()))
-            if source_activity_at is not None
-            else None
+            max(0, int((now - source_activity_at).total_seconds())) if source_activity_at is not None else None
         )
 
     def record_connector_failure(self, state: ConnectorState, error: str) -> None:
@@ -199,7 +195,7 @@ class ConnectorRepository:
                     GitHubRepositoryMapping.id == mapping_id,
                     GitHubRepositoryMapping.organization_id == organization_id,
                 )
-            )
+            ),
         )
 
     async def get_github_mapping_by_repo(
@@ -219,7 +215,7 @@ class ConnectorRepository:
                     GitHubRepositoryMapping.repository == repository,
                     GitHubRepositoryMapping.branch == branch,
                 )
-            )
+            ),
         )
 
     async def acquire_github_sync(
@@ -227,6 +223,9 @@ class ConnectorRepository:
         *,
         mapping_id: uuid.UUID,
         organization_id: uuid.UUID,
+        lease_id: uuid.UUID,
+        now: datetime,
+        expires_at: datetime,
     ) -> bool:
         result = await self.db.execute(
             update(GitHubRepositoryMapping)
@@ -234,9 +233,100 @@ class ConnectorRepository:
                 GitHubRepositoryMapping.id == mapping_id,
                 GitHubRepositoryMapping.organization_id == organization_id,
                 GitHubRepositoryMapping.is_enabled.is_(True),
-                GitHubRepositoryMapping.status != "syncing",
+                or_(
+                    GitHubRepositoryMapping.status != "syncing",
+                    GitHubRepositoryMapping.sync_lease_expires_at.is_(None),
+                    GitHubRepositoryMapping.sync_lease_expires_at <= now,
+                ),
             )
-            .values(status="syncing", error_detail=None)
+            .values(
+                status="syncing",
+                error_detail=None,
+                sync_lease_id=lease_id,
+                sync_lease_expires_at=expires_at,
+            )
+            .returning(GitHubRepositoryMapping.id)
+        )
+        return result.scalar_one_or_none() is not None
+
+    async def renew_github_sync(
+        self,
+        *,
+        mapping_id: uuid.UUID,
+        organization_id: uuid.UUID,
+        lease_id: uuid.UUID,
+        expires_at: datetime,
+    ) -> bool:
+        result = await self.db.execute(
+            update(GitHubRepositoryMapping)
+            .where(
+                GitHubRepositoryMapping.id == mapping_id,
+                GitHubRepositoryMapping.organization_id == organization_id,
+                GitHubRepositoryMapping.is_enabled.is_(True),
+                GitHubRepositoryMapping.status == "syncing",
+                GitHubRepositoryMapping.sync_lease_id == lease_id,
+            )
+            .values(sync_lease_expires_at=expires_at)
+            .returning(GitHubRepositoryMapping.id)
+        )
+        return result.scalar_one_or_none() is not None
+
+    async def complete_github_sync(
+        self,
+        *,
+        mapping_id: uuid.UUID,
+        organization_id: uuid.UUID,
+        lease_id: uuid.UUID,
+        commit_sha: str,
+        tree_sha: str,
+        indexed_at: datetime,
+    ) -> bool:
+        result = await self.db.execute(
+            update(GitHubRepositoryMapping)
+            .where(
+                GitHubRepositoryMapping.id == mapping_id,
+                GitHubRepositoryMapping.organization_id == organization_id,
+                GitHubRepositoryMapping.status == "syncing",
+                GitHubRepositoryMapping.sync_lease_id == lease_id,
+            )
+            .values(
+                status="connected",
+                head_commit_sha=commit_sha,
+                head_tree_sha=tree_sha,
+                last_indexed_at=indexed_at,
+                last_error_at=None,
+                error_detail=None,
+                sync_lease_id=None,
+                sync_lease_expires_at=None,
+            )
+            .returning(GitHubRepositoryMapping.id)
+        )
+        return result.scalar_one_or_none() is not None
+
+    async def fail_github_sync(
+        self,
+        *,
+        mapping_id: uuid.UUID,
+        organization_id: uuid.UUID,
+        lease_id: uuid.UUID,
+        failed_at: datetime,
+        error_detail: str,
+    ) -> bool:
+        result = await self.db.execute(
+            update(GitHubRepositoryMapping)
+            .where(
+                GitHubRepositoryMapping.id == mapping_id,
+                GitHubRepositoryMapping.organization_id == organization_id,
+                GitHubRepositoryMapping.status == "syncing",
+                GitHubRepositoryMapping.sync_lease_id == lease_id,
+            )
+            .values(
+                status="failed",
+                last_error_at=failed_at,
+                error_detail=error_detail[:1000],
+                sync_lease_id=None,
+                sync_lease_expires_at=None,
+            )
             .returning(GitHubRepositoryMapping.id)
         )
         return result.scalar_one_or_none() is not None

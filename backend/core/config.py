@@ -177,6 +177,7 @@ class Settings(BaseSettings):
     github_max_files_per_sync: int = 2000
     github_max_blob_bytes: int = 1_000_000
     github_recent_pr_limit: int = 20
+    github_sync_lease_seconds: int = 1800
     github_default_path_denylist: str = (
         ".git/**,node_modules/**,.next/**,dist/**,build/**,coverage/**,vendor/**,"
         "**/*.min.js,**/*.map,**/generated/**,**/.env*,**/*secret*,**/*credential*,"

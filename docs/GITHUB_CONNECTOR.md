@@ -45,10 +45,14 @@ GITHUB_API_MAX_RETRIES=3
 GITHUB_MAX_FILES_PER_SYNC=2000
 GITHUB_MAX_BLOB_BYTES=1000000
 GITHUB_RECENT_PR_LIMIT=20
+GITHUB_SYNC_LEASE_SECONDS=1800
 ```
 
 `GITHUB_DEFAULT_PATH_DENYLIST` can override the conservative built-in denylist. Do not weaken the
 secret, dependency, vendor, generated, build, or artifact exclusions without a security review.
+Repository syncs use a renewable ownership lease. If a process is cancelled, evicted, or killed,
+another worker can recover the mapping after `GITHUB_SYNC_LEASE_SECONDS`; an older worker cannot
+complete or fail a lease that a newer worker owns.
 
 ## Configure and operate
 

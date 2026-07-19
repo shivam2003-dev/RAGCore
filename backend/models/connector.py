@@ -25,7 +25,7 @@ class ConnectorState(UUIDPKMixin, TimestampMixin, Base):
     created_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     kind: Mapped[str] = mapped_column(String(40))
     status: Mapped[str] = mapped_column(String(40), default="disabled")
-    config: Mapped[dict] = mapped_column(JSONB, default=dict)
+    config: Mapped[dict[str, object]] = mapped_column(JSONB, default=dict)
     cursor: Mapped[str | None] = mapped_column(Text, nullable=True)
     last_event_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_success_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -119,8 +119,8 @@ class GitHubRepositoryMapping(UUIDPKMixin, TimestampMixin, Base):
     owner: Mapped[str] = mapped_column(String(255))
     repository: Mapped[str] = mapped_column(String(255))
     branch: Mapped[str] = mapped_column(String(255))
-    path_allowlist: Mapped[list] = mapped_column(JSONB, default=list)
-    path_denylist: Mapped[list] = mapped_column(JSONB, default=list)
+    path_allowlist: Mapped[list[str]] = mapped_column(JSONB, default=list)
+    path_denylist: Mapped[list[str]] = mapped_column(JSONB, default=list)
     is_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     status: Mapped[str] = mapped_column(String(40), default="configured")
     head_commit_sha: Mapped[str | None] = mapped_column(String(64), nullable=True)
@@ -128,6 +128,8 @@ class GitHubRepositoryMapping(UUIDPKMixin, TimestampMixin, Base):
     last_indexed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_error_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     error_detail: Mapped[str | None] = mapped_column(Text, nullable=True)
+    sync_lease_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    sync_lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     __table_args__ = (
         ForeignKeyConstraint(

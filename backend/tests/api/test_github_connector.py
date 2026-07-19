@@ -1,3 +1,4 @@
+import asyncio
 import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
@@ -36,11 +37,14 @@ class FakeGitHubClient:
     snapshot: GitHubBranchSnapshot
     entries: list[GitHubTreeEntry]
     blobs: dict[str, bytes]
+    cancel_on_branch: bool = False
 
     def __post_init__(self) -> None:
         self.blob_calls: list[str] = []
 
     async def branch(self, *, owner: str, repository: str, branch: str) -> GitHubBranchSnapshot:
+        if self.cancel_on_branch:
+            raise asyncio.CancelledError
         return self.snapshot
 
     async def tree(self, *, owner: str, repository: str, tree_sha: str) -> list[GitHubTreeEntry]:
@@ -181,14 +185,21 @@ async def test_github_incremental_indexing_code_search_prs_and_acl(client, auth_
 
     connector_repository = ConnectorRepository(db)
     organization_id = user.organization_id
+    first_lease_id = uuid.uuid4()
     assert await connector_repository.acquire_github_sync(
         mapping_id=uuid.UUID(mapping["id"]),
         organization_id=organization_id,
+        lease_id=first_lease_id,
+        now=utcnow(),
+        expires_at=utcnow() + timedelta(minutes=30),
     )
     await db.commit()
     assert not await connector_repository.acquire_github_sync(
         mapping_id=uuid.UUID(mapping["id"]),
         organization_id=organization_id,
+        lease_id=uuid.uuid4(),
+        now=utcnow(),
+        expires_at=utcnow() + timedelta(minutes=30),
     )
     await db.commit()
     with pytest.raises(ConflictError, match="already running"):
@@ -202,8 +213,18 @@ async def test_github_incremental_indexing_code_search_prs_and_acl(client, auth_
         organization_id=organization_id,
     )
     assert locked_mapping is not None
-    locked_mapping.status = "connected"
+    locked_mapping.sync_lease_expires_at = utcnow() - timedelta(seconds=1)
     await db.commit()
+    recovered_lock = await service.sync_repository(
+        user=user,
+        mapping_id=uuid.UUID(mapping["id"]),
+        client=fixture,
+    )
+    assert recovered_lock["skipped"] == 4
+    await db.refresh(locked_mapping)
+    assert locked_mapping.status == "connected"
+    assert locked_mapping.sync_lease_id is None
+    assert locked_mapping.sync_lease_expires_at is None
 
     semantic = await client.post(
         "/api/v1/search",
@@ -356,6 +377,23 @@ async def test_github_incremental_indexing_code_search_prs_and_acl(client, auth_
     )
     assert failed_mapping is not None
     assert failed_mapping.status == "failed"
+
+    await db.refresh(user)
+    fixture.cancel_on_branch = True
+    with pytest.raises(asyncio.CancelledError):
+        await service.sync_repository(
+            user=user,
+            mapping_id=uuid.UUID(mapping["id"]),
+            client=fixture,
+        )
+    cancelled_mapping = await ConnectorRepository(db).get_github_mapping(
+        mapping_id=uuid.UUID(mapping["id"]),
+        organization_id=organization_id,
+    )
+    assert cancelled_mapping is not None
+    assert cancelled_mapping.status == "failed"
+    assert cancelled_mapping.sync_lease_id is None
+    assert cancelled_mapping.sync_lease_expires_at is None
 
 
 async def test_github_configuration_rejects_unsafe_repository_inputs(client, auth_headers):
