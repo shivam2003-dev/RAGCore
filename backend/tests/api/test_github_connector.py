@@ -1,14 +1,18 @@
 import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
+from datetime import timedelta
 from typing import Any
 
-from sqlalchemy import delete
+import pytest
+from sqlalchemy import delete, update
 
 from core.config import get_settings
+from core.exceptions import ConflictError
+from database.base import utcnow
 from embeddings.fake import FakeEmbeddings
 from ingestion.queue import IngestionQueue
-from models import AuditLog, Document, User
+from models import AuditLog, Document, DocumentStatus, User
 from repositories.connectors import ConnectorRepository
 from services.document_service import DocumentService
 from services.github_client import (
@@ -175,6 +179,32 @@ async def test_github_incremental_indexing_code_search_prs_and_acl(client, auth_
     assert indexed_document.doc_metadata["github_contributors"] == ["alice", "bob"]
     assert indexed_document.doc_metadata["github_commit_sha"] == "a" * 40
 
+    connector_repository = ConnectorRepository(db)
+    organization_id = user.organization_id
+    assert await connector_repository.acquire_github_sync(
+        mapping_id=uuid.UUID(mapping["id"]),
+        organization_id=organization_id,
+    )
+    await db.commit()
+    assert not await connector_repository.acquire_github_sync(
+        mapping_id=uuid.UUID(mapping["id"]),
+        organization_id=organization_id,
+    )
+    await db.commit()
+    with pytest.raises(ConflictError, match="already running"):
+        await service.sync_repository(
+            user=user,
+            mapping_id=uuid.UUID(mapping["id"]),
+            client=fixture,
+        )
+    locked_mapping = await connector_repository.get_github_mapping(
+        mapping_id=uuid.UUID(mapping["id"]),
+        organization_id=organization_id,
+    )
+    assert locked_mapping is not None
+    locked_mapping.status = "connected"
+    await db.commit()
+
     semantic = await client.post(
         "/api/v1/search",
         json={
@@ -210,6 +240,18 @@ async def test_github_incremental_indexing_code_search_prs_and_acl(client, auth_
     )
     assert control.status_code == 422
 
+    duplicate_start = len(queue.jobs)
+    orphan = await documents.create_from_bytes(
+        user=user,
+        kb_id=uuid.UUID(mapping["knowledge_base_id"]),
+        filename="duplicate-app.py",
+        content=app_v1,
+        title="orphaned retry document",
+        metadata=dict(indexed_document.doc_metadata),
+        audit_action="github.file.ingest",
+    )
+    await _run_jobs(queue, duplicate_start)
+
     initial_blob_calls = list(fixture.blob_calls)
     initial_job_count = len(queue.jobs)
     unchanged = await service.sync_repository(
@@ -220,6 +262,8 @@ async def test_github_incremental_indexing_code_search_prs_and_acl(client, auth_
     assert unchanged["skipped"] == 4
     assert fixture.blob_calls == initial_blob_calls
     assert len(queue.jobs) == initial_job_count
+    await db.refresh(orphan)
+    assert orphan.is_deleted is True
 
     app_v2 = b"def target_symbol():\n    return 'v2'\n"
     fixture.snapshot = GitHubBranchSnapshot(commit_sha="c" * 40, tree_sha="d" * 40)
@@ -260,6 +304,27 @@ async def test_github_incremental_indexing_code_search_prs_and_acl(client, auth_
     assert prs[0].url.endswith("/pull/7")
     assert prs[0].author == "alice"
 
+    # Recover a file whose metadata committed before a failed request but whose
+    # queued background ingestion never ran.
+    recovery_start = len(queue.jobs)
+    await db.execute(
+        update(Document)
+        .where(Document.id == indexed_document.id)
+        .values(
+            status=DocumentStatus.UPLOADED,
+            updated_at=utcnow() - timedelta(minutes=5),
+        )
+    )
+    await db.commit()
+    recovered = await service.sync_repository(
+        user=user,
+        mapping_id=uuid.UUID(mapping["id"]),
+        client=fixture,
+    )
+    assert recovered["updated"] == 1
+    assert len(queue.jobs) == recovery_start + 1
+    await _run_jobs(queue, recovery_start)
+
     # Keep this session-scoped database fixture isolated for older metrics
     # tests that intentionally assert an empty starting inventory.
     for file_state in states:
@@ -272,6 +337,25 @@ async def test_github_incremental_indexing_code_search_prs_and_acl(client, auth_
         )
     )
     await db.commit()
+
+    # A provider failure must remain the surfaced error after rollback. In
+    # particular, error-state recording cannot lazy-load the expired user and
+    # replace the original failure with SQLAlchemy MissingGreenlet.
+    organization_id = user.organization_id
+    fixture.snapshot = GitHubBranchSnapshot(commit_sha="e" * 40, tree_sha="f" * 40)
+    fixture.entries = [GitHubTreeEntry("src/broken.py", "0" * 40, 10)]
+    with pytest.raises(KeyError):
+        await service.sync_repository(
+            user=user,
+            mapping_id=uuid.UUID(mapping["id"]),
+            client=fixture,
+        )
+    failed_mapping = await ConnectorRepository(db).get_github_mapping(
+        mapping_id=uuid.UUID(mapping["id"]),
+        organization_id=organization_id,
+    )
+    assert failed_mapping is not None
+    assert failed_mapping.status == "failed"
 
 
 async def test_github_configuration_rejects_unsafe_repository_inputs(client, auth_headers):

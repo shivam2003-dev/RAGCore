@@ -3,6 +3,7 @@ import pytest
 from core.exceptions import ValidationError
 from repositories.code_search import validate_exact_code_query
 from services.github_index import (
+    _ingestion_filename,
     owners_for_path,
     parse_codeowners,
     path_policy,
@@ -21,9 +22,17 @@ def test_path_allow_deny_secret_binary_and_size_policy():
     assert path_policy("src/secret_key.py", size=100, **kwargs) == "denied"
     assert path_policy("vendor/app.py", size=100, **kwargs) == "denied"
     assert path_policy("src/logo.png", size=100, **kwargs) == "denied"
+    assert path_policy("src/__init__.py", size=0, **kwargs) == "denied"
     assert path_policy("src/large.py", size=1001, **kwargs) == "oversized"
     with pytest.raises(ValidationError):
         validate_path_patterns(["../private/**"])
+
+
+def test_ingestion_filename_preserves_supported_suffixes_and_wraps_other_text():
+    assert _ingestion_filename("src/app.py") == "app.py"
+    assert _ingestion_filename("package.json") == "package.json.txt"
+    assert _ingestion_filename("docs/guide.rst") == "guide.rst.txt"
+    assert _ingestion_filename("CODEOWNERS") == "CODEOWNERS.txt"
 
 
 def test_codeowners_parser_uses_last_matching_rule():

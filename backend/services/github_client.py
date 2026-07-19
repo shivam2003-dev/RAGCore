@@ -2,7 +2,7 @@ import asyncio
 import base64
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import Protocol, cast
+from typing import Literal, Protocol, cast, overload
 from urllib.parse import quote
 
 import httpx
@@ -127,7 +127,10 @@ class GitHubHttpClient:
         payload = await self._get(
             f"/repos/{_segment(owner)}/{_segment(repository)}/git/blobs/{_segment(blob_sha)}",
         )
-        content = _required_str(payload, "content").replace("\n", "")
+        raw_content = payload.get("content")
+        if not isinstance(raw_content, str):
+            raise ProviderError("GitHub API response is missing content")
+        content = raw_content.replace("\n", "")
         if payload.get("encoding") != "base64":
             raise ProviderError("GitHub blob response did not use base64 encoding")
         try:
@@ -143,7 +146,7 @@ class GitHubHttpClient:
         )
         return [
             login
-            for row in cast(list[JsonDict], payload)
+            for row in payload
             if (login := _str(row.get("login")))
         ][:30]
 
@@ -164,7 +167,25 @@ class GitHubHttpClient:
             },
             expect_list=True,
         )
-        return [_pull_request(row) for row in cast(list[JsonDict], payload)]
+        return [_pull_request(row) for row in payload]
+
+    @overload
+    async def _get(
+        self,
+        path: str,
+        *,
+        params: dict[str, str] | None = None,
+        expect_list: Literal[False] = False,
+    ) -> JsonDict: ...
+
+    @overload
+    async def _get(
+        self,
+        path: str,
+        *,
+        params: dict[str, str] | None = None,
+        expect_list: Literal[True],
+    ) -> list[JsonDict]: ...
 
     async def _get(
         self,

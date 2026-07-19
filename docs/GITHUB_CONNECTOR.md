@@ -83,16 +83,23 @@ errors. Sync is disabled until a server-side credential is configured.
 ## Incremental algorithm
 
 1. Resolve the configured branch to its head commit and tree SHA.
-2. If the tree SHA matches the last successful sync, return without listing blobs or queueing any
-   embeddings.
-3. Read the recursive tree and apply file-count, size, extension, allowlist, and denylist policies.
-4. Compare each allowed path's blob SHA with `github_file_states`.
-5. Unchanged path/blob pairs are skipped without downloading or re-embedding.
-6. Added/changed files create a new document or document version.
-7. A new path with a missing path's blob SHA is treated as a rename; document lineage is retained
+2. Atomically acquire the repository mapping for sync. A concurrent request receives HTTP `409`
+   instead of starting a second writer for the same repository/branch.
+3. If the tree SHA matches the last successful sync and every tracked document is ready, return
+   without listing blobs or queueing any embeddings.
+4. Read the recursive tree and apply file-count, zero-byte, size, extension, allowlist, and denylist
+   policies.
+5. Compare each allowed path's blob SHA with `github_file_states`.
+6. Unchanged path/blob pairs are skipped without downloading or re-embedding when their document is
+   ready. Failed or stale incomplete ingestion is requeued without downloading the blob again.
+7. Added/changed files create a new document or document version. Text formats without a native
+   extractor, such as JSON or RST, are safely ingested through the plain-text extractor.
+8. A new path with a missing path's blob SHA is treated as a rename; document lineage is retained
    and source/citation metadata is updated to the new path and commit URL.
-8. Missing or newly denied files are soft-deleted and their chunks are deactivated.
-9. Successful state records the head commit/tree SHA, freshness, counts, and sanitized health data.
+9. Missing or newly denied files are soft-deleted and their chunks are deactivated. Documents left
+   untracked by an interrupted request are adopted or soft-deleted on recovery so duplicates do not
+   remain searchable.
+10. Successful state records the head commit/tree SHA, freshness, counts, and sanitized health data.
 
 Text files are decoded as UTF-8; NUL-containing or undecodable blobs are treated as binary. Oversized
 files are reported and skipped before download when the tree supplies a size.
@@ -127,3 +134,11 @@ The authenticated read-only CLI smoke against `shivam2003-dev/RAGCore` resolved 
 untruncated 216-blob tree, confirmed no dependency/vendor paths in that tree, and normalized the
 latest pull request. Changed-file behavior stays fixture-proven because the smoke must not modify the
 connected source repository.
+
+The server-side local smoke on 2026-07-20 used the existing OS-keyring GitHub authentication only in
+the API process environment. It configured `shivam2003-dev/RAGCore@main` in a dedicated `RAGCore
+Code` Project, indexed 194 allowlisted files at commit `b3f1701`, denied 89 files by policy, recovered
+191 incomplete background jobs without redownloading their blobs, removed three interrupted-request
+orphans, and then proved a 194-file no-op incremental sync. Exact code search returned symbol-aware,
+commit-pinned hits; semantic Project-scoped retrieval and recent-PR normalization also passed. No
+credential was written to a file and no GitHub mutation method was called.

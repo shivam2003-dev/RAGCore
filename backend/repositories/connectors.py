@@ -1,5 +1,6 @@
 import uuid
 from datetime import datetime
+from typing import cast
 
 from sqlalchemy import select, update
 from sqlalchemy.dialects.postgresql import insert
@@ -21,10 +22,13 @@ class ConnectorRepository:
         self.db = db
 
     async def get_state(self, organization_id: uuid.UUID, kind: str) -> ConnectorState | None:
-        return await self.db.scalar(
-            select(ConnectorState).where(
-                ConnectorState.organization_id == organization_id,
-                ConnectorState.kind == kind,
+        return cast(
+            ConnectorState | None,
+            await self.db.scalar(
+                select(ConnectorState).where(
+                    ConnectorState.organization_id == organization_id,
+                    ConnectorState.kind == kind,
+                )
             )
         )
 
@@ -72,7 +76,7 @@ class ConnectorRepository:
         )
         if enabled_only:
             stmt = stmt.where(SlackChannelMapping.is_enabled.is_(True))
-        return await self.db.scalar(stmt)
+        return cast(SlackChannelMapping | None, await self.db.scalar(stmt))
 
     async def get_slack_mapping_for_state(
         self,
@@ -80,11 +84,14 @@ class ConnectorRepository:
         connector_state_id: uuid.UUID,
         channel_id: str,
     ) -> SlackChannelMapping | None:
-        return await self.db.scalar(
-            select(SlackChannelMapping).where(
-                SlackChannelMapping.connector_state_id == connector_state_id,
-                SlackChannelMapping.channel_id == channel_id,
-                SlackChannelMapping.is_enabled.is_(True),
+        return cast(
+            SlackChannelMapping | None,
+            await self.db.scalar(
+                select(SlackChannelMapping).where(
+                    SlackChannelMapping.connector_state_id == connector_state_id,
+                    SlackChannelMapping.channel_id == channel_id,
+                    SlackChannelMapping.is_enabled.is_(True),
+                )
             )
         )
 
@@ -185,10 +192,13 @@ class ConnectorRepository:
         mapping_id: uuid.UUID,
         organization_id: uuid.UUID,
     ) -> GitHubRepositoryMapping | None:
-        return await self.db.scalar(
-            select(GitHubRepositoryMapping).where(
-                GitHubRepositoryMapping.id == mapping_id,
-                GitHubRepositoryMapping.organization_id == organization_id,
+        return cast(
+            GitHubRepositoryMapping | None,
+            await self.db.scalar(
+                select(GitHubRepositoryMapping).where(
+                    GitHubRepositoryMapping.id == mapping_id,
+                    GitHubRepositoryMapping.organization_id == organization_id,
+                )
             )
         )
 
@@ -200,14 +210,36 @@ class ConnectorRepository:
         repository: str,
         branch: str,
     ) -> GitHubRepositoryMapping | None:
-        return await self.db.scalar(
-            select(GitHubRepositoryMapping).where(
-                GitHubRepositoryMapping.organization_id == organization_id,
-                GitHubRepositoryMapping.owner == owner,
-                GitHubRepositoryMapping.repository == repository,
-                GitHubRepositoryMapping.branch == branch,
+        return cast(
+            GitHubRepositoryMapping | None,
+            await self.db.scalar(
+                select(GitHubRepositoryMapping).where(
+                    GitHubRepositoryMapping.organization_id == organization_id,
+                    GitHubRepositoryMapping.owner == owner,
+                    GitHubRepositoryMapping.repository == repository,
+                    GitHubRepositoryMapping.branch == branch,
+                )
             )
         )
+
+    async def acquire_github_sync(
+        self,
+        *,
+        mapping_id: uuid.UUID,
+        organization_id: uuid.UUID,
+    ) -> bool:
+        result = await self.db.execute(
+            update(GitHubRepositoryMapping)
+            .where(
+                GitHubRepositoryMapping.id == mapping_id,
+                GitHubRepositoryMapping.organization_id == organization_id,
+                GitHubRepositoryMapping.is_enabled.is_(True),
+                GitHubRepositoryMapping.status != "syncing",
+            )
+            .values(status="syncing", error_detail=None)
+            .returning(GitHubRepositoryMapping.id)
+        )
+        return result.scalar_one_or_none() is not None
 
     async def github_file_states(self, mapping_id: uuid.UUID) -> list[GitHubFileState]:
         rows = await self.db.scalars(

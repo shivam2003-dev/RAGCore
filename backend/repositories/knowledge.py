@@ -1,4 +1,5 @@
 import uuid
+from typing import cast
 
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -14,8 +15,14 @@ class KnowledgeBaseRepository:
         self.db.add(kb)
 
     async def get(self, kb_id: uuid.UUID, org_id: uuid.UUID) -> KnowledgeBase | None:
-        return await self.db.scalar(
-            select(KnowledgeBase).where(KnowledgeBase.id == kb_id, KnowledgeBase.organization_id == org_id)
+        return cast(
+            KnowledgeBase | None,
+            await self.db.scalar(
+                select(KnowledgeBase).where(
+                    KnowledgeBase.id == kb_id,
+                    KnowledgeBase.organization_id == org_id,
+                )
+            ),
         )
 
     async def list_by_org(self, org_id: uuid.UUID) -> list[KnowledgeBase]:
@@ -38,10 +45,13 @@ class KnowledgeBaseRepository:
         return list(rows)
 
     async def get_by_name(self, org_id: uuid.UUID, name: str) -> KnowledgeBase | None:
-        return await self.db.scalar(
-            select(KnowledgeBase).where(
-                KnowledgeBase.organization_id == org_id,
-                KnowledgeBase.name == name,
+        return cast(
+            KnowledgeBase | None,
+            await self.db.scalar(
+                select(KnowledgeBase).where(
+                    KnowledgeBase.organization_id == org_id,
+                    KnowledgeBase.name == name,
+                )
             )
         )
 
@@ -72,17 +82,20 @@ class DocumentRepository:
         self.db.add(version)
 
     async def get(self, doc_id: uuid.UUID) -> Document | None:
-        return await self.db.get(Document, doc_id)
+        return cast(Document | None, await self.db.get(Document, doc_id))
 
     async def get_by_metadata_value(self, kb_id: uuid.UUID, key: str, value: str) -> Document | None:
-        return await self.db.scalar(
-            select(Document)
-            .where(
-                Document.knowledge_base_id == kb_id,
-                Document.is_deleted.is_(False),
-                Document.doc_metadata[key].as_string() == value,
+        return cast(
+            Document | None,
+            await self.db.scalar(
+                select(Document)
+                .where(
+                    Document.knowledge_base_id == kb_id,
+                    Document.is_deleted.is_(False),
+                    Document.doc_metadata[key].as_string() == value,
+                )
+                .order_by(Document.updated_at.desc(), Document.created_at.desc())
             )
-            .order_by(Document.updated_at.desc(), Document.created_at.desc())
         )
 
     async def update_metadata(self, doc_id: uuid.UUID, metadata: dict[str, object]) -> None:
@@ -109,6 +122,34 @@ class DocumentRepository:
         await self.db.execute(update(Document).where(Document.id.in_(duplicate_ids)).values(is_deleted=True))
         await self.db.execute(update(Chunk).where(Chunk.document_id.in_(duplicate_ids)).values(is_active=False))
         return len(duplicate_ids)
+
+    async def soft_delete_metadata_orphans(
+        self,
+        *,
+        kb_id: uuid.UUID,
+        key: str,
+        tracked_values: list[str],
+        tracked_document_ids: list[uuid.UUID],
+    ) -> int:
+        if not tracked_values:
+            return 0
+        stmt = select(Document.id).where(
+            Document.knowledge_base_id == kb_id,
+            Document.is_deleted.is_(False),
+            Document.doc_metadata[key].as_string().in_(tracked_values),
+        )
+        if tracked_document_ids:
+            stmt = stmt.where(Document.id.not_in(tracked_document_ids))
+        orphan_ids = list(await self.db.scalars(stmt))
+        if not orphan_ids:
+            return 0
+        await self.db.execute(
+            update(Document).where(Document.id.in_(orphan_ids)).values(is_deleted=True)
+        )
+        await self.db.execute(
+            update(Chunk).where(Chunk.document_id.in_(orphan_ids)).values(is_active=False)
+        )
+        return len(orphan_ids)
 
     async def list_by_kb(self, kb_id: uuid.UUID, limit: int = 50, offset: int = 0) -> tuple[list[Document], int]:
         base = select(Document).where(Document.knowledge_base_id == kb_id, Document.is_deleted.is_(False))
@@ -150,9 +191,12 @@ class DocumentRepository:
         await self.db.execute(update(Chunk).where(Chunk.document_id == doc_id).values(is_active=False))
 
     async def latest_version(self, doc_id: uuid.UUID) -> DocumentVersion | None:
-        return await self.db.scalar(
-            select(DocumentVersion)
-            .where(DocumentVersion.document_id == doc_id)
-            .order_by(DocumentVersion.version.desc())
-            .limit(1)
+        return cast(
+            DocumentVersion | None,
+            await self.db.scalar(
+                select(DocumentVersion)
+                .where(DocumentVersion.document_id == doc_id)
+                .order_by(DocumentVersion.version.desc())
+                .limit(1)
+            ),
         )

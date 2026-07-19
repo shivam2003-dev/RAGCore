@@ -3,17 +3,22 @@ import hashlib
 import re
 import uuid
 from dataclasses import dataclass
+from datetime import datetime, timedelta
 from pathlib import PurePosixPath
 from urllib.parse import quote
 
-from sqlalchemy import delete
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.config import Settings
-from core.exceptions import NotFoundError, ValidationError
+from core.exceptions import ConflictError, NotFoundError, ValidationError
 from database.base import utcnow
+from ingestion.extractors.registry import SUPPORTED_SUFFIXES
 from models import (
     AccessScope,
+    ConnectorState,
+    Document,
+    DocumentStatus,
     GitHubFileState,
     GitHubRepositoryMapping,
     KnowledgeBase,
@@ -22,7 +27,7 @@ from models import (
 )
 from repositories.audit import AuditLogRepository
 from repositories.connectors import ConnectorRepository
-from repositories.knowledge import KnowledgeBaseRepository
+from repositories.knowledge import DocumentRepository, KnowledgeBaseRepository
 from repositories.projects import ProjectAuthorizationRepository, ProjectRepository
 from services.document_service import DocumentService
 from services.github_client import GitHubPullRequest, GitHubReadClient, GitHubTreeEntry
@@ -64,6 +69,8 @@ _TEXT_SUFFIXES = _CODE_SUFFIXES | {
     ".yml",
 }
 _SPECIAL_TEXT_FILES = {"codeowners", "dockerfile", "makefile"}
+_UPLOADED_REINDEX_AFTER = timedelta(seconds=30)
+_PROCESSING_REINDEX_AFTER = timedelta(minutes=15)
 
 
 @dataclass(slots=True, frozen=True)
@@ -95,6 +102,7 @@ class GitHubIndexService:
         self._documents = document_service
         self._connectors = ConnectorRepository(db)
         self._kbs = KnowledgeBaseRepository(db)
+        self._document_rows = DocumentRepository(db)
         self._projects = ProjectRepository(db)
         self._authorization = ProjectAuthorizationRepository(db)
         self._audit = AuditLogRepository(db)
@@ -208,9 +216,10 @@ class GitHubIndexService:
         mapping_id: uuid.UUID,
         client: GitHubReadClient,
     ) -> dict[str, object]:
+        organization_id = user.organization_id
         mapping = await self._connectors.get_github_mapping(
             mapping_id=mapping_id,
-            organization_id=user.organization_id,
+            organization_id=organization_id,
         )
         if mapping is None or not mapping.is_enabled:
             raise NotFoundError("GitHub repository mapping not found")
@@ -219,9 +228,16 @@ class GitHubIndexService:
             project_id=mapping.project_id,
             knowledge_base_id=mapping.knowledge_base_id,
         )
-        state = await self._connectors.get_state(user.organization_id, "github")
+        state = await self._connectors.get_state(organization_id, "github")
         if state is None:
             raise ValidationError("GitHub connector is not configured")
+        acquired = await self._connectors.acquire_github_sync(
+            mapping_id=mapping_id,
+            organization_id=organization_id,
+        )
+        if not acquired:
+            raise ConflictError("GitHub repository sync is already running")
+        await self._db.commit()
         counts: dict[str, int] = {
             "created": 0,
             "updated": 0,
@@ -241,7 +257,36 @@ class GitHubIndexService:
             _validate_sha(snapshot.commit_sha)
             _validate_sha(snapshot.tree_sha)
             states = await self._connectors.github_file_states(mapping.id)
-            if mapping.head_tree_sha == snapshot.tree_sha:
+            tracked_states = [
+                item
+                for item in states
+                if item.status == "active" and item.document_id is not None
+            ]
+            tracked_document_ids = [
+                document_id
+                for item in tracked_states
+                if (document_id := item.document_id) is not None
+            ]
+            await self._document_rows.soft_delete_metadata_orphans(
+                kb_id=mapping.knowledge_base_id,
+                key="github_path",
+                tracked_values=[item.path for item in tracked_states],
+                tracked_document_ids=tracked_document_ids,
+            )
+            documents = {
+                document.id: document
+                for document in await self._db.scalars(
+                    select(Document).where(Document.id.in_(tracked_document_ids))
+                )
+            }
+            if mapping.head_tree_sha == snapshot.tree_sha and all(
+                item.document_id is not None
+                and (document := documents.get(item.document_id)) is not None
+                and document.status == DocumentStatus.READY
+                and not document.is_deleted
+                for item in states
+                if item.status == "active"
+            ):
                 counts["skipped"] = sum(item.status == "active" for item in states)
                 await self._record_success(state, mapping, snapshot.commit_sha, snapshot.tree_sha)
                 await self._db.commit()
@@ -278,12 +323,23 @@ class GitHubIndexService:
             allowed_paths = {entry.path for entry in allowed_entries}
             missing_states = [item for item in states if item.status == "active" and item.path not in allowed_paths]
             missing_by_blob = {item.blob_sha: item for item in missing_states}
+            now = utcnow()
 
             for entry in allowed_entries:
                 current = active_by_path.get(entry.path)
                 if current is not None and current.blob_sha == entry.blob_sha:
-                    counts["skipped"] += 1
-                    continue
+                    document = documents.get(current.document_id) if current.document_id else None
+                    if document is not None and not document.is_deleted:
+                        if document.status == DocumentStatus.READY or _document_job_is_recent(
+                            document,
+                            now=now,
+                        ):
+                            counts["skipped"] += 1
+                            continue
+                        await self._documents.reindex(user=user, document_id=document.id)
+                        counts["updated"] += 1
+                        continue
+                    current.document_id = None
                 rename = current is None and entry.blob_sha in missing_by_blob
                 file_state = missing_by_blob.pop(entry.blob_sha) if rename else current
                 content = await client.blob(
@@ -301,6 +357,14 @@ class GitHubIndexService:
                         counts["deleted"] += 1
                     continue
                 existing_document_id = file_state.document_id if file_state else None
+                if existing_document_id is None:
+                    orphan = await self._document_rows.get_by_metadata_value(
+                        mapping.knowledge_base_id,
+                        "github_path",
+                        entry.path,
+                    )
+                    if orphan is not None:
+                        existing_document_id = orphan.id
                 metadata = github_file_metadata(
                     mapping=mapping,
                     path=entry.path,
@@ -319,6 +383,12 @@ class GitHubIndexService:
                     title=f"{mapping.owner}/{mapping.repository}:{entry.path}"[:500],
                     metadata=metadata,
                     audit_action="github.file.ingest",
+                )
+                await self._document_rows.soft_delete_metadata_duplicates(
+                    mapping.knowledge_base_id,
+                    "github_path",
+                    entry.path,
+                    document.id,
                 )
                 if file_state is None:
                     file_state = GitHubFileState(
@@ -363,10 +433,10 @@ class GitHubIndexService:
             return {**counts, "commit_sha": snapshot.commit_sha, "tree_sha": snapshot.tree_sha}
         except Exception as exc:
             await self._db.rollback()
-            state = await self._connectors.get_state(user.organization_id, "github")
+            state = await self._connectors.get_state(organization_id, "github")
             mapping = await self._connectors.get_github_mapping(
                 mapping_id=mapping_id,
-                organization_id=user.organization_id,
+                organization_id=organization_id,
             )
             if state is not None:
                 self._connectors.record_connector_failure(state, str(exc))
@@ -422,7 +492,7 @@ class GitHubIndexService:
 
     async def _record_success(
         self,
-        state,
+        state: ConnectorState,
         mapping: GitHubRepositoryMapping,
         commit_sha: str,
         tree_sha: str,
@@ -486,6 +556,8 @@ def path_policy(
         or any(ord(character) < 32 for character in normalized)
     ):
         return "denied"
+    if size <= 0:
+        return "denied"
     if size > max_bytes:
         return "oversized"
     name = PurePosixPath(normalized).name.lower()
@@ -528,6 +600,15 @@ def is_text_content(content: bytes) -> bool:
     except UnicodeDecodeError:
         return False
     return True
+
+
+def _document_job_is_recent(document: Document, *, now: datetime) -> bool:
+    age = now - document.updated_at
+    if document.status == DocumentStatus.UPLOADED:
+        return age < _UPLOADED_REINDEX_AFTER
+    if document.status == DocumentStatus.PROCESSING:
+        return age < _PROCESSING_REINDEX_AFTER
+    return False
 
 
 def language_for_path(path: str) -> str:
@@ -636,4 +717,8 @@ def _validate_sha(value: str) -> None:
 
 def _ingestion_filename(path: str) -> str:
     suffix = PurePosixPath(path).suffix.lower()
-    return PurePosixPath(path).name if suffix in _TEXT_SUFFIXES else f"{PurePosixPath(path).name}.txt"
+    return (
+        PurePosixPath(path).name
+        if suffix in SUPPORTED_SUFFIXES
+        else f"{PurePosixPath(path).name}.txt"
+    )
