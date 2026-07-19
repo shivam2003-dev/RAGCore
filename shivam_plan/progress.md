@@ -7,7 +7,8 @@ Branch: `agent/cerebras-knowledge-upgrade`
 ## Current phase
 
 Phase 6 complete — Evidence-backed product workflows and browser-verified UI.
-Phase 7 in progress — final hardening, documentation, migration/container gates, and draft PR.
+Phase 7 complete — final hardening, documentation, migration/container gates, branch publication,
+and draft-PR handoff.
 
 ## Completed work
 
@@ -240,10 +241,10 @@ after the round-trip checks. No application or source-system database was delete
 
 ## Remaining work
 
-- Complete the Phase 7 migration/container/secret/full-test matrix.
-- Push the feature branch to `shivam2003-dev/RAGCore` and open a draft PR into `main`.
 - Run the real Slack read-only smoke after dedicated credentials and a public test-channel allowlist
   are supplied.
+- Optionally run the server-side GitHub connector smoke with a least-privilege GitHub App
+  installation token. The authenticated CLI and fixture-backed connector paths already passed.
 
 ## External input required
 
