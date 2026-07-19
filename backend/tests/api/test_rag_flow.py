@@ -51,11 +51,12 @@ async def test_full_rag_flow(client, auth_headers):
     hits = search.json()["hits"]
     assert hits and hits[0]["document_id"] == doc_id
     assert "timings_ms" in search.json()
+    trace = search.json()["trace"]
+    assert trace["selected"][0]["retrieval_arms"]
+    assert "Push the image" not in json.dumps(trace)
 
     # conversation + streamed ask
-    conv = await client.post(
-        "/api/v1/conversations", json={"knowledge_base_id": kb_id}, headers=auth_headers
-    )
+    conv = await client.post("/api/v1/conversations", json={"knowledge_base_id": kb_id}, headers=auth_headers)
     conv_id = conv.json()["id"]
     async with client.stream(
         "POST",
@@ -75,15 +76,16 @@ async def test_full_rag_flow(client, auth_headers):
     assert event_types[0] == "sources"
     assert "delta" in event_types
     assert event_types[-1] == "done"
+    sources_event = json.loads(events[0][1])
+    assert sources_event["retrieval_trace"]["queries"][0]["selected"]
+    assert "Push the image" not in json.dumps(sources_event["retrieval_trace"])
     done = json.loads(events[-1][1])
     assert done["usage"]["output_tokens"] >= 0
     assert done["latency_ms"] >= 0
     message_id = done["message_id"]
 
     # persisted history with citations (FakeLLM cites [1])
-    messages = (
-        await client.get(f"/api/v1/conversations/{conv_id}/messages", headers=auth_headers)
-    ).json()
+    messages = (await client.get(f"/api/v1/conversations/{conv_id}/messages", headers=auth_headers)).json()
     assert [m["role"] for m in messages] == ["user", "assistant"]
     assert messages[1]["citations"], "fake LLM emits [n] markers"
 
@@ -106,9 +108,7 @@ async def test_full_rag_flow(client, auth_headers):
     assert followup_sources["standalone_question"] != "Where do I push it?"
     assert followup_events[-1][0] == "done"
 
-    messages = (
-        await client.get(f"/api/v1/conversations/{conv_id}/messages", headers=auth_headers)
-    ).json()
+    messages = (await client.get(f"/api/v1/conversations/{conv_id}/messages", headers=auth_headers)).json()
     assert [m["role"] for m in messages] == ["user", "assistant", "user", "assistant"]
 
     # feedback
@@ -121,9 +121,7 @@ async def test_full_rag_flow(client, auth_headers):
 
     clear = await client.delete(f"/api/v1/conversations/{conv_id}/messages", headers=auth_headers)
     assert clear.status_code == 204
-    messages = (
-        await client.get(f"/api/v1/conversations/{conv_id}/messages", headers=auth_headers)
-    ).json()
+    messages = (await client.get(f"/api/v1/conversations/{conv_id}/messages", headers=auth_headers)).json()
     assert messages == []
 
 
@@ -166,11 +164,80 @@ async def test_web_only_ask_streams_and_persists_citations(client, auth_headers)
     assert done["source_mode"] == "web"
     assert done["message_id"]
 
-    messages = (
-        await client.get(f"/api/v1/conversations/{conv_id}/messages", headers=auth_headers)
-    ).json()
+    messages = (await client.get(f"/api/v1/conversations/{conv_id}/messages", headers=auth_headers)).json()
     assert [message["role"] for message in messages] == ["user", "assistant"]
     assert messages[1]["citations"], "web chunks are persisted and citable"
+
+
+async def test_structured_jira_count_remains_deterministic(client, auth_headers, db):
+    from database.base import utcnow
+    from models import Chunk, Document, DocumentStatus, DocumentVersion
+
+    kb_id = uuid.UUID(await _create_kb(client, auth_headers))
+    document = Document(
+        knowledge_base_id=kb_id,
+        title="DEVO-4242: Retry budget exhausted",
+        source_type="md",
+        status=DocumentStatus.READY,
+        doc_metadata={
+            "source": "jira",
+            "jira_issue_key": "DEVO-4242",
+            "jira_project_key": "DEVO",
+            "jira_assignee_email": "s.kumar@kimbal.io",
+            "jira_issue_status": "In Progress",
+            "jira_issue_status_category_key": "indeterminate",
+        },
+    )
+    db.add(document)
+    await db.flush()
+    version = DocumentVersion(
+        document_id=document.id,
+        version=1,
+        file_path="/dev/null",
+        file_sha256="4" * 64,
+        file_size_bytes=1,
+        created_at=utcnow(),
+    )
+    db.add(version)
+    await db.flush()
+    db.add(
+        Chunk(
+            knowledge_base_id=kb_id,
+            document_id=document.id,
+            document_version_id=version.id,
+            ordinal=0,
+            content="DEVO-4242 retry budget exhausted",
+            token_count=10,
+            chunk_metadata={"source": "jira"},
+            created_at=utcnow(),
+        )
+    )
+    await db.commit()
+
+    conversation = await client.post(
+        "/api/v1/conversations",
+        json={"knowledge_base_id": str(kb_id)},
+        headers=auth_headers,
+    )
+    assert conversation.status_code == 201
+    async with client.stream(
+        "POST",
+        f"/api/v1/conversations/{conversation.json()['id']}/ask",
+        json={"question": "How many open Jira issues in DEVO are assigned to s.kumar@kimbal.io?"},
+        headers=auth_headers,
+    ) as response:
+        events: list[tuple[str, str]] = []
+        current_event = ""
+        async for line in response.aiter_lines():
+            if line.startswith("event: "):
+                current_event = line[7:]
+            elif line.startswith("data: "):
+                events.append((current_event, line[6:]))
+
+    done = json.loads(events[-1][1])
+    assert done["model"] == "deterministic-jira-count"
+    assert "**1 issue**" in done["answer"]
+    assert "DEVO-4242" in done["answer"]
 
 
 async def test_upload_rejects_wrong_magic_bytes(client, auth_headers):
@@ -187,9 +254,7 @@ async def test_upload_rejects_wrong_magic_bytes(client, auth_headers):
 async def test_document_delete_removes_from_search(client, auth_headers):
     kb_id = await _create_kb(client, auth_headers)
     doc_id = await _upload_and_wait(client, auth_headers, kb_id)
-    assert (
-        await client.delete(f"/api/v1/documents/{doc_id}", headers=auth_headers)
-    ).status_code == 204
+    assert (await client.delete(f"/api/v1/documents/{doc_id}", headers=auth_headers)).status_code == 204
     search = await client.post(
         "/api/v1/search",
         json={"query": "deploy image registry", "knowledge_base_id": kb_id},

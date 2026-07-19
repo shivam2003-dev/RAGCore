@@ -613,6 +613,7 @@ class SearchResponse(BaseModel):
     hits: list[SearchHitOut]
     confidence: float | None
     timings_ms: dict[str, int]
+    trace: dict[str, object] | None = None
 
 
 # --- chat ---

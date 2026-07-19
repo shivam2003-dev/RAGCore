@@ -26,6 +26,13 @@ async def runtime_config(_admin: CurrentUser, settings: SettingsDep) -> dict[str
             "candidate_k": settings.retrieval_candidate_k,
             "dense_weight": settings.retrieval_dense_weight,
             "sparse_weight": settings.retrieval_sparse_weight,
+            "fusion_mode": settings.retrieval_fusion_mode,
+            "rrf_smoothing_k": settings.retrieval_rrf_smoothing_k,
+            "exact_identifier_enabled": settings.retrieval_exact_identifier_enabled,
+            "rare_token_enabled": settings.retrieval_rare_token_enabled,
+            "recency_decay_enabled": settings.retrieval_recency_decay_enabled,
+            "model_reranker_enabled": settings.retrieval_model_reranker_enabled,
+            "neighbor_expansion_enabled": settings.retrieval_neighbor_expansion_enabled,
         },
         "chunking": {
             "uploads": {
@@ -38,9 +45,7 @@ async def runtime_config(_admin: CurrentUser, settings: SettingsDep) -> dict[str
                 "size_tokens": settings.jira_chunk_size_tokens,
                 "overlap_tokens": settings.jira_chunk_overlap_tokens,
                 "excluded_issue_types": [
-                    item.strip()
-                    for item in settings.jira_exclude_issue_types.split(",")
-                    if item.strip()
+                    item.strip() for item in settings.jira_exclude_issue_types.split(",") if item.strip()
                 ],
                 "comments_indexed": settings.jira_include_comments,
                 "attachments_extracted": settings.jira_extract_attachments,
@@ -56,10 +61,7 @@ async def runtime_config(_admin: CurrentUser, settings: SettingsDep) -> dict[str
             "top_k": settings.web_search_top_k,
             "configured": bool(
                 settings.web_search_provider not in {"", "disabled"}
-                and (
-                    settings.web_search_provider not in {"brave", "tavily"}
-                    or settings.web_search_api_key
-                )
+                and (settings.web_search_provider not in {"brave", "tavily"} or settings.web_search_api_key)
             ),
         },
         "council": {
@@ -116,12 +118,8 @@ async def update_role(
 
 
 @router.get("/audit-logs", response_model=list[AuditLogOut])
-async def list_audit_logs(
-    admin: CurrentUser, db: DbDep, limit: int = 100, offset: int = 0
-) -> list[AuditLogOut]:
-    logs = await AuditLogRepository(db).list_for_org(
-        admin.organization_id, limit=min(limit, 500), offset=offset
-    )
+async def list_audit_logs(admin: CurrentUser, db: DbDep, limit: int = 100, offset: int = 0) -> list[AuditLogOut]:
+    logs = await AuditLogRepository(db).list_for_org(admin.organization_id, limit=min(limit, 500), offset=offset)
     return [AuditLogOut.model_validate(entry) for entry in logs]
 
 

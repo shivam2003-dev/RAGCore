@@ -20,7 +20,7 @@ from core.exceptions import AuthorizationError, NotFoundError, ProviderError, Va
 from database.base import utcnow
 from llm.base import ChatMessage, LLMProvider, LLMRequest, LLMUsage
 from llm.openai_compat import OpenAICompatLLM
-from models import Chunk, Citation, Conversation, Document, KnowledgeBase, Message, User
+from models import Chunk, Citation, Conversation, Document, KnowledgeBase, Message, Role, User
 from repositories.conversations import ConversationRepository, MessageRepository
 from repositories.knowledge import KnowledgeBaseRepository
 from repositories.projects import ProjectAuthorizationRepository
@@ -244,6 +244,7 @@ class ChatService:
                 "retrieval_attempts": retrieval.attempts,
                 "quality_notes": retrieval.quality_notes,
                 "weak_internal_retrieval": retrieval.weak_internal_retrieval,
+                "retrieval_trace": retrieval.trace if user.role is Role.ADMIN else None,
             },
         )
 

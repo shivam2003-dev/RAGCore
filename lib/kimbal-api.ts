@@ -555,6 +555,35 @@ export type RagSource = {
   freshness_label?: string;
 };
 
+export type RetrievalTraceQuery = {
+  fusion_mode?: string;
+  reranker?: string;
+  candidate_count?: number;
+  selected_count?: number;
+  expanded_count?: number;
+  discarded_candidate_count?: number;
+  fusion_latency_ms?: number;
+  neighbor_expansion_latency_ms?: number;
+  arms?: Array<{
+    arm: string;
+    result_count: number;
+    latency_ms: number;
+    identifier_count?: number;
+    token_count?: number;
+  }>;
+  selected?: Array<{
+    chunk_id: string;
+    retrieval_arms: string[];
+    arm_ranks: Record<string, number>;
+    selected_rank: number | null;
+    expanded_from_chunk_id: string | null;
+  }>;
+};
+
+export type RetrievalTrace = {
+  queries?: RetrievalTraceQuery[];
+};
+
 export type AskStreamEvent =
   | {
       type: "sources";
@@ -564,6 +593,7 @@ export type AskStreamEvent =
         source_mode?: SourceMode;
         answer_mode?: AnswerMode;
         query_classification?: string;
+        retrieval_trace?: RetrievalTrace | null;
       };
     }
   | { type: "delta"; data: { text?: string; delta?: string; content?: string } }

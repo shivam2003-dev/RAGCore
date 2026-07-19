@@ -99,6 +99,7 @@ class RetrievalResult:
     quality_notes: list[str] = field(default_factory=list)
     weak_internal_retrieval: bool = False
     fallback_requested: bool = False
+    trace: dict[str, object] = field(default_factory=dict)
 
 
 class ConversationalRetriever:
@@ -148,6 +149,7 @@ class ConversationalRetriever:
         quality_notes: list[str] = []
         fallback_requested = False
         live_jira_chunks: list[RetrievedChunk] = []
+        retrieval_traces: list[dict[str, object]] = []
 
         if source_mode in {"knowledge", "blended"}:
             kb_scope = await self._knowledge_scope(
@@ -173,6 +175,7 @@ class ConversationalRetriever:
                     conversation_context="\n".join(m.content[:500] for m in history[-4:]),
                 )
                 ctx = await self._retrieval.run(ctx)
+                retrieval_traces.append(ctx.trace)
                 chunks.extend(ctx.chunks)
                 for key, value in ctx.timings_ms.items():
                     timings_ms[f"{key}_{index}" if len(subqueries) > 1 else key] = value
@@ -259,6 +262,7 @@ class ConversationalRetriever:
             quality_notes=quality_notes,
             weak_internal_retrieval=weak_internal,
             fallback_requested=fallback_requested,
+            trace={"queries": retrieval_traces},
         )
 
     async def _map_live_jira_chunks(

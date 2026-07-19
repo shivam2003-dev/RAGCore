@@ -45,10 +45,16 @@ For a query, the pipeline:
 3. Runs dense vector search over pgvector.
 4. Runs strict and relaxed sparse search through Postgres full-text search, with normalized content
    ranking, document-title boosts, and exact Jira-key boosts.
-5. Fuses dense and sparse results. Local deterministic embeddings use a lexical-first fusion balance;
-   configured semantic embedding providers use the configured dense/sparse weights.
-6. Reranks against the original user intent, evaluates evidence quality and source coverage, and
-   applies the corrective retrieval policy loop.
+5. Optionally runs explicit exact-identifier and document-frequency-weighted rare-token arms.
+6. Fuses candidates with either the existing weighted strategy or configurable weighted Reciprocal
+   Rank Fusion (RRF). Each candidate retains the contributing arms, native arm scores, and arm ranks.
+7. Optionally applies a floor-bounded, source-specific recency multiplier when a valid source update
+   timestamp exists. Missing dates are not penalized.
+8. Reranks a bounded candidate set against the original user intent. Heuristic reranking is always
+   available; the optional model reranker has a timeout and falls back on any provider or output error.
+9. Selects the final diverse context and only then optionally inserts adjacent chunks from the same
+   active document version, within a separate context token budget.
+10. Evaluates evidence quality and source coverage and applies the corrective retrieval policy loop.
 
 An exact Jira key also activates relationship retrieval. Indexed metadata expands the issue to
 parent, child, and linked tickets. Ask then performs a read-only live Jira refresh for that issue
@@ -60,6 +66,30 @@ Default fusion weights:
 
 - Dense: `0.7`
 - Sparse: `0.3`
+
+The request-scoped SQLAlchemy session is deliberately used sequentially. Retrieval arms do not run
+concurrent statements through the same `AsyncSession`.
+
+### Retrieval experiment flags
+
+The conservative production defaults preserve weighted fusion, heuristic reranking, and no extra
+arms or expansion. The experimental path is controlled with:
+
+- `RETRIEVAL_FUSION_MODE=weighted|rrf`
+- `RETRIEVAL_RRF_SMOOTHING_K`
+- `RETRIEVAL_EXACT_IDENTIFIER_ENABLED` and `RETRIEVAL_EXACT_IDENTIFIER_WEIGHT`
+- `RETRIEVAL_RARE_TOKEN_ENABLED` and `RETRIEVAL_RARE_TOKEN_WEIGHT`
+- `RETRIEVAL_RECENCY_DECAY_ENABLED`, `RETRIEVAL_RECENCY_HALF_LIVES`, and
+  `RETRIEVAL_RECENCY_FLOOR`
+- `RETRIEVAL_MODEL_RERANKER_ENABLED`, `RETRIEVAL_MODEL_RERANKER_TIMEOUT_SECONDS`, and
+  `RETRIEVAL_MODEL_RERANKER_CANDIDATE_K`
+- `RETRIEVAL_NEIGHBOR_EXPANSION_ENABLED`, `RETRIEVAL_NEIGHBOR_WINDOW`,
+  `RETRIEVAL_NEIGHBOR_TOKEN_BUDGET`, and `RETRIEVAL_NEIGHBOR_MAX_CHUNKS`
+
+An administrator can inspect a content-free retrieval trace in the Ask source drawer. It reports
+fusion/reranker mode, arm hit counts and latency, selected and discarded counts, selected chunk IDs,
+contributing arms, and ranks. Non-admin responses omit the trace. The local 129-case weighted/RRF
+comparison and default decision are recorded in `shivam_plan/retrieval_experiment.md`.
 
 The CRAG path includes:
 
@@ -87,7 +117,6 @@ Implemented now:
 
 Not implemented yet:
 
-- An optional model-based relevance grader for ambiguous semantic questions.
 - Claim-level natural-language inference against each cited source.
 - Automatic web fallback for Knowledge mode. Web evidence remains explicit through Web or Both mode.
 

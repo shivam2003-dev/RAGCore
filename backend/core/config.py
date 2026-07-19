@@ -65,6 +65,22 @@ class Settings(BaseSettings):
     retrieval_candidate_k: int = 24  # per-arm candidates before fusion
     retrieval_dense_weight: float = 0.7
     retrieval_sparse_weight: float = 0.3
+    retrieval_fusion_mode: str = "weighted"  # weighted | rrf
+    retrieval_rrf_smoothing_k: int = 60
+    retrieval_exact_identifier_enabled: bool = False
+    retrieval_exact_identifier_weight: float = 0.25
+    retrieval_rare_token_enabled: bool = False
+    retrieval_rare_token_weight: float = 0.15
+    retrieval_recency_decay_enabled: bool = False
+    retrieval_recency_half_lives: str = "jira=45,confluence=180,slack=30,github=90,upload=365,web=14,default=180"
+    retrieval_recency_floor: float = 0.35
+    retrieval_model_reranker_enabled: bool = False
+    retrieval_model_reranker_timeout_seconds: float = 3.0
+    retrieval_model_reranker_candidate_k: int = 20
+    retrieval_neighbor_expansion_enabled: bool = False
+    retrieval_neighbor_window: int = 1
+    retrieval_neighbor_token_budget: int = 1200
+    retrieval_neighbor_max_chunks: int = 8
 
     # chunking
     chunk_size_tokens: int = 400

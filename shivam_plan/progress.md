@@ -6,8 +6,8 @@ Branch: `agent/cerebras-knowledge-upgrade`
 
 ## Current phase
 
-Phase 1 complete — Projects, default scope, and enforceable source ACLs.
-Phase 2 is next — Retrieval ranking experiment.
+Phase 2 complete — Retrieval ranking experiment and observable admin trace.
+Phase 3 is next — Read-only, allowlisted Slack knowledge ingestion.
 
 ## Completed work
 
@@ -29,6 +29,22 @@ Phase 2 is next — Retrieval ranking experiment.
 - Added the `/projects` management interface and project selectors in the Ask composer and settings surface.
 - New organizations/users receive a usable default project; new knowledge bases are mapped into the default project.
 - Revoked citations now redact the stored assistant answer instead of returning previously derived restricted content.
+
+### Phase 2
+
+- Added configurable weighted and RRF fusion paths with stable tie handling, duplicate suppression,
+  weighted arm contributions, native arm scores, and per-arm rank provenance.
+- Added independently flagged exact-identifier and IDF-based rare-token retrieval arms for Jira keys,
+  error codes, hostnames, flags, IP addresses, and other uncommon identifiers.
+- Added source-specific, floor-bounded recency decay that leaves missing timestamps unpenalized.
+- Added an optional bounded model reranker for ambiguous semantic questions with deterministic
+  heuristic fallback on timeout, provider error, or invalid output.
+- Added post-rank neighboring-chunk expansion with document-version boundaries, stable persisted
+  citation identities, deterministic ordering, and token/count budgets.
+- Preserved deterministic exact Jira-key, relationship, and structured count paths.
+- Added an admin-only, content-free retrieval trace to search/chat and the Ask source drawer.
+- Added a read-only weighted/RRF comparison script and recorded the evidence in
+  `shivam_plan/retrieval_experiment.md`.
 
 ## Baseline test results
 
@@ -62,6 +78,23 @@ The Ruff and mypy failures existed before application changes on this branch. Th
 
 The temporary browser-test project was safely deactivated after verification. Its source was not deleted. The local All Knowledge project remains the default.
 
+## Phase 2 test evidence
+
+| Check | Result |
+|---|---|
+| Retrieval unit tests | Passed; RRF formula/weights/ties/duplicates/provenance, recency boundaries, rare tokens, neighbors, and model timeout/fallback |
+| Retrieval integration tests | Passed; weighted/RRF paths, exact and rare-token arms, source diversity, real neighbor identities, and citation metadata |
+| RAG/API regressions | Passed; deterministic Jira count, admin trace without content, and viewer trace omission |
+| Local 129-case comparison | Weighted: recall 0.8372, precision 0.9298, MRR 0.9607, top-k 0.9845, p95 1293 ms; RRF: recall 0.8643, precision 0.9191, MRR 0.9566, top-k 0.9845, p95 1473 ms |
+| Default decision | Weighted retained; RRF remains flagged because recall improved but precision, MRR, and p95 latency regressed |
+| Frontend lint and TypeScript | Passed |
+| Changed Python files Ruff | Passed |
+| Browser desktop | Passed in Chrome against `localhost:3100` using the fake local LLM; admin trace displayed fusion/reranker modes, counts, per-arm latency, chunk IDs, ranks, and provenance |
+
+The pre-commit full backend suite passed with 113 tests and 1 explicitly gated migration test
+skipped. The 129-case dataset gate, frontend lint, TypeScript check, 21-page production build,
+changed-file Ruff check, and `git diff --check` also passed. These checks run again in Phase 7.
+
 ## Files and migrations changed
 
 - `shivam_plan/new.md` — source recommendation plan prepared before the goal began.
@@ -76,7 +109,6 @@ The temporary browser-test project was safely deactivated after verification. It
 
 ## Remaining work
 
-- Phase 2: retrieval arms, RRF experiment, trace, scoring, reranker fallback, neighbors, and evaluation comparison.
 - Phase 3: Slack read-only connector with fixture/contract coverage.
 - Phase 4: GitHub read-only incremental indexing and code intelligence.
 - Phase 5: planner/executor/evidence tools and MCP parity.

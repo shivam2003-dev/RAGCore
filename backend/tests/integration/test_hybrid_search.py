@@ -1,6 +1,7 @@
 """Repository-level hybrid search against real Postgres + pgvector."""
 
 import pytest
+from sqlalchemy import select
 
 from core.config import get_settings
 from database.base import utcnow
@@ -8,6 +9,7 @@ from embeddings.fake import FakeEmbeddings
 from models import Chunk, Document, DocumentStatus, DocumentVersion, KnowledgeBase, Organization
 from repositories.chunks import ChunkSearchRepository
 from retrieval.context import RetrievalContext
+from retrieval.crag import AlwaysAcceptPolicy
 from retrieval.pipeline import RetrievalPipeline
 
 CONTENTS = [
@@ -24,20 +26,28 @@ async def seeded_kb(db):
     db.add(org)
     await db.flush()
     kb = KnowledgeBase(
-        organization_id=org.id, name="KB", embedding_model="fake",
+        organization_id=org.id,
+        name="KB",
+        embedding_model="fake",
         embedding_dimensions=embedder.dimensions,
     )
     db.add(kb)
     await db.flush()
     doc = Document(
-        knowledge_base_id=kb.id, title="Handbook", source_type="txt",
+        knowledge_base_id=kb.id,
+        title="Handbook",
+        source_type="txt",
         status=DocumentStatus.READY,
     )
     db.add(doc)
     await db.flush()
     version = DocumentVersion(
-        document_id=doc.id, version=1, file_path="/dev/null",
-        file_sha256="0" * 64, file_size_bytes=1, created_at=utcnow(),
+        document_id=doc.id,
+        version=1,
+        file_path="/dev/null",
+        file_sha256="0" * 64,
+        file_size_bytes=1,
+        created_at=utcnow(),
     )
     db.add(version)
     await db.flush()
@@ -45,9 +55,14 @@ async def seeded_kb(db):
     for i, (content, vec) in enumerate(zip(CONTENTS, vectors, strict=True)):
         db.add(
             Chunk(
-                knowledge_base_id=kb.id, document_id=doc.id,
-                document_version_id=version.id, ordinal=i, content=content,
-                token_count=20, embedding=vec, created_at=utcnow(),
+                knowledge_base_id=kb.id,
+                document_id=doc.id,
+                document_version_id=version.id,
+                ordinal=i,
+                content=content,
+                token_count=20,
+                embedding=vec,
+                created_at=utcnow(),
             )
         )
     await db.commit()
@@ -119,12 +134,8 @@ async def test_sparse_search_uses_document_titles_for_broad_questions(db, seeded
 
 async def test_pipeline_end_to_end(db, seeded_kb):
     kb, embedder = seeded_kb
-    pipeline = RetrievalPipeline(
-        search_repo=ChunkSearchRepository(db), embedder=embedder, settings=get_settings()
-    )
-    ctx = await pipeline.run(
-        RetrievalContext(kb_id=kb.id, query="incident response on-call paging", top_k=2)
-    )
+    pipeline = RetrievalPipeline(search_repo=ChunkSearchRepository(db), embedder=embedder, settings=get_settings())
+    ctx = await pipeline.run(RetrievalContext(kb_id=kb.id, query="incident response on-call paging", top_k=2))
     assert ctx.chunks
     assert "on-call" in ctx.chunks[0].content
     assert ctx.confidence is not None and ctx.confidence > 0
@@ -176,9 +187,7 @@ async def test_pipeline_can_search_across_multiple_knowledge_bases(db, seeded_kb
     )
     await db.commit()
 
-    pipeline = RetrievalPipeline(
-        search_repo=ChunkSearchRepository(db), embedder=embedder, settings=get_settings()
-    )
+    pipeline = RetrievalPipeline(search_repo=ChunkSearchRepository(db), embedder=embedder, settings=get_settings())
     ctx = await pipeline.run(
         RetrievalContext(
             kb_id=kb.id,
@@ -190,3 +199,102 @@ async def test_pipeline_can_search_across_multiple_knowledge_bases(db, seeded_kb
 
     assert ctx.chunks
     assert any("DEVO-10555" in chunk.content for chunk in ctx.chunks)
+
+
+async def test_rrf_exact_and_rare_arms_expose_provenance(db, seeded_kb):
+    kb, embedder = seeded_kb
+    document = Document(
+        knowledge_base_id=kb.id,
+        title="ERR5029 broker-17.prod.example.com",
+        source_type="txt",
+        status=DocumentStatus.READY,
+        doc_metadata={"source": "upload"},
+    )
+    db.add(document)
+    await db.flush()
+    version = DocumentVersion(
+        document_id=document.id,
+        version=1,
+        file_path="/dev/null",
+        file_sha256="3" * 64,
+        file_size_bytes=1,
+        created_at=utcnow(),
+    )
+    db.add(version)
+    await db.flush()
+    content = "ERR5029 occurs on broker-17.prod.example.com when --retry-limit is exhausted."
+    vector = (await embedder.embed([content]))[0]
+    db.add(
+        Chunk(
+            knowledge_base_id=kb.id,
+            document_id=document.id,
+            document_version_id=version.id,
+            ordinal=0,
+            content=content,
+            token_count=20,
+            embedding=vector,
+            created_at=utcnow(),
+        )
+    )
+    await db.commit()
+
+    settings = get_settings().model_copy(
+        update={
+            "retrieval_fusion_mode": "rrf",
+            "retrieval_exact_identifier_enabled": True,
+            "retrieval_rare_token_enabled": True,
+        }
+    )
+    pipeline = RetrievalPipeline(
+        search_repo=ChunkSearchRepository(db),
+        embedder=embedder,
+        settings=settings,
+        policy=AlwaysAcceptPolicy(),
+    )
+    ctx = await pipeline.run(
+        RetrievalContext(
+            kb_id=kb.id,
+            query="Find ERR5029 on broker-17.prod.example.com with --retry-limit",
+            top_k=3,
+        )
+    )
+
+    assert ctx.chunks[0].document_id == document.id
+    assert {"exact_identifier", "rare_token"}.issubset(ctx.chunks[0].retrieval_arms)
+    assert ctx.trace["fusion_mode"] == "rrf"
+    assert {arm["arm"] for arm in ctx.trace["arms"]} >= {
+        "dense",
+        "sparse",
+        "exact_identifier",
+        "rare_token",
+    }
+    rare_trace = ctx.trace["rare_token_signal"]
+    assert rare_trace["total_documents"] >= 2
+    assert rare_trace["document_frequencies"]["err5029"] == 1
+
+
+async def test_neighbor_expansion_uses_real_chunk_identity_after_ranking(db, seeded_kb):
+    kb, embedder = seeded_kb
+    settings = get_settings().model_copy(
+        update={
+            "retrieval_neighbor_expansion_enabled": True,
+            "retrieval_neighbor_window": 1,
+            "retrieval_neighbor_token_budget": 20,
+            "retrieval_neighbor_max_chunks": 1,
+        }
+    )
+    pipeline = RetrievalPipeline(
+        search_repo=ChunkSearchRepository(db),
+        embedder=embedder,
+        settings=settings,
+        policy=AlwaysAcceptPolicy(),
+    )
+    ctx = await pipeline.run(RetrievalContext(kb_id=kb.id, query="vacation paid leave", top_k=1))
+
+    assert len(ctx.chunks) == 2
+    anchor, neighbor = ctx.chunks
+    assert neighbor.expanded_from_chunk_id == anchor.chunk_id
+    persisted_ids = {
+        chunk.id for chunk in await db.scalars(select(Chunk).where(Chunk.id.in_([anchor.chunk_id, neighbor.chunk_id])))
+    }
+    assert persisted_ids == {anchor.chunk_id, neighbor.chunk_id}

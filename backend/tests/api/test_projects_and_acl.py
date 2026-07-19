@@ -249,6 +249,7 @@ async def test_project_scope_and_restricted_source_grants_are_enforced(client, a
     )
     assert alpha.status_code == 200, alpha.text
     assert alpha.json()["hits"][0]["document_id"] == alpha_document
+    assert alpha.json()["trace"] is None
 
     beta = await client.post(
         "/api/v1/search",

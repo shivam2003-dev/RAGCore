@@ -54,6 +54,7 @@ import {
   type MessageOut,
   type Project,
   type RagSource,
+  type RetrievalTrace,
   type SourceMode,
   type UserOut,
   type WebSearchStatus,
@@ -70,6 +71,7 @@ type ChatMessage = {
   messageId?: string;
   pending?: boolean;
   error?: boolean;
+  retrievalTrace?: RetrievalTrace | null;
 };
 
 type RoleOption = {
@@ -437,6 +439,7 @@ export function ChatAskClient() {
   const [sourcesOpen, setSourcesOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [activeSources, setActiveSources] = useState<RagSource[]>([]);
+  const [activeRetrievalTrace, setActiveRetrievalTrace] = useState<RetrievalTrace | null>(null);
   const [highlightedMarker, setHighlightedMarker] = useState<number | null>(null);
   const [feedback, setFeedback] = useState<Record<string, "up" | "down">>({});
   const [customRole, setCustomRole] = useState<AssistantRoleConfig | null>(() => readCustomRole());
@@ -636,8 +639,14 @@ export function ChatAskClient() {
       )) {
         if (event.type === "sources") {
           const citations = event.data.sources ?? event.data.hits ?? [];
-          updateAssistant(assistantId, (message) => ({ ...message, citations }));
+          const retrievalTrace = event.data.retrieval_trace ?? null;
+          updateAssistant(assistantId, (message) => ({
+            ...message,
+            citations,
+            retrievalTrace,
+          }));
           setActiveSources(citations);
+          setActiveRetrievalTrace(retrievalTrace);
           setPhase("answering");
         } else if (event.type === "delta") {
           const text = event.data.text ?? event.data.delta ?? event.data.content ?? "";
@@ -686,6 +695,9 @@ export function ChatAskClient() {
       setConversationKbId(conversation.knowledge_base_id);
       if (conversation.project_id) setActiveProjectId(conversation.project_id);
       setMessages(loaded.map(messageFromApi));
+      setActiveSources([]);
+      setActiveRetrievalTrace(null);
+      setSourcesOpen(false);
       setSidebarOpen(false);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Could not open this conversation.");
@@ -703,6 +715,7 @@ export function ChatAskClient() {
     setAttachments([]);
     setError("");
     setActiveSources([]);
+    setActiveRetrievalTrace(null);
     setSourcesOpen(false);
     setSidebarOpen(false);
     textareaRef.current?.focus();
@@ -718,6 +731,7 @@ export function ChatAskClient() {
       setConversationKbId(null);
       setMessages([]);
       setActiveSources([]);
+      setActiveRetrievalTrace(null);
       setSourcesOpen(false);
       setAttachments([]);
     } catch (cause) {
@@ -736,8 +750,13 @@ export function ChatAskClient() {
     }
   }
 
-  function openSources(sources: RagSource[], marker?: number) {
+  function openSources(
+    sources: RagSource[],
+    marker?: number,
+    retrievalTrace?: RetrievalTrace | null
+  ) {
     setActiveSources(sources);
+    setActiveRetrievalTrace(retrievalTrace ?? null);
     setHighlightedMarker(marker ?? null);
     setSourcesOpen(true);
   }
@@ -974,7 +993,7 @@ export function ChatAskClient() {
                         {message.error ? (
                           <p className="rounded-lg border border-[#fecdca] bg-[#fef3f2] px-3 py-2.5 text-[14px] text-[#b42318]">{message.content}</p>
                         ) : message.content ? (
-                          <MarkdownAnswer content={message.content} pending={Boolean(message.pending)} onCitationClick={(marker) => openSources(message.citations, marker)} />
+                          <MarkdownAnswer content={message.content} pending={Boolean(message.pending)} onCitationClick={(marker) => openSources(message.citations, marker, message.retrievalTrace)} />
                         ) : (
                           <div className="flex items-center gap-2 py-1 text-[13px] text-[#6b7280]">
                             <Loader2 size={15} className="animate-spin text-[#5b5ceb]" /> {phaseLabel(phase)}
@@ -987,7 +1006,7 @@ export function ChatAskClient() {
                             <button type="button" onClick={() => void rateMessage(message, 1)} className={cx("flex h-8 w-8 items-center justify-center rounded-md hover:bg-[#f7f7f8] hover:text-[#343541]", feedback[message.messageId ?? message.id] === "up" && "bg-[#ecfdf3] text-[#067647]")} aria-label="Helpful" title="Helpful"><ThumbsUp size={15} /></button>
                             <button type="button" onClick={() => void rateMessage(message, -1)} className={cx("flex h-8 w-8 items-center justify-center rounded-md hover:bg-[#f7f7f8] hover:text-[#343541]", feedback[message.messageId ?? message.id] === "down" && "bg-[#fef3f2] text-[#b42318]")} aria-label="Not helpful" title="Not helpful"><ThumbsDown size={15} /></button>
                             {message.citations.length > 0 && (
-                              <button type="button" onClick={() => openSources(message.citations)} className="ml-1 inline-flex h-8 items-center gap-1.5 rounded-md px-2 text-[12px] font-medium hover:bg-[#f7f7f8] hover:text-[#343541]">
+                              <button type="button" onClick={() => openSources(message.citations, undefined, message.retrievalTrace)} className="ml-1 inline-flex h-8 items-center gap-1.5 rounded-md px-2 text-[12px] font-medium hover:bg-[#f7f7f8] hover:text-[#343541]">
                                 <BookOpen size={14} /> {message.citations.length} source{message.citations.length === 1 ? "" : "s"}
                               </button>
                             )}
@@ -1113,6 +1132,45 @@ export function ChatAskClient() {
                 );
               })}
               {!activeSources.length && <p className="px-2 py-10 text-center text-[13px] text-[#8e8ea0]">No sources are attached to this answer.</p>}
+              {user?.role === "admin" && activeRetrievalTrace?.queries?.length ? (
+                <section className="rounded-lg border border-[#d9dce1] bg-[#fafafa] p-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <p className="text-[12px] font-semibold text-[#343541]">Retrieval trace</p>
+                      <p className="mt-0.5 text-[10px] text-[#8e8ea0]">Ranks and timings only; source content is excluded.</p>
+                    </div>
+                    <span className="rounded-full bg-[#ececf1] px-2 py-1 text-[10px] font-medium text-[#4b5563]">Admin</span>
+                  </div>
+                  <div className="mt-3 space-y-3">
+                    {activeRetrievalTrace.queries.map((queryTrace, queryIndex) => (
+                      <div key={`${queryTrace.fusion_mode ?? "retrieval"}-${queryIndex}`} className="rounded-md border border-[#e5e7eb] bg-white p-3">
+                        <div className="flex flex-wrap gap-2 text-[10px] text-[#4b5563]">
+                          <span className="rounded bg-[#f2f4f7] px-2 py-1">{queryTrace.fusion_mode ?? "weighted"}</span>
+                          <span className="rounded bg-[#f2f4f7] px-2 py-1">{queryTrace.reranker ?? "heuristic"}</span>
+                          <span className="rounded bg-[#f2f4f7] px-2 py-1">{queryTrace.selected_count ?? 0} selected</span>
+                          <span className="rounded bg-[#f2f4f7] px-2 py-1">{queryTrace.discarded_candidate_count ?? 0} discarded</span>
+                        </div>
+                        <div className="mt-3 space-y-1.5">
+                          {(queryTrace.arms ?? []).map((arm) => (
+                            <div key={arm.arm} className="flex items-center justify-between gap-3 text-[11px]">
+                              <span className="font-medium text-[#343541]">{arm.arm.replaceAll("_", " ")}</span>
+                              <span className="text-[#8e8ea0]">{arm.result_count} hits · {arm.latency_ms} ms</span>
+                            </div>
+                          ))}
+                        </div>
+                        <div className="mt-3 space-y-1 border-t border-[#ececf1] pt-3">
+                          {(queryTrace.selected ?? []).slice(0, 8).map((selected) => (
+                            <div key={selected.chunk_id} className="flex items-center justify-between gap-3 text-[10px] text-[#6b7280]">
+                              <span>#{selected.selected_rank ?? "neighbor"} · {selected.chunk_id.slice(0, 8)}</span>
+                              <span className="truncate">{selected.retrieval_arms.join(" + ")}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </section>
+              ) : null}
             </div>
           </aside>
         </>

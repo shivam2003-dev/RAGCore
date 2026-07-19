@@ -33,6 +33,7 @@ from api.schemas import (
 )
 from database.base import utcnow
 from models import Conversation, Feedback, KnowledgeBase, Message, Role
+from repositories.projects import ProjectAuthorizationRepository
 from retrieval.context import RetrievalContext, RetrievedChunk
 
 router = APIRouter(prefix="/evals", tags=["evals"], dependencies=[require_role(Role.ADMIN)])
@@ -89,15 +90,18 @@ async def evals_overview(
     """Read-only live eval overview from persisted answer, citation, latency, and feedback data."""
 
     org_id = user.organization_id
-    total_answers = await db.scalar(
-        select(func.count(Message.id))
-        .join(Conversation, Conversation.id == Message.conversation_id)
-        .where(
-            Conversation.organization_id == org_id,
-            Conversation.is_deleted.is_(False),
-            Message.role == "assistant",
+    total_answers = (
+        await db.scalar(
+            select(func.count(Message.id))
+            .join(Conversation, Conversation.id == Message.conversation_id)
+            .where(
+                Conversation.organization_id == org_id,
+                Conversation.is_deleted.is_(False),
+                Message.role == "assistant",
+            )
         )
-    ) or 0
+        or 0
+    )
 
     sampled_messages = await _recent_messages(db, org_id, limit)
     evals = _evaluate_answers(sampled_messages)
@@ -172,9 +176,13 @@ async def _run_offline_gate(
 ) -> EvalGateRunOut:
     cases = _load_golden_cases()
     dataset_path = _display_dataset_path(_golden_dataset_path())
+    authorized_scope = await ProjectAuthorizationRepository(db).authorized_scope(user=user)
     kbs = list(
         await db.scalars(
-            select(KnowledgeBase).where(KnowledgeBase.organization_id == user.organization_id)
+            select(KnowledgeBase).where(
+                KnowledgeBase.organization_id == user.organization_id,
+                KnowledgeBase.id.in_(authorized_scope.knowledge_base_ids),
+            )
         )
     )
     if not cases or not kbs:
@@ -247,8 +255,7 @@ def _evaluate_golden_case(
     returned = [_source_family(chunk) for chunk in chunks]
     returned_unique = _dedupe_strings(returned)
     relevant_flags = [
-        _matches_expected_source(case, chunk, source)
-        for chunk, source in zip(chunks, returned, strict=False)
+        _matches_expected_source(case, chunk, source) for chunk, source in zip(chunks, returned, strict=False)
     ]
     source_recall = _source_recall(expected, returned_unique)
     top_k_hit = 1.0 if any(relevant_flags) else 0.0
@@ -266,10 +273,7 @@ def _evaluate_golden_case(
         groundedness = 1.0
     else:
         groundedness = _clamp01(
-            (0.35 * context_precision)
-            + (0.25 * source_recall)
-            + (0.25 * citation_coverage)
-            + (0.15 * answer_relevance)
+            (0.35 * context_precision) + (0.25 * source_recall) + (0.25 * citation_coverage) + (0.15 * answer_relevance)
         )
     faithfulness = _clamp01((0.55 * groundedness) + (0.45 * (1 - unsupported_claim_rate)))
     scores: dict[str, float | None] = {
@@ -545,9 +549,8 @@ def _offline_answer_text(
     source_lines = []
     for marker, chunk in enumerate(chunks[:3], start=1):
         source_lines.append(f"- {chunk.document_title} [{marker}]")
-    return (
-        f"Offline dry run for {case.category}: retrieved source-backed evidence for the question.\n\n"
-        + "\n".join(source_lines)
+    return f"Offline dry run for {case.category}: retrieved source-backed evidence for the question.\n\n" + "\n".join(
+        source_lines
     )
 
 
@@ -708,9 +711,7 @@ def _evaluate_answers(messages: list[Message]) -> list[AnswerEval]:
             if observed and isinstance(retrieval_confidence, (int, float))
             else _citation_confidence(citations)
         )
-        unsupported_claim_rate = (
-            _clamp01(float(evaluation.get("unsupported_claim_rate") or 0.0)) if observed else None
-        )
+        unsupported_claim_rate = _clamp01(float(evaluation.get("unsupported_claim_rate") or 0.0)) if observed else None
         groundedness = (
             _clamp01(1.0 - float(unsupported_claim_rate or 0.0))
             if observed and bool(evaluation.get("grounded"))
@@ -811,9 +812,7 @@ def _scorecards(evals: list[AnswerEval], feedback: FeedbackMetricOut) -> list[Ev
     relevance = _avg([item.relevance for item in evals if item.relevance is not None])
     completeness = _avg([item.completeness for item in evals])
     success = _avg([item.success for item in evals])
-    retrieval_confidence = _avg(
-        [item.citation_confidence for item in evals if item.citation_confidence is not None]
-    )
+    retrieval_confidence = _avg([item.citation_confidence for item in evals if item.citation_confidence is not None])
     latency_health = _latency_health([item.message.latency_ms for item in evals if item.message.latency_ms is not None])
     unsupported_claim_rate = _avg(
         [item.unsupported_claim_rate for item in evals if item.unsupported_claim_rate is not None]
@@ -898,11 +897,7 @@ def _mode_breakdown(evals: list[AnswerEval]) -> list[EvalModeOut]:
                 avg_latency_ms=round(mean(latencies)) if latencies else None,
                 groundedness_score=_avg([item.groundedness for item in items]),
                 unsupported_claim_rate=_avg(
-                    [
-                        item.unsupported_claim_rate
-                        for item in items
-                        if item.unsupported_claim_rate is not None
-                    ]
+                    [item.unsupported_claim_rate for item in items if item.unsupported_claim_rate is not None]
                 ),
                 failure_rate=_avg([1.0 if item.verdict == "failure" else 0.0 for item in items]),
             )

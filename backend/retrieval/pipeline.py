@@ -1,3 +1,4 @@
+import copy
 import re
 import time
 import uuid
@@ -5,7 +6,7 @@ from collections.abc import Sequence
 
 from core.config import Settings
 from embeddings.base import EmbeddingProvider
-from repositories.chunks import ChunkSearchRepository
+from repositories.chunks import ChunkSearchRepository, SearchHit
 from retrieval.context import RetrievalAttempt, RetrievalContext, RetrievedChunk
 from retrieval.crag import (
     ChunkReranker,
@@ -18,7 +19,10 @@ from retrieval.crag import (
     RetrievalPolicy,
     ThresholdRetrievalPolicy,
 )
-from retrieval.fusion import fuse
+from retrieval.expansion import expand_ranked_neighbors
+from retrieval.fusion import fuse, fuse_weighted, reciprocal_rank_fusion
+from retrieval.recency import apply_source_recency_decay, parse_half_lives
+from retrieval.signals import exact_identifiers, rare_tokens
 
 MAX_ATTEMPTS = 3  # hard stop for future retrying policies
 DOC_INTENT_TERMS = {
@@ -92,17 +96,17 @@ class RetrievalPipeline:
         best_chunks: list[RetrievedChunk] = []
         best_confidence = -1.0
         best_query: str | None = None
+        best_trace: dict[str, object] = {}
 
         for _ in range(MAX_ATTEMPTS):
             await self._retrieve_once(ctx)
             ctx.confidence = await self._evaluator.evaluate(ctx)
             confidence = ctx.confidence or 0.0
-            if confidence > best_confidence or (
-                confidence == best_confidence and len(ctx.chunks) > len(best_chunks)
-            ):
+            if confidence > best_confidence or (confidence == best_confidence and len(ctx.chunks) > len(best_chunks)):
                 best_chunks = list(ctx.chunks)
                 best_confidence = confidence
                 best_query = ctx.effective_query
+                best_trace = copy.deepcopy(ctx.trace)
             ctx.attempts.append(
                 RetrievalAttempt(
                     query=ctx.effective_query,
@@ -126,10 +130,10 @@ class RetrievalPipeline:
             ctx.chunks = best_chunks
             ctx.confidence = best_confidence
             ctx.rewritten_query = best_query if best_query and best_query != ctx.query else None
+            ctx.trace = best_trace
+            ctx.trace["policy_attempt_count"] = len(ctx.attempts)
             if len(ctx.attempts) > 1:
-                ctx.quality_notes.append(
-                    f"selected_best_attempt={best_query[:140] if best_query else ctx.query[:140]}"
-                )
+                ctx.quality_notes.append(f"selected_best_attempt={best_query[:140] if best_query else ctx.query[:140]}")
 
         ctx.time_stage("retrieval", started)
         return ctx
@@ -166,27 +170,160 @@ class RetrievalPipeline:
 
         candidates = max(self._settings.retrieval_candidate_k, ctx.top_k)
         kb_scope = ctx.kb_ids or ctx.kb_id
-        dense = await self._search.dense_search(
-            kb_scope, query_vec, candidates, ctx.collection_id
+        arms: dict[str, list[SearchHit]] = {}
+        arm_trace: list[dict[str, object]] = []
+
+        dense_started = time.perf_counter()
+        dense = await self._search.dense_search(kb_scope, query_vec, candidates, ctx.collection_id)
+        arms["dense"] = dense
+        arm_trace.append(
+            {
+                "arm": "dense",
+                "result_count": len(dense),
+                "latency_ms": int((time.perf_counter() - dense_started) * 1000),
+            }
         )
-        sparse = await self._search.sparse_search(
-            kb_scope, retrieval_query, candidates, ctx.collection_id
+
+        sparse_started = time.perf_counter()
+        sparse = await self._search.sparse_search(kb_scope, retrieval_query, candidates, ctx.collection_id)
+        arms["sparse"] = sparse
+        arm_trace.append(
+            {
+                "arm": "sparse",
+                "result_count": len(sparse),
+                "latency_ms": int((time.perf_counter() - sparse_started) * 1000),
+            }
         )
+
+        identifiers = exact_identifiers(retrieval_query)
+        if self._settings.retrieval_exact_identifier_enabled and identifiers:
+            exact_started = time.perf_counter()
+            exact = await self._search.exact_identifier_search(
+                kb_scope,
+                identifiers,
+                candidates,
+                ctx.collection_id,
+            )
+            arms["exact_identifier"] = exact
+            arm_trace.append(
+                {
+                    "arm": "exact_identifier",
+                    "result_count": len(exact),
+                    "latency_ms": int((time.perf_counter() - exact_started) * 1000),
+                    "identifier_count": len(identifiers),
+                }
+            )
+
+        measured_tokens = rare_tokens(retrieval_query)
+        rare_trace: dict[str, object] = {}
+        if self._settings.retrieval_rare_token_enabled and measured_tokens:
+            rare_started = time.perf_counter()
+            rare = await self._search.rare_token_search(
+                kb_scope,
+                measured_tokens,
+                candidates,
+                ctx.collection_id,
+            )
+            arms["rare_token"] = rare.hits
+            rare_trace = {
+                "document_frequencies": rare.document_frequencies,
+                "total_documents": rare.total_documents,
+            }
+            arm_trace.append(
+                {
+                    "arm": "rare_token",
+                    "result_count": len(rare.hits),
+                    "latency_ms": int((time.perf_counter() - rare_started) * 1000),
+                    "token_count": len(measured_tokens),
+                }
+            )
+
         dense_weight = self._settings.retrieval_dense_weight
         sparse_weight = self._settings.retrieval_sparse_weight
         if self._embedder.name == "fake":
             dense_weight, sparse_weight = 0.45, 0.55
             if "lexical_fusion_for_local_embeddings" not in ctx.quality_notes:
                 ctx.quality_notes.append("lexical_fusion_for_local_embeddings")
-        fused = fuse(
-            dense,
-            sparse,
-            dense_weight=dense_weight,
-            sparse_weight=sparse_weight,
-            top_k=min(candidates, 50),
-        )
+        weights = {
+            "dense": dense_weight,
+            "sparse": sparse_weight,
+            "exact_identifier": self._settings.retrieval_exact_identifier_weight,
+            "rare_token": self._settings.retrieval_rare_token_weight,
+        }
+        active_weight_total = sum(max(weights.get(name, 0.0), 0.0) for name in arms) or 1.0
+        active_weights = {name: max(weights.get(name, 0.0), 0.0) / active_weight_total for name in arms}
+        fusion_started = time.perf_counter()
+        fusion_mode = self._settings.retrieval_fusion_mode.lower().strip()
+        if fusion_mode == "rrf":
+            fused = reciprocal_rank_fusion(
+                arms,
+                weights=active_weights,
+                smoothing_k=self._settings.retrieval_rrf_smoothing_k,
+                top_k=min(candidates, 50),
+            )
+        else:
+            if fusion_mode != "weighted":
+                ctx.quality_notes.append(f"unknown_fusion_mode={fusion_mode};using=weighted")
+            fusion_mode = "weighted"
+            fused = fuse_weighted(
+                arms,
+                weights=active_weights,
+                top_k=min(candidates, 50),
+            )
+        fusion_ms = int((time.perf_counter() - fusion_started) * 1000)
+        if self._settings.retrieval_recency_decay_enabled:
+            fused = apply_source_recency_decay(
+                fused,
+                half_lives=parse_half_lives(self._settings.retrieval_recency_half_lives),
+                floor=self._settings.retrieval_recency_floor,
+            )
         reranked = await self._reranker.rerank(ctx, fused)
-        ctx.chunks = select_final_context(ctx, reranked, top_k=ctx.top_k)
+        reranker_name = str(ctx.trace.get("reranker") or "heuristic")
+        selected = select_final_context(ctx, reranked, top_k=ctx.top_k)
+        for rank, chunk in enumerate(selected, start=1):
+            chunk.selected_rank = rank
+
+        expanded = selected
+        neighbor_ms = 0
+        if self._settings.retrieval_neighbor_expansion_enabled and selected:
+            neighbor_started = time.perf_counter()
+            neighbors = await self._search.neighboring_chunks(
+                kb_scope,
+                anchor_chunk_ids=[chunk.chunk_id for chunk in selected],
+                window=self._settings.retrieval_neighbor_window,
+            )
+            expanded = expand_ranked_neighbors(
+                selected,
+                neighbors,
+                token_budget=self._settings.retrieval_neighbor_token_budget,
+                max_neighbors=self._settings.retrieval_neighbor_max_chunks,
+            )
+            neighbor_ms = int((time.perf_counter() - neighbor_started) * 1000)
+        ctx.chunks = expanded
+        ctx.trace = {
+            "fusion_mode": fusion_mode,
+            "reranker": reranker_name,
+            "fusion_latency_ms": fusion_ms,
+            "arms": arm_trace,
+            "candidate_count": len(fused),
+            "selected_count": len(selected),
+            "expanded_count": len(expanded) - len(selected),
+            "discarded_candidate_count": max(0, len(fused) - len(selected)),
+            "neighbor_expansion_latency_ms": neighbor_ms,
+            "rare_token_signal": rare_trace,
+            "selected": [
+                {
+                    "chunk_id": str(chunk.chunk_id),
+                    "retrieval_arms": list(chunk.retrieval_arms),
+                    "arm_ranks": dict(chunk.arm_ranks),
+                    "selected_rank": chunk.selected_rank,
+                    "expanded_from_chunk_id": (
+                        str(chunk.expanded_from_chunk_id) if chunk.expanded_from_chunk_id else None
+                    ),
+                }
+                for chunk in expanded
+            ],
+        }
 
 
 def select_final_context(ctx: RetrievalContext, chunks: list[RetrievedChunk], *, top_k: int) -> list[RetrievedChunk]:
@@ -268,11 +405,7 @@ def retrieval_search_query(query: str) -> str:
     if not doc_intent:
         return query
 
-    kept = [
-        token
-        for token in raw_tokens
-        if token.lower() not in QUERY_NOISE_TERMS and len(token) > 2
-    ]
+    kept = [token for token in raw_tokens if token.lower() not in QUERY_NOISE_TERMS and len(token) > 2]
     if len(kept) >= 2:
         return " ".join(kept)
     return query

@@ -110,25 +110,19 @@ def get_auth_service(db: DbDep, settings: SettingsDep) -> AuthService:
 def get_document_service(
     db: DbDep, settings: SettingsDep, embedder: EmbedderDep, background: BackgroundTasks
 ) -> DocumentService:
-    return DocumentService(
-        db=db, settings=settings, embedder=embedder, queue=BackgroundTasksQueue(background)
-    )
+    return DocumentService(db=db, settings=settings, embedder=embedder, queue=BackgroundTasksQueue(background))
 
 
 def get_confluence_sync_service(
     db: DbDep, settings: SettingsDep, embedder: EmbedderDep, background: BackgroundTasks
 ) -> ConfluenceSyncService:
-    return ConfluenceSyncService(
-        db=db, settings=settings, embedder=embedder, queue=BackgroundTasksQueue(background)
-    )
+    return ConfluenceSyncService(db=db, settings=settings, embedder=embedder, queue=BackgroundTasksQueue(background))
 
 
 def get_jira_sync_service(
     db: DbDep, settings: SettingsDep, embedder: EmbedderDep, background: BackgroundTasks
 ) -> JiraSyncService:
-    return JiraSyncService(
-        db=db, settings=settings, embedder=embedder, queue=BackgroundTasksQueue(background)
-    )
+    return JiraSyncService(db=db, settings=settings, embedder=embedder, queue=BackgroundTasksQueue(background))
 
 
 def get_web_search_service(db: DbDep, settings: SettingsDep, embedder: EmbedderDep) -> WebSearchService:
@@ -140,10 +134,25 @@ def get_discover_service(db: DbDep, settings: SettingsDep) -> DiscoverService:
 
 
 def get_retrieval_pipeline(
-    db: DbDep, settings: SettingsDep, embedder: EmbedderDep
+    db: DbDep,
+    settings: SettingsDep,
+    embedder: EmbedderDep,
+    llm: LLMDep,
 ) -> RetrievalPipeline:
+    reranker = None
+    if settings.retrieval_model_reranker_enabled:
+        from retrieval.rerankers import ModelReranker
+
+        reranker = ModelReranker(
+            llm=llm,
+            timeout_seconds=settings.retrieval_model_reranker_timeout_seconds,
+            candidate_limit=settings.retrieval_model_reranker_candidate_k,
+        )
     return RetrievalPipeline(
-        search_repo=ChunkSearchRepository(db), embedder=embedder, settings=settings
+        search_repo=ChunkSearchRepository(db),
+        embedder=embedder,
+        settings=settings,
+        reranker=reranker,
     )
 
 
